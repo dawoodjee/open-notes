@@ -112,13 +112,24 @@ export function parseNoteContent(body: string, titleLimit: number = 120) {
 
 export function formatNoteDate(date: Date): string {
   const now = new Date();
-  const isToday =
-    date.getDate() === now.getDate() &&
-    date.getMonth() === now.getMonth() &&
-    date.getFullYear() === now.getFullYear();
 
-  if (isToday) {
+  // Normalize both dates to midnight (00:00:00) to accurately compare calendar days
+  const targetDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const nowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const diffTime = nowDate.getTime() - targetDate.getTime();
+  const diffDays = diffTime / (1000 * 60 * 60 * 24);
+
+  // 1. If it's today -> Show just the time (e.g., "4:32 PM")
+  if (diffDays === 0) {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
+
+  // 2. If it's yesterday -> Show "Yesterday"
+  if (diffDays === 1) {
+    return 'Yesterday';
+  }
+
+  // 3. If it's older -> Show short date format (e.g., "Oct 15" or "15 Oct" depending on locale)
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
