@@ -10,6 +10,14 @@ import { HStack } from '@/components/ui/hstack';
 
 // Custom Store & Types
 import { initialNotesState, notesReducer } from '@/types/notesStore';
+import {
+  powersync,
+  initPowerSync,
+  mapRowToNote,
+  createNoteInDB,
+  updateNoteInDB,
+  trashNoteInDB,
+} from '@/lib/powersync/db';
 
 // =============================================================================
 // MAIN COMPONENT
@@ -43,10 +51,45 @@ export default function NotesLayout() {
 
   const selectedNote = notes.find((n) => n.id === selectedNoteId);
 
-  // Timer ref to hold pending state dispatches
+  // PowerSync local SQLite init + live watch query.
+  // The watch callback is the *only* place notes state gets set — the reducer
+  // just mirrors whatever SQLite currently reports, it doesn't own the data.
+  useEffect(() => {
+    const abortController = new AbortController();
+
+    async function setupDatabase() {
+      try {
+        await initPowerSync();
+
+        powersync.watch(
+          'SELECT * FROM notes ORDER BY updated_at DESC',
+          [],
+          {
+            onResult: (result) => {
+              dispatch({ type: 'SET_NOTES', payload: { notes: result.array.map(mapRowToNote) } });
+            },
+            onError: (err) => {
+              console.error('PowerSync watch error:', err);
+            },
+          },
+          { signal: abortController.signal }
+        );
+      } catch (err) {
+        console.error('Failed to initialize PowerSync local database:', err);
+      }
+    }
+
+    setupDatabase();
+
+    return () => {
+      abortController.abort();
+    };
+  }, []);
+
+  // Timer ref to hold pending SQLite writes
   const updateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Debounced dispatch to avoid updating store on every keystroke
+  // Debounced SQLite write to avoid disk thrashing on every keystroke
   const handleNoteChange = useCallback(
     (html: string) => {
       if (!selectedNote) return;
@@ -55,15 +98,34 @@ export default function NotesLayout() {
         clearTimeout(updateTimeoutRef.current);
       }
 
-      updateTimeoutRef.current = setTimeout(() => {
-        dispatch({
-          type: 'UPDATE_NOTE',
-          payload: { id: selectedNote.id, body: html },
-        });
+      updateTimeoutRef.current = setTimeout(async () => {
+        try {
+          await updateNoteInDB(selectedNote.id, html);
+        } catch (err) {
+          console.error('Failed to update note in local SQLite:', err);
+        }
       }, 300);
     },
-    [dispatch, selectedNote]
+    [selectedNote]
   );
+
+  const handleCreateNote = useCallback(async () => {
+    try {
+      const newNote = await createNoteInDB();
+      dispatch({ type: 'SELECT_NOTE', payload: { id: newNote.id } });
+    } catch (err) {
+      console.error('Failed to create note in local SQLite:', err);
+    }
+  }, []);
+
+  const handleTrashNote = useCallback(async (id: string) => {
+    try {
+      await trashNoteInDB(id);
+      dispatch({ type: 'SELECT_NOTE', payload: { id: null } });
+    } catch (err) {
+      console.error('Failed to trash note in local SQLite:', err);
+    }
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -94,7 +156,7 @@ export default function NotesLayout() {
           isSidebarTucked={isSidebarTucked}
           sidebarWidth={sidebarWidth}
           onSelectNote={(id) => dispatch({ type: 'SELECT_NOTE', payload: { id } })}
-          onCreateNote={() => dispatch({ type: 'CREATE_NOTE' })}
+          onCreateNote={handleCreateNote}
           onSearchChange={(query) =>
             dispatch({ type: 'SET_SEARCH_QUERY', payload: { query } })
           }
@@ -118,7 +180,7 @@ export default function NotesLayout() {
           isSidebarTucked={isSidebarTucked}
           onToggleSidebar={() => setIsSidebarTucked(!isSidebarTucked)}
           onBackToList={() => dispatch({ type: 'SELECT_NOTE', payload: { id: null } })}
-          onTrashNote={(id) => dispatch({ type: 'TRASH_NOTE', payload: { id } })}
+          onTrashNote={handleTrashNote}
           onNoteChange={handleNoteChange}
         />
       </HStack>

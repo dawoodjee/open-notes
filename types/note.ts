@@ -6,12 +6,12 @@ export interface Note {
   id: string;
   body: string;
   title: string;          // Derived from 1st line of body
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: string;       // ISO string — matches Postgres timestamptz later
+  updatedAt: string;       // ISO string — matches Postgres timestamptz later
 
   // Trash / Soft Delete
   isTrashed: boolean;
-  trashedAt: Date | null;
+  trashedAt: string | null;
 
   // Local-first Sync Metadata
   isSynced: boolean;
@@ -22,17 +22,14 @@ export interface NotesState {
   notes: Note[];
   selectedNoteId: string | null;
   searchQuery: string;
+  isLoading: boolean;
 }
 
 export type NotesAction =
-  | { type: 'CREATE_NOTE' }
+  | { type: 'SET_NOTES'; payload: { notes: Note[] } }
   | { type: 'SELECT_NOTE'; payload: { id: string | null } }
-  | { type: 'UPDATE_NOTE'; payload: { id: string; body: string } }
-  | { type: 'TRASH_NOTE'; payload: { id: string } }
-  | { type: 'RESTORE_NOTE'; payload: { id: string } }
-  | { type: 'PERMANENT_DELETE_NOTE'; payload: { id: string } }
-  | { type: 'EMPTY_TRASH' }
-  | { type: 'SET_SEARCH_QUERY'; payload: { query: string } };
+  | { type: 'SET_SEARCH_QUERY'; payload: { query: string } }
+  | { type: 'SET_LOADING'; payload: { isLoading: boolean } };
 
 // =============================================================================
 // HELPER FUNCTIONS
