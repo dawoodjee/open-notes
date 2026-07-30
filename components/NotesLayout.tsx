@@ -17,6 +17,8 @@ import {
   createNoteInDB,
   updateNoteInDB,
   trashNoteInDB,
+  getUiState,
+  saveUiState,
 } from '@/lib/powersync/db';
 
 // =============================================================================
@@ -51,6 +53,10 @@ export default function NotesLayout() {
 
   const selectedNote = notes.find((n) => n.id === selectedNoteId);
 
+  // Restored editor scroll offset, read once at startup. Held in a ref (not
+  // state) so later scrolling doesn't re-render or re-trigger the restore.
+  const restoredEditorScrollRef = useRef<number>(0);
+
   // PowerSync local SQLite init + live watch query.
   // The watch callback is the *only* place notes state gets set — the reducer
   // just mirrors whatever SQLite currently reports, it doesn't own the data.
@@ -60,6 +66,14 @@ export default function NotesLayout() {
     async function setupDatabase() {
       try {
         await initPowerSync();
+
+        // Restore last session's open note before notes arrive. If that note is
+        // gone/trashed, SET_NOTES' existing fallback quietly takes over.
+        const uiState = await getUiState();
+        restoredEditorScrollRef.current = uiState.editorScrollOffset;
+        if (uiState.lastOpenedNoteId) {
+          dispatch({ type: 'SELECT_NOTE', payload: { id: uiState.lastOpenedNoteId } });
+        }
 
         powersync.watch(
           'SELECT * FROM notes ORDER BY updated_at DESC',
@@ -127,6 +141,36 @@ export default function NotesLayout() {
     }
   }, []);
 
+  // Persist which note is open so the next launch reopens it
+  useEffect(() => {
+    if (!selectedNoteId) return;
+    saveUiState({ lastOpenedNoteId: selectedNoteId }).catch((err) =>
+      console.error('Failed to persist last opened note:', err)
+    );
+  }, [selectedNoteId]);
+
+  const scrollSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleEditorScrollChange = useCallback((offset: number) => {
+    if (scrollSaveTimeoutRef.current) {
+      clearTimeout(scrollSaveTimeoutRef.current);
+    }
+
+    scrollSaveTimeoutRef.current = setTimeout(() => {
+      saveUiState({ editorScrollOffset: Math.round(offset) }).catch((err) =>
+        console.error('Failed to persist editor scroll offset:', err)
+      );
+    }, 300);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (scrollSaveTimeoutRef.current) {
+        clearTimeout(scrollSaveTimeoutRef.current);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     return () => {
       if (updateTimeoutRef.current) {
@@ -182,6 +226,8 @@ export default function NotesLayout() {
           onBackToList={() => dispatch({ type: 'SELECT_NOTE', payload: { id: null } })}
           onTrashNote={handleTrashNote}
           onNoteChange={handleNoteChange}
+          initialEditorScrollOffset={restoredEditorScrollRef.current}
+          onEditorScrollOffsetChange={handleEditorScrollChange}
         />
       </HStack>
     </SafeAreaView>

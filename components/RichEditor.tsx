@@ -31,6 +31,11 @@ export interface RichEditorProps {
   initialContent?: string;
   onChange?: (html: string) => void;
   autoFocus?: boolean;
+  // Accepted so both platform variants share one props contract; scroll
+  // persistence is only implemented in RichEditor.native.tsx, since web is
+  // out of scope (parked on the web-powersync branch).
+  initialScrollOffset?: number;
+  onScrollOffsetChange?: (offset: number) => void;
 }
 
 // Ensure initial HTML starts with an <h1> without extra blank elements

@@ -28,7 +28,10 @@ export async function initPowerSync(): Promise<void> {
     const initialNotes = [
       {
         id: Crypto.randomUUID(),
-        body: 'MVP Build Plan<br>The frictionless experience of Apple Notes, the data sovereignty of Obsidian, and the extensibility of Notion.',
+        // Heading-led to match what the editor itself produces — otherwise
+        // formatInitialContent normalizes it on first open, which counts as an
+        // edit and bumps updated_at (reordering the list without a real change).
+        body: '<h1>MVP Build Plan</h1><p>The frictionless experience of Apple Notes, the data sovereignty of Obsidian, and the extensibility of Notion.</p>',
         title: 'MVP Build Plan',
         created_at: now,
         updated_at: now,
@@ -153,4 +156,50 @@ export async function permanentDeleteNoteInDB(id: string): Promise<void> {
 
 export async function emptyTrashInDB(): Promise<void> {
   await powersync.execute('DELETE FROM notes WHERE is_trashed = 1');
+}
+
+export interface UiState {
+  lastOpenedNoteId: string | null;
+  editorScrollOffset: number;
+}
+
+export async function getUiState(): Promise<UiState> {
+  const row = await powersync.getOptional<any>(
+    'SELECT last_opened_note_id, editor_scroll_offset FROM ui_state WHERE id = ?',
+    ['singleton']
+  );
+
+  return {
+    lastOpenedNoteId: row?.last_opened_note_id ?? null,
+    editorScrollOffset: row?.editor_scroll_offset ?? 0,
+  };
+}
+
+// PowerSync exposes tables as SQLite *views* (INSTEAD OF triggers over internal
+// storage), which support INSERT/UPDATE/DELETE but not UPSERT — so this
+// read-merge-writes rather than using ON CONFLICT.
+export async function saveUiState(partial: Partial<UiState>): Promise<void> {
+  await powersync.writeTransaction(async (tx) => {
+    const existing = await tx.getOptional<any>(
+      'SELECT last_opened_note_id, editor_scroll_offset FROM ui_state WHERE id = ?',
+      ['singleton']
+    );
+
+    const lastOpenedNoteId =
+      partial.lastOpenedNoteId ?? existing?.last_opened_note_id ?? null;
+    const editorScrollOffset =
+      partial.editorScrollOffset ?? existing?.editor_scroll_offset ?? 0;
+
+    if (existing) {
+      await tx.execute(
+        `UPDATE ui_state SET last_opened_note_id = ?, editor_scroll_offset = ? WHERE id = ?`,
+        [lastOpenedNoteId, editorScrollOffset, 'singleton']
+      );
+    } else {
+      await tx.execute(
+        `INSERT INTO ui_state (id, last_opened_note_id, editor_scroll_offset) VALUES (?, ?, ?)`,
+        ['singleton', lastOpenedNoteId, editorScrollOffset]
+      );
+    }
+  });
 }

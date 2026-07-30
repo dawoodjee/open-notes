@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useMemo } from 'react';
+import type { WebViewMessageEvent } from 'react-native-webview';
 import {
   useEditorBridge,
   RichText,
@@ -31,7 +32,31 @@ export interface RichEditorProps {
   initialContent?: string;
   onChange?: (html: string) => void;
   autoFocus?: boolean;
+  initialScrollOffset?: number;
+  onScrollOffsetChange?: (offset: number) => void;
 }
+
+// Namespaced so it can't collide with TenTap's own bridge message types
+const SCROLL_MESSAGE_TYPE = 'notes-editor-scroll';
+
+// Walks up from the ProseMirror node to whichever ancestor actually scrolls,
+// rather than assuming it's the document (it isn't — TenTap scrolls a container).
+const FIND_SCROLLER_JS = `
+  window.__notesFindScroller = function() {
+    var candidates = [];
+    var node = document.querySelector('.ProseMirror');
+    while (node && node !== document.documentElement) {
+      candidates.push(node);
+      node = node.parentElement;
+    }
+    candidates.push(document.scrollingElement, document.documentElement, document.body);
+    for (var i = 0; i < candidates.length; i++) {
+      var el = candidates[i];
+      if (el && el.scrollHeight > el.clientHeight + 4) return el;
+    }
+    return document.scrollingElement || document.documentElement;
+  };
+`;
 
 // Ensure initial HTML starts with an <h1> without extra blank elements
 function formatInitialContent(content: string): string {
@@ -125,6 +150,8 @@ export default function RichEditor({
   initialContent = '',
   onChange,
   autoFocus = false,
+  initialScrollOffset = 0,
+  onScrollOffsetChange,
 }: RichEditorProps) {
   const formattedContent = useMemo(
     () => formatInitialContent(initialContent),
@@ -172,6 +199,84 @@ export default function RichEditor({
 
   const editorState = useBridgeState(editor);
 
+  const onScrollOffsetChangeRef = useRef(onScrollOffsetChange);
+  useEffect(() => {
+    onScrollOffsetChangeRef.current = onScrollOffsetChange;
+  }, [onScrollOffsetChange]);
+
+  // TenTap renders its WebView with scrollEnabled={false} and scrolls the web
+  // document itself, so React Native's onScroll never fires. We instead listen
+  // for scroll *inside* the page and post the offset back over the WebView's
+  // message channel.
+  const installScrollListener = () => {
+    editor.webviewRef?.current?.injectJavaScript(`
+      ${FIND_SCROLLER_JS}
+      (function() {
+        if (window.__notesScrollHooked) return true;
+        window.__notesScrollHooked = true;
+        var post = function(e) {
+          // The scrolling node is a container inside the page, not the document,
+          // so prefer the event's own target over guessing.
+          var el = (e && e.target && e.target.scrollTop != null)
+            ? e.target
+            : window.__notesFindScroller();
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: '${SCROLL_MESSAGE_TYPE}',
+            payload: el ? el.scrollTop : 0
+          }));
+        };
+        // scroll doesn't bubble, but capture-phase on document still sees it
+        document.addEventListener('scroll', post, { passive: true, capture: true });
+        window.addEventListener('scroll', post, { passive: true });
+      })();
+      true;
+    `);
+  };
+
+  // Content arrives over TenTap's own bridge after the page loads, and there's
+  // no "content ready" signal — so retry until the document is tall enough.
+  const restoreScroll = () => {
+    if (!initialScrollOffset) return;
+
+    if (__DEV__) {
+      console.warn(
+        `[RichEditor] attempting scroll restore to ${initialScrollOffset}px (best-effort)`
+      );
+    }
+
+    editor.webviewRef?.current?.injectJavaScript(`
+      ${FIND_SCROLLER_JS}
+      (function() {
+        var target = ${initialScrollOffset};
+        var attempts = 0;
+        var tryScroll = function() {
+          attempts++;
+          var el = window.__notesFindScroller();
+          if (el && el.scrollHeight >= target + el.clientHeight) {
+            el.scrollTop = target;
+            return;
+          }
+          if (attempts < 20) setTimeout(tryScroll, 100);
+        };
+        tryScroll();
+      })();
+      true;
+    `);
+  };
+
+  const handleWebViewMessage = (event: WebViewMessageEvent) => {
+    const raw = event.nativeEvent.data;
+    if (typeof raw !== 'string') return;
+    try {
+      const { type, payload } = JSON.parse(raw);
+      if (type === SCROLL_MESSAGE_TYPE) {
+        onScrollOffsetChangeRef.current?.(payload);
+      }
+    } catch {
+      // Non-JSON messages belong to TenTap; ignore them here.
+    }
+  };
+
   if (!editor) return null;
 
   const isHeading1Active = editorState.headingLevel === 1;
@@ -181,7 +286,18 @@ export default function RichEditor({
     <Box className="flex-1 bg-white flex flex-col">
       {/* Editor Canvas */}
       <Box className="flex-1">
-        <RichText editor={editor} style={{ flex: 1 }} />
+        <RichText
+          editor={editor}
+          style={{ flex: 1 }}
+          onLoadEnd={() => {
+            installScrollListener();
+            restoreScroll();
+          }}
+          // Must stay false, otherwise TenTap skips its own message handling
+          // and the editor bridge stops working.
+          exclusivelyUseCustomOnMessage={false}
+          onMessage={handleWebViewMessage}
+        />
       </Box>
 
       {/* Toolbar built with Gluestack UI components */}

@@ -35,6 +35,8 @@ export interface NoteEditorPaneProps {
   onBackToList: () => void;
   onTrashNote: (id: string) => void;
   onNoteChange: (html: string) => void;
+  initialEditorScrollOffset?: number;
+  onEditorScrollOffsetChange?: (offset: number) => void;
 }
 
 export default function NoteEditorPane({
@@ -45,6 +47,8 @@ export default function NoteEditorPane({
   onBackToList,
   onTrashNote,
   onNoteChange,
+  initialEditorScrollOffset,
+  onEditorScrollOffsetChange,
 }: NoteEditorPaneProps) {
   return (
     <VStack
@@ -122,6 +126,8 @@ export default function NoteEditorPane({
               initialContent={selectedNote.body}
               onChange={onNoteChange}
               autoFocus={!selectedNote.body || selectedNote.body === ''}
+              initialScrollOffset={initialEditorScrollOffset}
+              onScrollOffsetChange={onEditorScrollOffsetChange}
             />
           </Box>
         </>

@@ -10,8 +10,17 @@ export const notesTable = new Table({
   version: column.integer,
 });
 
+export const uiStateTable = new Table(
+  {
+    last_opened_note_id: column.text,
+    editor_scroll_offset: column.integer,
+  },
+  { localOnly: true }
+);
+
 export const AppSchema = new Schema({
   notes: notesTable,
+  ui_state: uiStateTable,
 });
 
 export type Database = (typeof AppSchema)['types'];

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { FlatList, Text as RNText, View, Platform } from 'react-native';
 
 // Gluestack UI Primitives
@@ -44,6 +44,23 @@ export default function NoteListPane({
       n.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const listRef = useRef<FlatList<Note>>(null);
+  const hasRestoredScroll = useRef<boolean>(false);
+
+  // Scroll the restored note into view once, on first load only — afterwards the
+  // user's own scrolling is left alone.
+  useEffect(() => {
+    if (hasRestoredScroll.current || !selectedNoteId || filteredNotes.length === 0) {
+      return;
+    }
+
+    const index = filteredNotes.findIndex((n) => n.id === selectedNoteId);
+    if (index < 0) return;
+
+    hasRestoredScroll.current = true;
+    listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false });
+  }, [selectedNoteId, filteredNotes]);
+
   return (
     <VStack
       style={
@@ -74,9 +91,21 @@ export default function NoteListPane({
 
       {/* Notes Scroll Area */}
       <FlatList
+        ref={listRef}
         data={filteredNotes}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 4 }}
+        // Rows are virtualized, so the target may not be measured yet — nudge
+        // toward it with an estimate, then retry once layout settles.
+        onScrollToIndexFailed={({ index, averageItemLength }) => {
+          listRef.current?.scrollToOffset({
+            offset: index * averageItemLength,
+            animated: false,
+          });
+          setTimeout(() => {
+            listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false });
+          }, 100);
+        }}
         renderItem={({ item: note }) => {
           const { title, preview } = parseNoteContent(note.body);
           const isSelected = note.id === selectedNoteId;
