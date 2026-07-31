@@ -16,87 +16,18 @@ export async function initPowerSync(): Promise<void> {
   if (isInitialized) return;
   await powersync.init();
   isInitialized = true;
-
-  // Seed default notes on first launch if empty
-  const existingNotes = await powersync.getAll('SELECT count(*) as count FROM notes');
-  const count = (existingNotes[0] as any)?.count ?? 0;
-
-  if (count === 0) {
-    const now = new Date().toISOString();
-    const twoDaysAgo = new Date(Date.now() - 86400000 * 2).toISOString();
-
-    const initialNotes = [
-      {
-        id: Crypto.randomUUID(),
-        // Heading-led to match what the editor itself produces — otherwise
-        // formatInitialContent normalizes it on first open, which counts as an
-        // edit and bumps updated_at (reordering the list without a real change).
-        body: '<h1>MVP Build Plan</h1><p>The frictionless experience of Apple Notes, the data sovereignty of Obsidian, and the extensibility of Notion.</p>',
-        title: 'MVP Build Plan',
-        created_at: now,
-        updated_at: now,
-        is_trashed: 0,
-        trashed_at: null,
-        version: 1,
-      },
-      {
-        id: Crypto.randomUUID(),
-        body: '<h1>Supabase Architecture</h1><p>Row Level Security and Postgres schemas for local-first sync using PowerSync.</p>',
-        title: 'Supabase Architecture',
-        created_at: twoDaysAgo,
-        updated_at: twoDaysAgo,
-        is_trashed: 0,
-        trashed_at: null,
-        version: 1,
-      },
-      {
-        id: Crypto.randomUUID(),
-        body: "<h1>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</h1>",
-        title: 'Lorem Ipsum',
-        created_at: now,
-        updated_at: now,
-        is_trashed: 0,
-        trashed_at: null,
-        version: 1,
-      },
-    ];
-
-    for (const note of initialNotes) {
-      await powersync.execute(
-        `INSERT INTO notes (id, body, title, created_at, updated_at, is_trashed, trashed_at, version)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          note.id,
-          note.body,
-          note.title,
-          note.created_at,
-          note.updated_at,
-          note.is_trashed,
-          note.trashed_at,
-          note.version,
-        ]
-      );
-    }
-  }
 }
 
 export function mapRowToNote(row: any): Note {
   return {
     id: row.id,
+    userId: row.user_id ?? null,
     body: row.body ?? '',
     title: row.title ?? '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     isTrashed: Boolean(row.is_trashed),
-    trashedAt: row.trashed_at ?? null,
-    isSynced: true,
-    version: row.version ?? 1,
   };
-}
-
-export async function fetchAllNotesFromDB(): Promise<Note[]> {
-  const rows = await powersync.getAll('SELECT * FROM notes ORDER BY updated_at DESC');
-  return rows.map(mapRowToNote);
 }
 
 export async function createNoteInDB(): Promise<Note> {
@@ -105,22 +36,21 @@ export async function createNoteInDB(): Promise<Note> {
   const { title } = parseNoteContent(body);
   const now = new Date().toISOString();
 
+  // user_id stays NULL until an account claims this note in Stage 5.
   await powersync.execute(
-    `INSERT INTO notes (id, body, title, created_at, updated_at, is_trashed, trashed_at, version)
-     VALUES (?, ?, ?, ?, ?, 0, NULL, 1)`,
+    `INSERT INTO notes (id, user_id, body, title, created_at, updated_at, is_trashed)
+     VALUES (?, NULL, ?, ?, ?, ?, 0)`,
     [id, body, title, now, now]
   );
 
   return {
     id,
+    userId: null,
     body,
     title,
     createdAt: now,
     updatedAt: now,
     isTrashed: false,
-    trashedAt: null,
-    isSynced: false,
-    version: 1,
   };
 }
 
@@ -129,23 +59,24 @@ export async function updateNoteInDB(id: string, body: string): Promise<void> {
   const now = new Date().toISOString();
 
   await powersync.execute(
-    `UPDATE notes SET body = ?, title = ?, updated_at = ?, version = version + 1 WHERE id = ?`,
+    `UPDATE notes SET body = ?, title = ?, updated_at = ? WHERE id = ?`,
     [body, title, now, id]
   );
 }
 
+// updated_at doubles as "when was this trashed" — see types/note.ts.
 export async function trashNoteInDB(id: string): Promise<void> {
   const now = new Date().toISOString();
   await powersync.execute(
-    `UPDATE notes SET is_trashed = 1, trashed_at = ?, updated_at = ? WHERE id = ?`,
-    [now, now, id]
+    `UPDATE notes SET is_trashed = 1, updated_at = ? WHERE id = ?`,
+    [now, id]
   );
 }
 
 export async function restoreNoteInDB(id: string): Promise<void> {
   const now = new Date().toISOString();
   await powersync.execute(
-    `UPDATE notes SET is_trashed = 0, trashed_at = NULL, updated_at = ? WHERE id = ?`,
+    `UPDATE notes SET is_trashed = 0, updated_at = ? WHERE id = ?`,
     [now, id]
   );
 }

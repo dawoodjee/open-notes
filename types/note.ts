@@ -3,19 +3,17 @@
 // =============================================================================
 
 export interface Note {
-  id: string;
+  id: string;              // UUID — parsed as Postgres uuid on sync
+  userId: string | null;   // null = local-only, not yet claimed by an account
   body: string;
-  title: string;          // Derived from 1st line of body
+  title: string;           // Derived from 1st line of body
   createdAt: string;       // ISO string — matches Postgres timestamptz later
   updatedAt: string;       // ISO string — matches Postgres timestamptz later
 
-  // Trash / Soft Delete
+  // Trash / Soft Delete.
+  // No separate trashedAt: updatedAt already moves on trash and restore, and a
+  // second field could contradict this one. One field = no illegal states.
   isTrashed: boolean;
-  trashedAt: string | null;
-
-  // Local-first Sync Metadata
-  isSynced: boolean;
-  version: number;
 }
 
 export interface NotesState {
