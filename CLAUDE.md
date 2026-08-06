@@ -25,6 +25,17 @@ The test when unsure: would undoing this in two weeks take minutes or days? Minu
 ## Verification
 Prove things rather than asserting them: use the terminal to run, boot, query, or test what you built, and show me the result.
 
+## Compact Instructions
+When compacting — automatic or manual — write a state snapshot, not a narrative recap. Preserve, exactly rather than paraphrased:
+- Current stage, branch name, and whether its checkpoint has passed.
+- Every file touched this session and what changed in each — not "updated the schema," but which columns/fields, in which file.
+- Every decision made and its stated reasoning and tradeoff, especially anything from the Decisions rule that was escalated to me and what I chose. Never silently drop an accepted tradeoff (e.g., the PIN-wraps-a-key model's stated consequence, the no-SMS/WhatsApp call, the username case-insensitivity/ASCII rules) — these are load-bearing for later stages.
+- Verification actually run and its real result — which command, what it proved — not "tests passed."
+- Error messages verbatim, not summarized.
+- Open questions, unresolved errors, and anything explicitly deferred (web platform, Phase 2 items).
+
+Fine to drop: exploratory dead ends that didn't change a decision, restated explanations of concepts already taught earlier this session, and superseded plans once the final approach is captured.
+
 ## Balance
 Teach densely, not lengthily — maximum learning per word, and keep momentum. Concise is not shallow: compress the explanation, never the substance. Skip preamble, restatement of what the diff already shows, and boilerplate caveats.
 
