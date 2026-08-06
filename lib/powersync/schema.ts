@@ -1,8 +1,9 @@
 import { column, Schema, Table } from '@powersync/common';
 
 // `id` is implicit in every PowerSync table, so it is not declared here.
-// Column types are limited to text/integer/real — see schema.draft.sql for how
-// each one maps onto its Postgres counterpart.
+// Column types are limited to text/integer/real — see
+// supabase/migrations/20260806122256_notes_and_profiles.sql for how each one
+// maps onto its Postgres counterpart.
 export const notesTable = new Table({
   user_id: column.text, // nullable until an account claims the note (Stage 5)
   body: column.text,
