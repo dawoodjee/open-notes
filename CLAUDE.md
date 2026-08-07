@@ -26,15 +26,39 @@ The test when unsure: would undoing this in two weeks take minutes or days? Minu
 Prove things rather than asserting them: use the terminal to run, boot, query, or test what you built, and show me the result.
 
 ## Compact Instructions
-When compacting — automatic or manual — write a state snapshot, not a narrative recap. Preserve, exactly rather than paraphrased:
-- Current stage, branch name, and whether its checkpoint has passed.
-- Every file touched this session and what changed in each — not "updated the schema," but which columns/fields, in which file.
-- Every decision made and its stated reasoning and tradeoff, especially anything from the Decisions rule that was escalated to me and what I chose. Never silently drop an accepted tradeoff (e.g., the PIN-wraps-a-key model's stated consequence, the no-SMS/WhatsApp call, the username case-insensitivity/ASCII rules) — these are load-bearing for later stages.
-- Verification actually run and its real result — which command, what it proved — not "tests passed."
-- Error messages verbatim, not summarized.
-- Open questions, unresolved errors, and anything explicitly deferred (web platform, Phase 2 items).
 
-Fine to drop: exploratory dead ends that didn't change a decision, restated explanations of concepts already taught earlier this session, and superseded plans once the final approach is captured.
+When compacting — automatic or manual — write a state snapshot, not a narrative
+recap. If the current stage is complete, don't compact: write outcomes into
+`mvp-build-plan.md`, commit, merge, `/clear`. A written handoff is inspectable;
+a summary isn't.
+
+Anything already committed or written to a file is durable — reference it by
+path rather than re-summarizing it. Preserve only what exists nowhere but this
+conversation. Compaction is lossy, so preserve in this order:
+
+1. **Position** — current stage, branch name, and whether its checkpoint has passed.
+2. **Uncommitted work** — every file touched this session and what changed in
+   each. Not "updated the schema," but which columns/fields, in which file, and
+   what's still unfinished.
+3. **Decisions, with reasoning and tradeoff** — especially anything escalated to
+   me under the Decisions rule and what I chose. Never silently drop an accepted
+   tradeoff (the PIN-wraps-a-key model's stated consequence, the no-SMS/WhatsApp
+   call, the username case-insensitivity/ASCII rules) — these are load-bearing
+   for later stages. A decision without its tradeoff gets relitigated.
+4. **Cross-stage deferrals** — what was deferred, which stage it lands in, and
+   what forces it then. The landing stage is the half that goes missing and
+   resurfaces as rework (web platform before/alongside Stage 6; native-vs-redirect
+   OAuth at Stage 5; seed notes with no `user_id` hitting the Stage 5 claim step).
+5. **Verification actually run** — which command, what it proved. Not "tests passed."
+6. **Errors verbatim** — never paraphrased, never summarized.
+7. **Open questions** — including concepts I asked about that aren't yet settled.
+
+Fine to drop: exploratory dead ends that didn't change a decision, restated
+explanations of concepts already taught this session, superseded plans once the
+final approach is captured, and tool output already acted on.
+
+Terse structured notes under these headings. Not prose. If a fact would need to
+be looked up again to act on it, it wasn't preserved.
 
 ## Balance
 Teach densely, not lengthily — maximum learning per word, and keep momentum. Concise is not shallow: compress the explanation, never the substance. Skip preamble, restatement of what the diff already shows, and boilerplate caveats.
