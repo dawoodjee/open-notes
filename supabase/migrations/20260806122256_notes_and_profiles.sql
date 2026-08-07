@@ -109,9 +109,21 @@ create table public.profiles (
   username_changed_at timestamptz,
   created_at timestamptz not null default now(),
 
+  -- Display name -- a free-text label, not an identifier. None of username's
+  -- hardening applies: no charset restriction (real names use non-ASCII
+  -- scripts routinely), no uniqueness, no reserved-word list, no rate limit.
+  -- The only rule is a length cap; leading/trailing whitespace is trimmed
+  -- client-side on write, the same place title/body are already normalized
+  -- in lib/powersync/db.ts, rather than adding a DB trigger for a cosmetic
+  -- rule that has no security consequence if skipped.
+  full_name text,
+
   -- Length.
   constraint username_length
     check (username is null or char_length(username) between 3 and 20),
+
+  constraint full_name_length
+    check (full_name is null or char_length(full_name) <= 100),
 
   -- ASCII letters, digits, underscore only. This -- not NFKC normalization --
   -- is what actually stops impersonation via Unicode confusables. NFKC only
@@ -249,6 +261,22 @@ create policy "owners can update their profile"
 -- above exactly. The trigger's inserts run as the table owner (a superuser
 -- role), which is never subject to a GRANT check, so it needs none.
 grant select, update on public.profiles to authenticated;
+
+-- One-time backfill: accounts that signed up via an OAuth provider (Google,
+-- Apple) often already have a name in their GoTrue user metadata -- no
+-- reason to make them retype it. GoTrue flattens whatever the provider's
+-- userinfo response contained into auth.users.raw_user_meta_data; Google
+-- populates a "name" key, Apple (when it sends a name at all -- only on
+-- first authorization) is normalized by GoTrue into the same flat keys, so
+-- checking both "full_name" and "name" covers both providers. Email-OTP
+-- accounts have no such claim and correctly stay null -- there is nothing to
+-- backfill from and this deliberately does not guess one.
+update public.profiles p
+set full_name = coalesce(u.raw_user_meta_data ->> 'full_name', u.raw_user_meta_data ->> 'name')
+from auth.users u
+where p.id = u.id
+  and p.full_name is null
+  and coalesce(u.raw_user_meta_data ->> 'full_name', u.raw_user_meta_data ->> 'name') is not null;
 
 -- =============================================================================
 -- Local SQLite (PowerSync) vs Postgres type differences (notes table)
