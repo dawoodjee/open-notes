@@ -1,0 +1,36 @@
+# Self-hosted PowerSync sync service (Stage 5). Runs alongside Supabase's own
+# CLI-managed containers (started separately via `supabase start`) -- this
+# file only adds PowerSync, joined onto the Docker network Supabase's CLI
+# already created so it can reach the Postgres container by hostname.
+#
+# Start: docker compose up -d
+# Stop:  docker compose down
+
+services:
+  powersync:
+    image: journeyapps/powersync-service:latest
+    restart: unless-stopped
+    command: ['start', '-r', 'unified']
+    volumes:
+      - ./powersync:/config
+    environment:
+      POWERSYNC_CONFIG_PATH: /config/config.yaml
+      NODE_OPTIONS: --max-old-space-size=1000
+      # Container hostname `db` is Supabase's own internal alias for its
+      # Postgres container (confirmed via `docker inspect supabase_db_notes`)
+      # -- not the host-exposed port 54322, which isn't reachable from inside
+      # this network.
+      PS_DATA_SOURCE_URI: postgresql://powersync_role:${POWERSYNC_REPLICATION_PASSWORD}@db:5432/postgres
+      PS_STORAGE_URI: postgresql://postgres:postgres@db:5432/postgres
+      PS_PORT: '8080'
+    ports:
+      - '8080:8080'
+    networks:
+      - supabase_network_notes
+
+networks:
+  # Created by the Supabase CLI (name derived from config.toml's project_id),
+  # not by this file -- `external: true` means "join the existing one",
+  # never create/manage it.
+  supabase_network_notes:
+    external: true

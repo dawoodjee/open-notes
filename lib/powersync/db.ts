@@ -2,6 +2,7 @@ import { Note, parseNoteContent } from '@/types/note';
 import { PowerSyncDatabase } from '@powersync/react-native';
 import * as Crypto from 'expo-crypto';
 import { AppSchema } from './schema';
+import { connector } from './connector';
 
 export const powersync = new PowerSyncDatabase({
   schema: AppSchema,
@@ -16,6 +17,14 @@ export async function initPowerSync(): Promise<void> {
   if (isInitialized) return;
   await powersync.init();
   isInitialized = true;
+}
+
+// Not called from initPowerSync -- connecting is an auth-state decision
+// (Phase 2 wires this to login/logout), not something that should happen
+// unconditionally at app boot. The app keeps working fully offline/local-only
+// without this ever being called, exactly as it did before Stage 5.
+export async function connectPowerSync(): Promise<void> {
+  await powersync.connect(connector);
 }
 
 export function mapRowToNote(row: any): Note {

@@ -279,6 +279,37 @@ where p.id = u.id
   and coalesce(u.raw_user_meta_data ->> 'full_name', u.raw_user_meta_data ->> 'name') is not null;
 
 -- =============================================================================
+-- PowerSync replication (Stage 5)
+--
+-- The powersync-service reads Postgres's write-ahead log directly, as this
+-- one dedicated role, to build per-user sync buckets (see powersync/sync-
+-- rules.yaml). Note what this role does and doesn't need:
+-- =============================================================================
+
+-- Which rows end up in which bucket -- notes' actual per-user privacy
+-- boundary during sync.
+create publication powersync for table public.notes;
+
+-- bypassrls: replication reads the raw table, not as any particular end
+-- user, so there is no "current user" for RLS to evaluate against at this
+-- layer -- RLS is simply inapplicable here, not bypassed as a workaround.
+-- The publication above is what actually decides which columns/rows flow
+-- into replication; the sync-rules bucket definition (keyed to each client's
+-- own JWT) is what decides which of those a given client receives. RLS is
+-- untouched everywhere else -- PostgREST/the REST API still enforces it
+-- exactly as verified in Stage 4.
+--
+-- Password intentionally left unset here: a real value committed into a
+-- migration is exactly the kind of thing that gets copied verbatim by
+-- anyone following these docs later, including past a local-dev context.
+-- Set via `alter role powersync_role password '<value>';` by hand, using the
+-- POWERSYNC_REPLICATION_PASSWORD value in the repo's root .env (gitignored)
+-- -- same pattern as the Google OAuth secret.
+create role powersync_role with replication bypassrls login password null;
+grant usage on schema public to powersync_role;
+grant select on public.notes to powersync_role;
+
+-- =============================================================================
 -- Local SQLite (PowerSync) vs Postgres type differences (notes table)
 --
 -- PowerSync's local schema only offers text / integer / real, so several

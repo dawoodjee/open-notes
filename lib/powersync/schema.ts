@@ -23,9 +23,26 @@ export const uiStateTable = new Table(
   { localOnly: true }
 );
 
+// One row per note that's currently failing to sync for a *structural*
+// reason (RLS rejection, a unique violation, a stale pre-Stage-5 queue entry
+// referencing a dropped column) -- see lib/powersync/connector.ts. Deliberately
+// localOnly: this is per-device diagnostic state, not something to sync (and
+// there's nowhere on the server for it to go). A row is deleted the moment
+// its note_id next uploads successfully, so this table only ever reflects
+// problems that are still true right now, never history.
+export const syncIssuesTable = new Table(
+  {
+    note_id: column.text,
+    message: column.text,
+    occurred_at: column.text, // ISO-8601, same convention as notes' timestamps
+  },
+  { localOnly: true }
+);
+
 export const AppSchema = new Schema({
   notes: notesTable,
   ui_state: uiStateTable,
+  sync_issues: syncIssuesTable,
 });
 
 export type Database = (typeof AppSchema)['types'];
