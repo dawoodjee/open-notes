@@ -25,7 +25,7 @@ import {
   sanitizeUsername,
   suggestUsername,
 } from '@/lib/auth/username';
-import { getPendingWrites, logout } from '@/lib/auth/logout';
+import { getPendingWriteCount, getPendingWrites, logout } from '@/lib/auth/logout';
 
 export interface ManageAccountDialogProps {
   isOpen: boolean;
@@ -131,17 +131,28 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
   }
 
   async function handleSignOut() {
-    const pending = await getPendingWrites();
-    if (pending.length === 0) {
+    // The COUNT is what decides whether to warn -- not the parsed list.
+    // Those are different questions: "is there anything unsynced" is a plain
+    // row count that cannot be got wrong, while "what are the notes called"
+    // depends on parsing PowerSync's internal CrudEntry JSON. Gating on the
+    // parsed list meant a parsing miss read as "nothing to lose" and wiped
+    // local data with no warning at all, which is exactly the outcome this
+    // dialog exists to prevent. Names are now decoration on the warning;
+    // the count alone decides whether the user is asked.
+    const pendingCount = await getPendingWriteCount();
+    if (pendingCount === 0) {
       await logout();
       onClose();
       return;
     }
 
-    const names = pending.map((p) => `"${p.title}"`).join(', ');
+    const pending = await getPendingWrites();
+    const names = pending.length > 0 ? pending.map((p) => `"${p.title}"`).join(', ') : null;
     Alert.alert(
       'You have unsynced changes',
-      `${pending.length === 1 ? 'This note hasn\'t' : 'These notes haven\'t'} finished syncing yet and will be lost if you log out now: ${names}`,
+      names
+        ? `${pending.length === 1 ? "This note hasn't" : "These notes haven't"} finished syncing yet and will be lost if you log out now: ${names}`
+        : `You have ${pendingCount} unsynced ${pendingCount === 1 ? 'change' : 'changes'} that will be lost if you log out now.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {

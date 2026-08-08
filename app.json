@@ -4,7 +4,7 @@
     "slug": "notes",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/Icon.png",
     "scheme": "notes",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -46,6 +46,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "def749bc-b287-4bcf-bb08-52645069b1b1"
+      }
     }
   }
 }

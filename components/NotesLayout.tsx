@@ -10,6 +10,7 @@ import { HStack } from '@/components/ui/hstack';
 
 // Custom Store & Types
 import { initialNotesState, notesReducer } from '@/types/notesStore';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   powersync,
   initPowerSync,
@@ -26,6 +27,7 @@ import {
 // =============================================================================
 
 export default function NotesLayout() {
+  const { session } = useAuth();
   const [state, dispatch] = useReducer(notesReducer, initialNotesState);
   const { notes, selectedNoteId, searchQuery } = state;
 
@@ -158,6 +160,30 @@ export default function NotesLayout() {
       console.error('Failed to persist last opened note:', err)
     );
   }, [selectedNoteId]);
+
+  // Logging out wipes local notes, but selectedNoteId lives in React state
+  // and survives that wipe -- leaving the editor pane open on a note that no
+  // longer exists. On mobile that pane covers the list entirely, so there's
+  // no list, no "+" button, and no way out: the same lockout the boot-time
+  // ui_state check fixes, arriving by a different route (that check only
+  // runs at startup, and this happens mid-session).
+  //
+  // Keyed to the auth transition rather than to "notes went empty" on
+  // purpose. An empty result from the watch query is ambiguous -- it also
+  // happens for a moment right after creating the first note, and clearing
+  // the selection on that would flash the editor open then shut. Signing out
+  // is unambiguous.
+  const wasSignedInRef = useRef(false);
+  useEffect(() => {
+    if (session) {
+      wasSignedInRef.current = true;
+      return;
+    }
+    if (wasSignedInRef.current) {
+      wasSignedInRef.current = false;
+      dispatch({ type: 'SELECT_NOTE', payload: { id: null } });
+    }
+  }, [session]);
 
   // Android hardware back button: on mobile, with a note open, go back to
   // the list instead of the OS default (exiting the app) -- there's no real
