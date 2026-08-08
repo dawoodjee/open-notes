@@ -13,6 +13,7 @@ import { Search, SquarePen } from 'lucide-react-native';
 
 // Custom Types & Helpers
 import { Note, parseNoteContent, formatNoteDate } from '@/types/note';
+import AvatarMenuTrigger from './AvatarMenuTrigger';
 
 export interface NoteListPaneProps {
   notes: Note[];
@@ -84,9 +85,7 @@ export default function NoteListPane({
         </VStack>
 
         {/* Mobile/List Avatar */}
-        <Pressable className="md:hidden w-8 h-8 rounded-full bg-lime-100 items-center justify-center border border-lime-300">
-          <RNText className="text-xs font-bold text-lime-800">AD</RNText>
-        </Pressable>
+        <AvatarMenuTrigger className="md:hidden" />
       </HStack>
 
       {/* Notes Scroll Area */}

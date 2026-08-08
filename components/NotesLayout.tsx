@@ -1,6 +1,6 @@
 import React, { useReducer, useState, useRef, useEffect, useCallback } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Platform } from 'react-native';
+import { Platform, BackHandler } from 'react-native';
 import NoteListPane from './NoteListPane';
 import NoteEditorPane from './NoteEditorPane';
 import DesktopResizeHandle from './DesktopResizeHandle';
@@ -67,12 +67,22 @@ export default function NotesLayout() {
       try {
         await initPowerSync();
 
-        // Restore last session's open note before notes arrive. If that note is
-        // gone/trashed, SET_NOTES' existing fallback quietly takes over.
+        // Restore last session's open note before notes arrive -- but only
+        // after confirming it still exists. A logout (or any
+        // disconnectAndClear) wipes the notes table, and ui_state can outlive
+        // it; restoring a dangling id would open the editor pane on a note
+        // that isn't there, which on mobile hides the list pane entirely and
+        // leaves no way back to create the first note.
         const uiState = await getUiState();
         restoredEditorScrollRef.current = uiState.editorScrollOffset;
         if (uiState.lastOpenedNoteId) {
-          dispatch({ type: 'SELECT_NOTE', payload: { id: uiState.lastOpenedNoteId } });
+          const stillExists = await powersync.getOptional<{ id: string }>(
+            'SELECT id FROM notes WHERE id = ?',
+            [uiState.lastOpenedNoteId]
+          );
+          if (stillExists) {
+            dispatch({ type: 'SELECT_NOTE', payload: { id: uiState.lastOpenedNoteId } });
+          }
         }
 
         powersync.watch(
@@ -147,6 +157,23 @@ export default function NotesLayout() {
     saveUiState({ lastOpenedNoteId: selectedNoteId }).catch((err) =>
       console.error('Failed to persist last opened note:', err)
     );
+  }, [selectedNoteId]);
+
+  // Android hardware back button: on mobile, with a note open, go back to
+  // the list instead of the OS default (exiting the app) -- there's no real
+  // navigation stack here (list/editor are conditionally-rendered panes in
+  // one screen, not routes), so nothing handles this without an explicit
+  // listener. Desktop/tablet shows both panes at once, so back has nothing
+  // to "return to" there -- only intercept when a note is actually selected.
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (selectedNoteId) {
+        dispatch({ type: 'SELECT_NOTE', payload: { id: null } });
+        return true;
+      }
+      return false;
+    });
+    return () => subscription.remove();
   }, [selectedNoteId]);
 
   const scrollSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);

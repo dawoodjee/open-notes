@@ -3,6 +3,7 @@ import { PowerSyncDatabase } from '@powersync/react-native';
 import * as Crypto from 'expo-crypto';
 import { AppSchema } from './schema';
 import { connector } from './connector';
+import { getCurrentUserId } from '@/lib/auth/currentUser';
 
 export const powersync = new PowerSyncDatabase({
   schema: AppSchema,
@@ -27,6 +28,31 @@ export async function connectPowerSync(): Promise<void> {
   await powersync.connect(connector);
 }
 
+/**
+ * Attach a newly-signed-in user to every local note that doesn't have an
+ * owner yet -- the notes they wrote before enabling sync.
+ *
+ * Must run BEFORE connectPowerSync(), not after. Once connected, the first
+ * sync checkpoint discards local rows the server doesn't know about, and an
+ * unowned note is unknowable to the server by construction (the sync bucket
+ * is `where user_id = bucket.user_id`). Claiming after connecting would race
+ * that checkpoint and usually lose.
+ *
+ * Purely local SQL, so it only ever touches rows already on this device.
+ * That's safe *because* an account switch clears local storage first (see
+ * becomeAuthenticatedLocally) -- without that ordering, this same statement
+ * would happily hand the previous account's notes to the new one.
+ */
+export async function claimUnownedNotes(userId: string): Promise<number> {
+  const unowned = await powersync.getAll<{ id: string }>(
+    'SELECT id FROM notes WHERE user_id IS NULL'
+  );
+  if (unowned.length === 0) return 0;
+
+  await powersync.execute('UPDATE notes SET user_id = ? WHERE user_id IS NULL', [userId]);
+  return unowned.length;
+}
+
 export function mapRowToNote(row: any): Note {
   return {
     id: row.id,
@@ -45,16 +71,26 @@ export async function createNoteInDB(): Promise<Note> {
   const { title } = parseNoteContent(body);
   const now = new Date().toISOString();
 
-  // user_id stays NULL until an account claims this note in Stage 5.
+  // Stamped with the current owner at creation, NULL only when genuinely
+  // signed out (those get claimed at login -- see claimUnownedNotes below).
+  //
+  // This is not cosmetic. Once PowerSync is connected, every local insert is
+  // queued for upload immediately, and a note with a NULL user_id can never
+  // satisfy the `owners insert their notes` RLS policy -- `auth.uid() = NULL`
+  // is NULL, not true. The rejected op gets dropped, PowerSync treats the
+  // local mutation as handed off, and the row is erased from local storage at
+  // the next checkpoint because the server never echoes it back (it isn't in
+  // any sync bucket). The note vanishes seconds after being created.
+  const userId = getCurrentUserId();
   await powersync.execute(
     `INSERT INTO notes (id, user_id, body, title, created_at, updated_at, is_trashed)
-     VALUES (?, NULL, ?, ?, ?, ?, 0)`,
-    [id, body, title, now, now]
+     VALUES (?, ?, ?, ?, ?, ?, 0)`,
+    [id, userId, body, title, now, now]
   );
 
   return {
     id,
-    userId: null,
+    userId,
     body,
     title,
     createdAt: now,

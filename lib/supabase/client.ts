@@ -14,31 +14,63 @@ import 'react-native-get-random-values';
 // (unlimited-size) encrypted session blob in AsyncStorage. The session still
 // ends up encrypted-at-rest -- the key never leaves the Keychain/Keystore --
 // while sidestepping the size cap entirely.
-class LargeSecureStore {
-  private async _encrypt(key: string, value: string) {
-    const encryptionKey = crypto.getRandomValues(new Uint8Array(256 / 8));
+//
+// One deviation from Supabase's published version of this adapter: their
+// example mints a *fresh* AES key on every write, stored under the same name
+// as the value it protects. Since supabase-js re-persists the session on
+// every token refresh, that means a Keychain write roughly hourly plus one
+// per sign-in. Here it's a single key under a fixed name of its own,
+// generated once and read once per launch, so SecureStore is touched twice in
+// the app's lifetime instead of continuously. Same security property either
+// way -- the key never leaves the Keychain/Keystore, and the session blob in
+// AsyncStorage is useless without it.
+//
+// Worth recording what this is NOT: for a while this adapter was believed to
+// be the cause of supabase.auth.getSession() hanging forever, because
+// swapping in plain AsyncStorage made the hang disappear. It didn't. The real
+// cause was a re-entrant call into supabase-js from inside its own
+// onAuthStateChange callback (see contexts/AuthContext.tsx) -- changing the
+// storage backend only shifted the timing enough to usually win the race.
+// The fix above is a genuine improvement to Keychain traffic; it was never
+// the bug.
+const ENCRYPTION_KEY_NAME = 'notes.session.encryption.key.v1';
 
-    const cipher = new aesjs.ModeOfOperation.ctr(encryptionKey, new aesjs.Counter(1));
-    const encryptedBytes = cipher.encrypt(aesjs.utils.utf8.toBytes(value));
+let encryptionKeyPromise: Promise<string> | null = null;
 
-    await SecureStore.setItemAsync(key, aesjs.utils.hex.fromBytes(encryptionKey));
+// Memoized on the promise, not the resolved value: two callers arriving
+// before the first read finishes must await the same native call rather than
+// each issuing their own -- which is the access pattern that hangs.
+function getEncryptionKey(): Promise<string> {
+  if (!encryptionKeyPromise) {
+    encryptionKeyPromise = (async () => {
+      const existing = await SecureStore.getItemAsync(ENCRYPTION_KEY_NAME);
+      if (existing) return existing;
 
-    return aesjs.utils.hex.fromBytes(encryptedBytes);
+      const created = aesjs.utils.hex.fromBytes(crypto.getRandomValues(new Uint8Array(256 / 8)));
+      await SecureStore.setItemAsync(ENCRYPTION_KEY_NAME, created);
+      return created;
+    })();
   }
+  return encryptionKeyPromise;
+}
 
-  private async _decrypt(key: string, value: string) {
-    const encryptionKeyHex = await SecureStore.getItemAsync(key);
-    if (!encryptionKeyHex) {
-      return encryptionKeyHex;
-    }
-
+class LargeSecureStore {
+  private async _encrypt(value: string) {
+    const keyHex = await getEncryptionKey();
     const cipher = new aesjs.ModeOfOperation.ctr(
-      aesjs.utils.hex.toBytes(encryptionKeyHex),
+      aesjs.utils.hex.toBytes(keyHex),
       new aesjs.Counter(1)
     );
-    const decryptedBytes = cipher.decrypt(aesjs.utils.hex.toBytes(value));
+    return aesjs.utils.hex.fromBytes(cipher.encrypt(aesjs.utils.utf8.toBytes(value)));
+  }
 
-    return aesjs.utils.utf8.fromBytes(decryptedBytes);
+  private async _decrypt(value: string) {
+    const keyHex = await getEncryptionKey();
+    const cipher = new aesjs.ModeOfOperation.ctr(
+      aesjs.utils.hex.toBytes(keyHex),
+      new aesjs.Counter(1)
+    );
+    return aesjs.utils.utf8.fromBytes(cipher.decrypt(aesjs.utils.hex.toBytes(value)));
   }
 
   async getItem(key: string) {
@@ -46,17 +78,29 @@ class LargeSecureStore {
     if (!encrypted) {
       return encrypted;
     }
-    return await this._decrypt(key, encrypted);
+    try {
+      return await this._decrypt(encrypted);
+    } catch {
+      // Undecryptable -- the key was cleared out from under the blob, or
+      // the blob predates this adapter. Treat it as no stored session
+      // (worst case: one extra sign-in) rather than throwing on every
+      // single auth call forever, which is what an unhandled AES failure
+      // here does.
+      await AsyncStorage.removeItem(key);
+      return null;
+    }
   }
 
   async removeItem(key: string) {
+    // Deliberately does not delete the encryption key: it's shared by every
+    // entry this adapter stores, and supabase-js calls removeItem on sign-out
+    // for individual keys. Dropping it would render any other entry
+    // unreadable, and the key protects nothing once its ciphertext is gone.
     await AsyncStorage.removeItem(key);
-    await SecureStore.deleteItemAsync(key);
   }
 
   async setItem(key: string, value: string) {
-    const encrypted = await this._encrypt(key, value);
-    await AsyncStorage.setItem(key, encrypted);
+    await AsyncStorage.setItem(key, await this._encrypt(value));
   }
 }
 
