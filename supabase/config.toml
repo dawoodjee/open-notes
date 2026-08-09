@@ -179,8 +179,20 @@ refresh_token_reuse_interval = 10
 enable_signup = true
 # Allow/disallow anonymous sign-ins to your project.
 enable_anonymous_sign_ins = false
-# Allow/disallow testing manual linking of accounts
-enable_manual_linking = false
+# Required for supabase.auth.linkIdentity()/unlinkIdentity() -- Stage 5
+# Phase 3's "Sign-in methods" section in Manage Account. GoTrue rejects those
+# calls outright when this is false, before any provider consent screen can
+# open, which is exactly how it presents: a Link button that appears to do
+# nothing.
+#
+# Off by default because it widens the auth surface: anyone holding a valid
+# session can attach an additional way into the account, so a stolen session
+# becomes a persistence path rather than something that expires. Accepted
+# here because linking is a deliberate Stage 5 feature, and the flow is
+# already narrow -- it needs an authenticated session, it goes through
+# Google's own consent screen, and Supabase refuses any identity already
+# bound to a different account.
+enable_manual_linking = true
 # Passwords shorter than this value will be rejected as weak. Minimum 6, recommended 8 or more.
 minimum_password_length = 6
 # Passwords that do not meet the following requirements will be rejected as weak. Supported values

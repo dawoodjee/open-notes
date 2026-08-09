@@ -13,7 +13,7 @@ import { Pressable } from '@/components/ui/pressable';
 import { VStack } from '@/components/ui/vstack';
 import { HStack } from '@/components/ui/hstack';
 import { Icon } from '@/components/ui/icon';
-import { Check, X, LogOut } from 'lucide-react-native';
+import { X, LogOut } from 'lucide-react-native';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/lib/auth/useProfile';
@@ -23,7 +23,6 @@ import {
   checkUsernameAvailable,
   formatRateLimitRemaining,
   sanitizeUsername,
-  suggestUsername,
 } from '@/lib/auth/username';
 import { getPendingWriteCount, getPendingWrites, logout } from '@/lib/auth/logout';
 import {
@@ -94,48 +93,87 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
     }
   }
 
-  function handleUnlinkGoogle() {
+  // No confirmation dialog, unlike signing out with unsynced notes. The two
+  // look similar but aren't: removing a sign-in method is recoverable (link
+  // it again), and the one case that genuinely isn't -- removing the last way
+  // into the account -- is refused server-side and disabled here before the
+  // tap. Unsynced notes, by contrast, are gone for good.
+  async function handleRemoveGoogle() {
     if (!googleIdentity) return;
-    // Unlinking removes a way into the account, so it gets the same
-    // explicit-confirmation treatment as signing out with unsynced work --
-    // both are easy to tap and annoying to undo.
-    Alert.alert(
-      'Unlink Google?',
-      `You'll no longer be able to sign in with ${googleIdentity.email ?? 'this Google account'}. Your notes aren't affected.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Unlink',
-          style: 'destructive',
-          onPress: async () => {
-            setIdentityBusy(true);
-            setIdentityError(null);
-            try {
-              await unlinkIdentity(googleIdentity);
-              await loadIdentities();
-            } catch (err: any) {
-              setIdentityError(err?.message ?? 'Could not unlink that account');
-            } finally {
-              setIdentityBusy(false);
-            }
-          },
-        },
-      ]
-    );
+    setIdentityBusy(true);
+    setIdentityError(null);
+    try {
+      await unlinkIdentity(googleIdentity);
+      await loadIdentities();
+    } catch (err: any) {
+      setIdentityError(err?.message ?? 'Could not remove that account');
+    } finally {
+      setIdentityBusy(false);
+    }
   }
 
-  // Seed fields from the loaded profile. If username is still unset,
-  // pre-fill (not auto-submit) a suggestion: sanitized full_name if one
-  // already arrived from OAuth, else the existing email-local-part fallback.
+  // The values last taken from the server, so we can tell "the user hasn't
+  // touched this box" from "the user typed something that happens to differ".
+  const seededRef = React.useRef<{ username: string; fullName: string } | null>(null);
+
+  // Seed straight from the profile, with no invented suggestion. An unset
+  // username stays visibly empty so its placeholder shows and typing a full
+  // name can fill it (see handleFullNameChange). Pre-filling here instead
+  // would mean the username box is never empty, and that auto-fill could
+  // never fire.
+  //
+  // Each field is only overwritten if it still holds exactly what was last
+  // seeded -- i.e. the user hasn't edited it. Seeding unconditionally looks
+  // harmless and isn't: saving the username calls refetch(), which produces a
+  // new profile object, which re-ran this effect and wiped a full name that
+  // had been typed but not yet saved. Observed exactly that -- username
+  // saved, full name silently discarded.
   useEffect(() => {
     if (!profile || !session) return;
-    setFullName(profile.full_name ?? '');
-    if (profile.username) {
-      setUsername(profile.username);
-    } else {
-      setUsername(suggestUsername(profile.full_name, session.user.email ?? ''));
+    const nextUsername = profile.username ?? '';
+    const nextFullName = profile.full_name ?? '';
+    const seeded = seededRef.current;
+
+    if (!seeded || username === seeded.username) {
+      setUsername(nextUsername);
+      setUsernameEdited(false);
     }
+    if (!seeded || fullName === seeded.fullName) {
+      setFullName(nextFullName);
+    }
+
+    seededRef.current = { username: nextUsername, fullName: nextFullName };
   }, [profile, session]);
+
+  // Whether the user has typed in the username box themselves. Once they
+  // have, the full name stops driving it -- their choice wins.
+  const [usernameEdited, setUsernameEdited] = useState(false);
+
+  // Typing a full name fills in the username underneath, and keeps following
+  // it keystroke by keystroke until either the account already has a username
+  // or the user edits the username box directly.
+  //
+  // Gating on "username is empty" instead looks equivalent and isn't: the
+  // first few characters of a name already sanitize to something non-empty,
+  // so the field stops being empty immediately and the suggestion freezes
+  // half-typed ("Adam D" -> adam_d, then stuck there no matter what you type
+  // next). Tracking intent rather than emptiness is what makes it follow
+  // along properly.
+  //
+  // Sanitized rather than copied: full_name is free text (any script, spaces,
+  // punctuation) while username has a strict charset, so the raw value would
+  // usually be invalid. Availability is still checked and the unique
+  // constraint is still authoritative -- this only saves typing.
+  function handleFullNameChange(text: string) {
+    setFullName(text);
+    if (profile?.username || usernameEdited) return;
+    setUsername(sanitizeUsername(text.replace(/\s+/g, '_')));
+  }
+
+  function handleUsernameChange(text: string) {
+    setUsernameEdited(true);
+    setUsername(sanitizeUsername(text));
+  }
 
   const usernameDirty = profile ? username !== (profile.username ?? '') : false;
   const fullNameDirty = profile ? fullName !== (profile.full_name ?? '') : false;
@@ -160,6 +198,34 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
     if (!profile?.username_changed_at) return '';
     return formatRateLimitRemaining(profile.username_changed_at);
   }, [profile?.username_changed_at]);
+
+  // Username is confirmed with an explicit button, not saved on blur. It's
+  // the one field with a real cost to getting wrong: changing it burns a
+  // 30-day allowance and it's the account's public identifier, so it
+  // shouldn't be committed by the incidental act of tapping elsewhere.
+  // Full name has neither property, so blur is fine there.
+  const showUsernameSave =
+    usernameDirty && username.trim().length >= 3 && usernameStatus !== 'taken';
+
+  function saveFullNameIfChanged() {
+    if (!fullNameDirty) return;
+    void saveFullName();
+  }
+
+  // Debounced autosave, because onBlur alone loses data. Moving focus from
+  // the full-name field straight onto a button (Set username, Log Out) does
+  // not reliably fire onBlur in React Native, so the typed name was silently
+  // discarded -- observed exactly that: username saved, full name gone.
+  //
+  // Safe to autosave here in a way it wouldn't be for username: full_name is
+  // free text with no uniqueness and no 30-day rate limit, so writing it
+  // repeatedly costs nothing and can't be rejected. Same 300ms debounce the
+  // note editor already uses for its own writes.
+  useEffect(() => {
+    if (!fullNameDirty) return;
+    const timeout = setTimeout(() => void saveFullName(), 300);
+    return () => clearTimeout(timeout);
+  }, [fullName, fullNameDirty]);
 
   async function saveUsername() {
     if (!session) return;
@@ -240,9 +306,14 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
   if (!session) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="md">
+    // Full-bleed sheet: full width, anchored to the bottom edge, 4/5 of the
+    // screen tall, square bottom corners so it reads as attached to the
+    // screen rather than floating. mt-auto is what pushes it down inside the
+    // modal's centering container. ROUNDED_LG is shared with every button
+    // below so the sheet and its controls agree on one radius.
+    <Modal isOpen={isOpen} onClose={onClose} size="full">
       <ModalBackdrop />
-      <ModalContent>
+      <ModalContent className="w-full max-w-full h-4/5 mt-auto mb-0 mx-0 rounded-t-2xl rounded-b-none border-0 px-5 pb-8">
         <ModalHeader>
           <RNText className="text-base font-semibold text-gray-900">Manage Account</RNText>
           <ModalCloseButton>
@@ -250,106 +321,96 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
           </ModalCloseButton>
         </ModalHeader>
 
-        <ModalBody className="gap-4 pb-4">
+        {/* flex-1 is what lets the Log Out button's mt-auto push it to the
+            bottom of the sheet instead of sitting directly under the last
+            row with dead space beneath it. */}
+        <ModalBody className="flex-1 gap-6 pt-4 pb-6">
           {profileError && (
-            <HStack className="items-center justify-between bg-red-50 rounded-lg px-3 py-2.5">
+            <HStack className="items-center justify-between bg-red-50 rounded-2xl px-4 py-3">
               <RNText className="text-xs text-red-600 flex-1 pr-2">
                 Couldn't load your profile: {profileError}
               </RNText>
-              <Pressable onPress={refetch} className="py-1 px-2.5 rounded-md bg-red-100">
+              <Pressable onPress={refetch} className="py-1.5 px-3 rounded-xl bg-red-100">
                 <RNText className="text-xs font-medium text-red-700">Retry</RNText>
               </Pressable>
             </HStack>
           )}
-          <VStack className="gap-1.5">
-            <RNText className="text-xs font-semibold text-gray-500 uppercase">Username</RNText>
-            <HStack className="items-center gap-2">
-              <Input className="flex-1 rounded-lg h-10 px-3">
-                <InputField
-                  value={username}
-                  onChangeText={(t) => setUsername(sanitizeUsername(t))}
-                  placeholder="username"
-                  autoCapitalize="none"
-                  className="text-sm"
-                />
-              </Input>
-              {usernameDirty && usernameStatus !== 'checking' && (
-                <Pressable
-                  onPress={saveUsername}
-                  disabled={usernameStatus === 'taken'}
-                  className="w-9 h-9 rounded-lg items-center justify-center bg-lime-500 active:bg-lime-600"
-                >
-                  <Icon as={Check} className="text-white w-4 h-4" />
-                </Pressable>
-              )}
-            </HStack>
+          {/* Full name before username: it's the human-facing one, and typing
+              it fills the username in below, so the order matches the flow. */}
+          <VStack className="gap-2">
+            <Input className="rounded-2xl h-12 px-4">
+              <InputField
+                value={fullName}
+                onChangeText={handleFullNameChange}
+                onBlur={saveFullNameIfChanged}
+                placeholder="Full name"
+                className="text-base"
+              />
+            </Input>
+            {fullNameStatus === 'saved' && (
+              <RNText className="text-xs text-green-600 px-1">Saved</RNText>
+            )}
+          </VStack>
+
+          <VStack className="gap-2">
+            <Input className="rounded-2xl h-12 px-4">
+              <InputField
+                value={username}
+                onChangeText={handleUsernameChange}
+                placeholder="Username"
+                autoCapitalize="none"
+                className="text-base"
+              />
+            </Input>
+
+            {/* Appears only when the username would actually change -- either
+                a genuine edit, or setting one for the first time. Both are
+                covered by "differs from what's stored"; an account with no
+                username has '' stored, so typing one makes it dirty. */}
+            {showUsernameSave && (
+              <Pressable
+                onPress={saveUsername}
+                disabled={usernameStatus === 'saving' || usernameStatus === 'checking'}
+                className="py-3 rounded-2xl bg-lime-500 items-center active:bg-lime-600 disabled:opacity-40"
+              >
+                <RNText className="text-sm font-semibold text-white">
+                  {profile?.username ? 'Change username' : 'Set username'}
+                </RNText>
+              </Pressable>
+            )}
             {usernameStatus === 'checking' && (
-              <RNText className="text-xs text-gray-400">Checking availability…</RNText>
+              <RNText className="text-xs text-gray-400 px-1">Checking availability…</RNText>
             )}
             {usernameStatus === 'available' && (
-              <RNText className="text-xs text-green-600">Available</RNText>
+              <RNText className="text-xs text-green-600 px-1">Available</RNText>
             )}
             {usernameStatus === 'taken' && (
-              <RNText className="text-xs text-red-500">
+              <RNText className="text-xs text-red-500 px-1">
                 {usernameError ?? 'That username is taken.'}
               </RNText>
             )}
             {usernameStatus === 'error' && (
-              <RNText className="text-xs text-red-500">{usernameError}</RNText>
+              <RNText className="text-xs text-red-500 px-1">{usernameError}</RNText>
             )}
             {usernameStatus === 'saved' && (
-              <RNText className="text-xs text-green-600">Saved.</RNText>
+              <RNText className="text-xs text-green-600 px-1">Saved</RNText>
             )}
             {usernameStatus === 'idle' && rateLimitMessage !== '' && (
-              <RNText className="text-xs text-gray-400">{rateLimitMessage}</RNText>
+              <RNText className="text-xs text-gray-400 px-1">{rateLimitMessage}</RNText>
             )}
           </VStack>
 
+          {/* Email is read-only, so it's plain text rather than a disabled
+              input -- a box you can't type in invites trying. */}
+          <RNText className="text-base text-gray-400 px-1 mt-1">{session.user.email}</RNText>
+
+          {/* Email sign-in isn't listed. It's always available and can't be
+              turned off, so a row for it would be inert -- and the address it
+              applies to is already shown directly above. */}
           <VStack className="gap-1.5">
-            <RNText className="text-xs font-semibold text-gray-500 uppercase">Full Name</RNText>
-            <HStack className="items-center gap-2">
-              <Input className="flex-1 rounded-lg h-10 px-3">
-                <InputField
-                  value={fullName}
-                  onChangeText={setFullName}
-                  placeholder="Your name"
-                  className="text-sm"
-                />
-              </Input>
-              {fullNameDirty && (
-                <Pressable
-                  onPress={saveFullName}
-                  className="w-9 h-9 rounded-lg items-center justify-center bg-lime-500 active:bg-lime-600"
-                >
-                  <Icon as={Check} className="text-white w-4 h-4" />
-                </Pressable>
-              )}
-            </HStack>
-            {fullNameStatus === 'saved' && (
-              <RNText className="text-xs text-green-600">Saved.</RNText>
-            )}
-          </VStack>
-
-          <VStack className="gap-1.5">
-            <RNText className="text-xs font-semibold text-gray-500 uppercase">Email</RNText>
-            <RNText className="text-sm text-gray-500">{session.user.email}</RNText>
-          </VStack>
-
-          <VStack className="gap-1.5">
-            <RNText className="text-xs font-semibold text-gray-500 uppercase">
-              Sign-in methods
-            </RNText>
-
-            {/* Email OTP is always present -- it's how the account exists at
-                all -- so it's shown as a fact, not something to manage. */}
-            <HStack className="items-center justify-between py-1">
-              <RNText className="text-sm text-gray-700">Email code</RNText>
-              <RNText className="text-xs text-gray-400">Always on</RNText>
-            </HStack>
-
             <HStack className="items-center justify-between py-1">
               <VStack className="flex-1">
-                <RNText className="text-sm text-gray-700">Google</RNText>
+                <RNText className="text-base text-gray-800">Google</RNText>
                 {googleIdentity?.email && (
                   <RNText className="text-xs text-gray-400">{googleIdentity.email}</RNText>
                 )}
@@ -359,35 +420,35 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
                 <RNText className="text-xs text-gray-400">…</RNText>
               ) : googleIdentity ? (
                 <Pressable
-                  onPress={handleUnlinkGoogle}
+                  onPress={handleRemoveGoogle}
                   disabled={identityBusy || !canUnlink(identities)}
-                  className="px-3 py-1.5 rounded-md active:bg-gray-100 disabled:opacity-40"
+                  className="px-4 py-2 rounded-xl active:bg-gray-100 disabled:opacity-40"
                 >
-                  <RNText className="text-xs font-medium text-red-600">Unlink</RNText>
+                  <RNText className="text-sm font-medium text-red-600">Remove</RNText>
                 </Pressable>
               ) : (
                 <Pressable
                   onPress={handleLinkGoogle}
                   disabled={identityBusy}
-                  className="px-3 py-1.5 rounded-md border border-gray-300 active:bg-gray-50 disabled:opacity-40"
+                  className="px-4 py-2 rounded-xl border border-gray-300 active:bg-gray-50 disabled:opacity-40"
                 >
-                  <RNText className="text-xs font-medium text-gray-800">Link</RNText>
+                  <RNText className="text-sm font-medium text-gray-800">Link</RNText>
                 </Pressable>
               )}
             </HStack>
 
-            {/* Explains a disabled Unlink rather than leaving it inert and
-                unexplained -- Supabase refuses to remove an account's last
+            {/* Explains a disabled Remove rather than leaving it inert and
+                unexplained -- Supabase refuses to drop an account's last
                 identity, and a greyed-out button with no reason is worse
                 than the rejection it's preventing. */}
             {googleIdentity && identities !== null && !canUnlink(identities) && (
-              <RNText className="text-xs text-gray-400">
-                This is your only sign-in method, so it can't be unlinked.
+              <RNText className="text-xs text-gray-400 px-1">
+                This is your only sign-in method, so it can't be removed.
               </RNText>
             )}
 
             <HStack className="items-center justify-between py-1">
-              <RNText className="text-sm text-gray-400">Apple</RNText>
+              <RNText className="text-base text-gray-400">Apple</RNText>
               <RNText className="text-xs text-gray-400">Not available yet</RNText>
             </HStack>
 
@@ -396,14 +457,24 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
             )}
           </VStack>
 
-          <Pressable
-            onPress={handleSignOut}
-            className="mt-2 py-2.5 rounded-lg bg-red-50 flex-row items-center justify-center gap-2 active:bg-red-100"
-          >
-            <Icon as={LogOut} className="text-red-600 w-4 h-4" />
-            <RNText className="text-sm font-medium text-red-600">Sign Out</RNText>
-          </Pressable>
         </ModalBody>
+
+        {/* Deliberately outside ModalBody. ModalBody is a ScrollView, and a
+            child's mt-auto can't stretch inside one -- the button ended up
+            floating directly under the last row with dead space beneath it.
+            Sitting here instead, as a sibling of the scroll area, pins it to
+            the bottom of the sheet whatever the content height.
+
+            Primary button shape (solid fill, same radius as the sheet and
+            every other control) in a warning colour -- it reads as the main
+            action without pretending to be a safe one. */}
+        <Pressable
+          onPress={handleSignOut}
+          className="py-3.5 rounded-2xl bg-red-600 flex-row items-center justify-center gap-2 active:bg-red-700"
+        >
+          <Icon as={LogOut} className="text-white w-4 h-4" />
+          <RNText className="text-base font-semibold text-white">Log Out</RNText>
+        </Pressable>
       </ModalContent>
     </Modal>
   );

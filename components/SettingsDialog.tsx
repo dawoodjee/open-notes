@@ -41,7 +41,7 @@ function SettingsRow({ icon, label, onPress, disabled }: SettingsRowProps) {
     <Pressable
       onPress={onPress}
       disabled={disabled}
-      className="flex-row items-center justify-between px-4 py-3.5 border-b border-gray-100 active:bg-gray-50"
+      className="flex-row items-center justify-between px-5 py-4 border-b border-gray-100 active:bg-gray-50"
     >
       <HStack className="items-center gap-3">
         <Icon as={icon} className={`w-5 h-5 ${disabled ? 'text-gray-300' : 'text-gray-600'}`} />
@@ -84,14 +84,14 @@ function AdvancedView({ onBack }: { onBack: () => void }) {
 
   return (
     <>
-      <HStack className="items-center px-4 py-3 border-b border-gray-100">
+      <HStack className="items-center px-5 py-4 border-b border-gray-100">
         <Pressable onPress={onBack} className="p-1 -ml-1 mr-2">
           <Icon as={ChevronLeft} className="text-gray-600 w-5 h-5" />
         </Pressable>
         <RNText className="text-base font-semibold text-gray-900">Advanced</RNText>
       </HStack>
 
-      <ScrollView className="max-h-[400px] px-4 py-4">
+      <ScrollView className="flex-1 px-5 py-5">
         <RNText className="text-xs font-semibold text-gray-400 uppercase mb-2">
           Sync Issues
         </RNText>
@@ -108,7 +108,7 @@ function AdvancedView({ onBack }: { onBack: () => void }) {
             ))}
             <Pressable
               onPress={handleClear}
-              className="mt-4 py-2.5 rounded-lg bg-gray-100 items-center active:bg-gray-200"
+              className="mt-6 py-3.5 rounded-2xl bg-gray-100 items-center active:bg-gray-200"
             >
               <RNText className="text-sm font-medium text-gray-700">Clear</RNText>
             </Pressable>
@@ -128,9 +128,9 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} size="md">
+    <Modal isOpen={isOpen} onClose={handleClose} size="full">
       <ModalBackdrop />
-      <ModalContent>
+      <ModalContent className="w-full max-w-full h-4/5 mt-auto mb-0 mx-0 rounded-t-2xl rounded-b-none border-0 pb-8">
         {view === 'root' ? (
           <>
             <ModalHeader>
@@ -139,7 +139,7 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
                 <Icon as={X} className="text-gray-400 w-5 h-5" />
               </ModalCloseButton>
             </ModalHeader>
-            <ScrollView className="max-h-[400px]">
+            <ScrollView className="flex-1">
               <ModalBody className="p-0">
                 {/* Change PIN is a stub -- Stage 6 wires the real action. */}
                 <SettingsRow icon={KeyRound} label="Change PIN" onPress={() => {}} />
