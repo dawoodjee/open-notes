@@ -250,6 +250,24 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
   //
   // Only ever fills blanks: a value already on the profile always wins, since
   // the user chose it and the provider didn't.
+  //
+  // Signup only. An account that already has a username has been through
+  // setup, and from then on Postgres is the only source for these fields --
+  // the provider must never write over them again, however empty they look.
+  //
+  // That isn't just tidiness, because of what the cascade would do next. A
+  // seeded full name flows into the username box, and committing a username
+  // sets username_changed_at (see enforce_username_change_limit in the
+  // migration) -- which starts the 30-day clock. The first set is allowed but
+  // it *is* the change that begins the window. So re-seeding an existing
+  // account risks spending someone's one change a month on a name Google
+  // picked rather than one they chose.
+  //
+  // "Has a username" is the test rather than "has a full name": username is
+  // mandatory at signup and full_name isn't, so an account can legitimately
+  // sit with a blank name forever and must not be re-seeded every time this
+  // sheet opens.
+  const isUnsetUpAccount = !!profile && !profile.username;
   const identitySeededRef = React.useRef(false);
 
   useEffect(() => {
@@ -259,12 +277,13 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
     }
     if (identitySeededRef.current) return;
     if (!identities || identities.length === 0 || !profile) return;
+    if (!isUnsetUpAccount) return;
 
     const source = identities.find((i) => i.fullName || i.email);
     if (!source) return;
     identitySeededRef.current = true;
 
-    if (!profile.full_name && source.fullName) {
+    if (source.fullName) {
       // Routed through the same handler as typing, so the username cascade
       // and the debounced autosave both happen exactly as they normally do.
       handleFullNameChange(source.fullName);
@@ -272,7 +291,7 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
     if (!session?.user.email && source.email) {
       setEmail(source.email);
     }
-  }, [isOpen, identities, profile, session?.user.email]);
+  }, [isOpen, identities, profile, isUnsetUpAccount, session?.user.email]);
 
   // --- Required fields -----------------------------------------------------
   // All three must have a value before the sheet will close. The rejection is
@@ -495,7 +514,7 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
           {/* Email sign-in isn't listed. It's always available and can't be
               turned off, so a row for it would be inert -- and the address it
               applies to is already shown directly above. */}
-          <VStack className="gap-1.5">
+          <VStack className="gap-1.5 pt-3">
             <HStack className="items-center justify-between py-1">
               <VStack className="flex-1">
                 <RNText className="text-base text-gray-800">Google</RNText>
