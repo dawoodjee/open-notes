@@ -4,6 +4,17 @@ import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { VaultProvider, useVault } from '@/contexts/VaultContext';
 import { PinSetupScreen, PinUnlockScreen } from '@/components/PinScreen';
+import { AdoptKeyScreen, usePendingAdoption } from '@/components/AdoptKeyScreen';
+
+function AdoptKeyOverlay() {
+  const pending = usePendingAdoption();
+  if (!pending) return null;
+  return (
+    <View className="absolute inset-0 bg-white">
+      <AdoptKeyScreen />
+    </View>
+  );
+}
 
 import '@/global.css';
 
@@ -65,7 +76,13 @@ function VaultGate() {
         <View className="absolute inset-0 bg-white">
           {status === 'needs-setup' ? <PinSetupScreen /> : <PinUnlockScreen />}
         </View>
-      ) : null}
+      ) : (
+        // Sits above the unlocked app, not instead of it: the account is
+        // signed in and sync is deliberately still disconnected until the
+        // recovery code arrives. Rendered after the lock overlay so a locked
+        // device never shows account content behind it.
+        <AdoptKeyOverlay />
+      )}
     </View>
   );
 }

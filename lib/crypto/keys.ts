@@ -1,7 +1,7 @@
 import { scrypt } from '@noble/hashes/scrypt.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { randomBytes, utf8ToBytes } from '@noble/ciphers/utils.js';
+import { bytesToHex, randomBytes, utf8ToBytes } from '@noble/ciphers/utils.js';
 import { base64ToBytes, bytesToBase64 } from './base64';
 import { decrypt, encrypt } from './envelope';
 
@@ -76,6 +76,25 @@ export function generateDataKey(): Uint8Array {
   return randomBytes(32);
 }
 
+const FINGERPRINT_INFO = utf8ToBytes('notes-key-fingerprint-v1');
+
+/**
+ * A short, non-secret tag identifying a data key.
+ *
+ * Exists to answer one question cheaply: "is the key this device holds the
+ * same one this account already uses?" Comparing the wrapped blobs cannot
+ * answer it -- different salts and nonces make two wrappings of the SAME key
+ * look entirely different -- and comparing raw keys would mean putting a raw
+ * key somewhere it can be compared, which is the one thing this design never
+ * does.
+ *
+ * Safe to store server-side and to log: HKDF is one-way, and 16 bytes of
+ * output reveals nothing usable about a 32-byte input.
+ */
+export function keyFingerprint(dataKey: Uint8Array): string {
+  return bytesToHex(hkdf(sha256, dataKey, undefined, FINGERPRINT_INFO, 16));
+}
+
 export function generateSalt(): string {
   return bytesToBase64(randomBytes(SALT_BYTES));
 }
@@ -122,13 +141,32 @@ export function getReferenceScrypt(): ScryptFn {
   return nobleScrypt;
 }
 
-function deriveKeyFromPin(pin: string, salt: string, params: KdfParams = SCRYPT_PARAMS) {
+/**
+ * Exported so a caller that needs to unwrap several blobs under the same PIN
+ * can pay the (deliberately expensive) scrypt cost once rather than per blob.
+ * Everything wrapped under a given PIN uses the same salt, so the wrapping
+ * key is identical for all of them.
+ */
+export function deriveKeyFromPin(pin: string, salt: string, params: KdfParams = SCRYPT_PARAMS) {
   return scryptImpl(utf8ToBytes(pin), base64ToBytes(salt), {
     N: params.N,
     r: params.r,
     p: params.p,
     dkLen: params.dkLen,
   });
+}
+
+/** Wrap/unwrap an arbitrary 32-byte secret under an already-derived key. */
+export function wrapWith(secret: Uint8Array, wrappingKey: Uint8Array): string {
+  return encrypt(bytesToBase64(secret), wrappingKey);
+}
+
+export function unwrapWith(blob: string, wrappingKey: Uint8Array): Uint8Array {
+  try {
+    return base64ToBytes(decrypt(blob, wrappingKey));
+  } catch {
+    throw new WrongPinError();
+  }
 }
 
 export function wrapDataKeyWithPin(

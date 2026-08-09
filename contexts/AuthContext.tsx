@@ -4,6 +4,16 @@ import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
 import { getPowerSync, connectPowerSync, claimUnownedNotes } from '@/lib/powersync/db';
 import { getCurrentSession, setCurrentSession } from '@/lib/auth/currentUser';
+import { setPendingAdoption } from '@/lib/crypto/adoption';
+import { AccountKeyRecord, fetchAccountKey, uploadAccountKey } from '@/lib/crypto/keyBackup';
+import { unwrapDataKeyWithRecoveryCode } from '@/lib/crypto/keys';
+import { reEncryptLocalNotes } from '@/lib/crypto/reEncrypt';
+import {
+  adoptAccountDataKey,
+  getDataKeyFingerprint,
+  getKeyBackupPayload,
+  markKeyBackedUp,
+} from '@/lib/crypto/vault';
 
 interface AuthContextValue {
   session: Session | null;
@@ -26,6 +36,88 @@ export function useAuth() {
 // component state: it must be reachable from a single serialized queue
 // regardless of provider remounts, and readable without a render round-trip.
 let inFlight: Promise<void> | null = null;
+
+/**
+ * Make this device's data key and the account's agree, or report that it
+ * can't be done without the user.
+ *
+ * Three outcomes:
+ *   - the account has no key yet  -> claim it with ours, nothing to re-encrypt
+ *   - the account's key is ours   -> nothing to do (the common case, every
+ *                                    launch after the first)
+ *   - the account's key differs   -> only the recovery code can unwrap it, so
+ *                                    hand off to the adoption screen
+ */
+async function reconcileAccountKey(
+  userId: string,
+  setSessionState: (s: Session | null) => void
+): Promise<'ok' | 'needs-adoption'> {
+  const account = await fetchAccountKey(userId);
+
+  if (!account) {
+    const payload = await getKeyBackupPayload();
+    if (!payload) return 'ok';
+    const { claimed } = await uploadAccountKey(userId, payload);
+    if (claimed) {
+      await markKeyBackedUp();
+      return 'ok';
+    }
+    // Lost a race with another device signing into the same new account.
+    // Fall through and adopt whatever won.
+    const winner = await fetchAccountKey(userId);
+    if (!winner) return 'ok';
+    return beginAdoption(winner, setSessionState);
+  }
+
+  if (account.fingerprint === getDataKeyFingerprint()) {
+    await markKeyBackedUp();
+    return 'ok';
+  }
+
+  return beginAdoption(account, setSessionState);
+}
+
+function beginAdoption(
+  record: AccountKeyRecord,
+  setSessionState: (s: Session | null) => void
+): 'needs-adoption' {
+  setPendingAdoption({
+    record,
+    async complete(recoveryCode: string, pin: string) {
+      // Throws WrongRecoveryCodeError on a bad code, before anything changes.
+      const accountKey = unwrapDataKeyWithRecoveryCode(
+        record.recoveryWrappedKey,
+        recoveryCode,
+        record.recoverySalt
+      );
+
+      const { previousKey } = await adoptAccountDataKey(
+        accountKey,
+        record.recoveryWrappedKey,
+        record.recoverySalt,
+        pin
+      );
+
+      // Both keys are in hand only here, so the local notes have to be
+      // converted now -- and before connecting, or they would upload still
+      // encrypted under a key the account cannot read.
+      await reEncryptLocalNotes(previousKey, accountKey);
+      previousKey.fill(0);
+
+      setPendingAdoption(null);
+      await connectPowerSync();
+    },
+    async cancel() {
+      setPendingAdoption(null);
+      // Nothing was changed, so signing out leaves this device exactly as it
+      // was, with its own key and its own notes intact.
+      await supabase.auth.signOut({ scope: 'local' });
+      setCurrentSession(null);
+      setSessionState(null);
+    },
+  });
+  return 'needs-adoption';
+}
 
 /**
  * The ONLY function in this codebase allowed to call getPowerSync().connect() or
@@ -77,6 +169,20 @@ async function becomeAuthenticatedLocally(
       // above has already emptied local storage by this point: there is
       // nothing of the previous account's left for this to claim.
       await claimUnownedNotes(newSession.user.id);
+
+      // Reconcile this device's data key against the account's BEFORE
+      // connecting. Every device mints its own key at PIN setup, before any
+      // account exists, so signing into an account that already has notes
+      // means those notes are encrypted under a different key. Connecting
+      // first would pull down content this device cannot read, and push up
+      // content the account cannot read.
+      const reconciliation = await reconcileAccountKey(newSession.user.id, setSessionState);
+      if (reconciliation === 'needs-adoption') {
+        // Sync stays disconnected until the user supplies their recovery
+        // code. The adoption screen calls connectPowerSync() when it's done.
+        return;
+      }
+
       await connectPowerSync();
     }
     // Otherwise this is a same-user token refresh: fetchCredentials() on the

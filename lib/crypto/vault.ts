@@ -13,13 +13,15 @@ import { bytesToHex, utf8ToBytes } from '@noble/ciphers/utils.js';
 import {
   KdfParams,
   SCRYPT_PARAMS,
+  deriveKeyFromPin,
   generateDataKey,
   generateRecoveryCode,
   generateSalt,
-  unwrapDataKeyWithPin,
+  keyFingerprint,
   unwrapDataKeyWithRecoveryCode,
-  wrapDataKeyWithPin,
+  unwrapWith,
   wrapDataKeyWithRecoveryCode,
+  wrapWith,
 } from './keys';
 
 /**
@@ -75,6 +77,24 @@ interface StoredVault {
    * the data key until finishSetup() runs initPowerSync().
    */
   setupComplete: boolean;
+  /**
+   * The seed for the SQLCipher database key, wrapped under the PIN. Device-
+   * local: it never leaves this device and is never backed up, because it
+   * protects this device's file rather than any content that syncs.
+   *
+   * WHY IT IS SEPARATE FROM THE DATA KEY (a Phase 1 mistake, corrected here):
+   * getDatabaseKey() originally derived the database key from the data key.
+   * That is fine until a device has to ADOPT a different account's data key
+   * on login -- at which point the database key would silently change and the
+   * open database file would become unopenable, requiring a full SQLCipher
+   * rekey mid-login. Two secrets with two jobs avoids that entirely: adopting
+   * an account key now leaves the file's key untouched.
+   *
+   * Optional for vaults created before this split. getDatabaseKey() falls
+   * back to the old derivation for those, and adoptAccountDataKey() pins the
+   * seed to the old value first so the file key is preserved exactly.
+   */
+  wrappedDbSeed?: string;
 }
 
 // --- in-memory unlocked state ----------------------------------------------
@@ -90,6 +110,11 @@ interface StoredVault {
 // not protected. The upside is that sync keeps working in the background
 // while locked, which is what a notes app should do.
 let dataKey: Uint8Array | null = null;
+
+// The SQLCipher seed, held alongside but kept distinct -- see
+// StoredVault.wrappedDbSeed. Null on legacy vaults, where getDatabaseKey()
+// falls back to deriving from the data key.
+let dbSeed: Uint8Array | null = null;
 
 export function isUnlocked(): boolean {
   return dataKey !== null;
@@ -107,6 +132,8 @@ export function getDataKey(): Uint8Array {
 export function forgetDataKey(): void {
   if (dataKey) dataKey.fill(0);
   dataKey = null;
+  if (dbSeed) dbSeed.fill(0);
+  dbSeed = null;
 }
 
 // --- persistence ------------------------------------------------------------
@@ -146,12 +173,15 @@ export async function markSetupComplete(): Promise<void> {
  */
 export async function createVault(pin: string): Promise<{ recoveryCode: string }> {
   const key = generateDataKey();
+  const seed = generateDataKey(); // same shape, different job -- see wrappedDbSeed
   const pinSalt = generateSalt();
   const recoverySalt = generateSalt();
   const recoveryCode = generateRecoveryCode();
+  const pinKey = deriveKeyFromPin(pin, pinSalt, SCRYPT_PARAMS);
 
   await writeVault({
-    wrappedByPin: wrapDataKeyWithPin(key, pin, pinSalt, SCRYPT_PARAMS),
+    wrappedByPin: wrapWith(key, pinKey),
+    wrappedDbSeed: wrapWith(seed, pinKey),
     pinSalt,
     wrappedByRecoveryCode: wrapDataKeyWithRecoveryCode(key, recoveryCode, recoverySalt),
     recoverySalt,
@@ -161,6 +191,7 @@ export async function createVault(pin: string): Promise<{ recoveryCode: string }
   });
 
   dataKey = key;
+  dbSeed = seed;
   return { recoveryCode };
 }
 
@@ -174,7 +205,10 @@ export async function unlockWithPin(pin: string): Promise<void> {
   // Node benchmarks used to pick SCRYPT_PARAMS.N. If this creeps past ~2s the
   // parameter needs revisiting -- an unlock people do daily can't feel broken.
   const startedAt = __DEV__ ? Date.now() : 0;
-  dataKey = unwrapDataKeyWithPin(vault.wrappedByPin, pin, vault.pinSalt, vault.kdfParams);
+  // One scrypt derivation unwraps both secrets -- they share the PIN salt.
+  const pinKey = deriveKeyFromPin(pin, vault.pinSalt, vault.kdfParams);
+  dataKey = unwrapWith(vault.wrappedByPin, pinKey);
+  dbSeed = vault.wrappedDbSeed ? unwrapWith(vault.wrappedDbSeed, pinKey) : null;
   if (__DEV__) {
     console.log(`[vault] scrypt N=2^${Math.log2(vault.kdfParams.N)} unlock: ${Date.now() - startedAt}ms`);
   }
@@ -191,61 +225,112 @@ export async function changePin(oldPin: string, newPin: string): Promise<void> {
   const vault = await readVault();
   if (!vault) throw new Error('No vault on this device.');
 
-  const key = unwrapDataKeyWithPin(vault.wrappedByPin, oldPin, vault.pinSalt, vault.kdfParams);
+  const oldPinKey = deriveKeyFromPin(oldPin, vault.pinSalt, vault.kdfParams);
+  const key = unwrapWith(vault.wrappedByPin, oldPinKey);
+  const seed = vault.wrappedDbSeed ? unwrapWith(vault.wrappedDbSeed, oldPinKey) : null;
+
   const pinSalt = generateSalt();
+  const newPinKey = deriveKeyFromPin(newPin, pinSalt, SCRYPT_PARAMS);
 
   await writeVault({
     ...vault,
-    wrappedByPin: wrapDataKeyWithPin(key, newPin, pinSalt, SCRYPT_PARAMS),
+    wrappedByPin: wrapWith(key, newPinKey),
+    // Re-wrapped under the new PIN too, or the database would stop opening
+    // after a PIN change -- the seed is unchanged, only its wrapping is.
+    ...(seed ? { wrappedDbSeed: wrapWith(seed, newPinKey) } : {}),
     pinSalt,
     kdfParams: SCRYPT_PARAMS,
   });
 
   dataKey = key;
+  dbSeed = seed;
 }
 
 /**
- * Second device: the account's key blob came down from user_keys, and the
- * recovery code unwraps it. Establishes a local vault with a fresh PIN so
- * subsequent unlocks on this device don't need the code again.
+ * Adopt an account's data key on a device that already had its own.
  *
- * Throws WrongRecoveryCodeError if the code doesn't match.
+ * This is the situation Phase 3 exists to resolve. Every device generates a
+ * data key at PIN setup, before any account exists. Sign in to an account
+ * that already has notes, and those notes are encrypted under a DIFFERENT
+ * key -- the one belonging to the device that created the account. Without
+ * adoption, they download and are simply unreadable.
+ *
+ * Ordering here is the whole game:
+ *   1. Pin the database seed to the CURRENT derivation first, if this vault
+ *      predates the two-secret split. Do this before touching dataKey, or the
+ *      database key changes underneath the open connection.
+ *   2. Swap in the account key and re-wrap under the PIN.
+ *
+ * Re-encrypting the notes already on this device is the caller's job (see
+ * lib/crypto/reEncrypt.ts) and must happen while BOTH keys are available --
+ * hence the old key is returned rather than discarded.
  */
-export async function restoreVaultFromRecovery(
-  wrappedByRecoveryCode: string,
-  recoverySalt: string,
-  recoveryCode: string,
-  newPin: string
-): Promise<void> {
-  const key = unwrapDataKeyWithRecoveryCode(wrappedByRecoveryCode, recoveryCode, recoverySalt);
+export async function adoptAccountDataKey(
+  accountKey: Uint8Array,
+  accountRecoveryWrapped: string,
+  accountRecoverySalt: string,
+  pin: string
+): Promise<{ previousKey: Uint8Array }> {
+  const vault = await readVault();
+  if (!vault) throw new Error('No vault on this device.');
+
+  const oldPinKey = deriveKeyFromPin(pin, vault.pinSalt, vault.kdfParams);
+  const previousKey = unwrapWith(vault.wrappedByPin, oldPinKey);
+  // Step 1: whatever getDatabaseKey() resolves to right now must keep
+  // resolving to the same thing afterwards.
+  const seed = vault.wrappedDbSeed ? unwrapWith(vault.wrappedDbSeed, oldPinKey) : previousKey;
+
   const pinSalt = generateSalt();
+  const newPinKey = deriveKeyFromPin(pin, pinSalt, SCRYPT_PARAMS);
 
   await writeVault({
-    wrappedByPin: wrapDataKeyWithPin(key, newPin, pinSalt, SCRYPT_PARAMS),
+    wrappedByPin: wrapWith(accountKey, newPinKey),
+    wrappedDbSeed: wrapWith(seed, newPinKey),
     pinSalt,
-    wrappedByRecoveryCode,
-    recoverySalt,
+    // The account's recovery material replaces this device's, because the
+    // account key is now what needs recovering. This device's original
+    // recovery code becomes meaningless and is discarded.
+    wrappedByRecoveryCode: accountRecoveryWrapped,
+    recoverySalt: accountRecoverySalt,
     kdfParams: SCRYPT_PARAMS,
-    backedUp: true, // it came from the server, so it is by definition already there
+    backedUp: true, // it came from the server by definition
     setupComplete: true,
   });
 
-  dataKey = key;
+  dataKey = accountKey;
+  dbSeed = seed;
+  return { previousKey };
 }
 
-/** What Phase 3's upload step needs, and the flag it flips afterwards. */
-export async function getPendingKeyBackup(): Promise<{
+/**
+ * This device's key material, ready to become the account's if the account
+ * doesn't have one yet.
+ *
+ * There is deliberately no separate "restore onto a blank device" path: PIN
+ * setup runs on first launch, before any sign-in, so a device always has a
+ * vault by the time it reaches an account. The only real case is adoption --
+ * see adoptAccountDataKey.
+ */
+export async function getKeyBackupPayload(): Promise<{
   wrappedByRecoveryCode: string;
   recoverySalt: string;
   kdfParams: KdfParams;
+  fingerprint: string;
 } | null> {
   const vault = await readVault();
-  if (!vault || vault.backedUp) return null;
+  if (!vault) return null;
   return {
     wrappedByRecoveryCode: vault.wrappedByRecoveryCode,
     recoverySalt: vault.recoverySalt,
     kdfParams: vault.kdfParams,
+    fingerprint: keyFingerprint(getDataKey()),
   };
+}
+
+/** Identifies the key this device currently holds, for comparison against
+ *  the account's. Non-secret -- see keyFingerprint. */
+export function getDataKeyFingerprint(): string {
+  return keyFingerprint(getDataKey());
 }
 
 export async function markKeyBackedUp(): Promise<void> {
@@ -271,5 +356,10 @@ const SQLCIPHER_INFO = utf8ToBytes('notes-sqlcipher-v1');
  * Returned as hex because op-sqlite takes the key as a string.
  */
 export function getDatabaseKey(): string {
-  return bytesToHex(hkdf(sha256, getDataKey(), undefined, SQLCIPHER_INFO, 32));
+  // dbSeed for vaults created since the two-secret split; the data key for
+  // older ones, so their existing database file stays openable. Once a legacy
+  // vault adopts an account key, adoptAccountDataKey() pins dbSeed to the old
+  // data key first, which keeps this value identical across the change.
+  const seed = dbSeed ?? getDataKey();
+  return bytesToHex(hkdf(sha256, seed, undefined, SQLCIPHER_INFO, 32));
 }
