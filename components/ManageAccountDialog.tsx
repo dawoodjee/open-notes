@@ -1,11 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Text as RNText } from 'react-native';
+import { Alert, View, Text as RNText } from 'react-native';
 import {
   Modal,
   ModalBackdrop,
   ModalContent,
   ModalHeader,
-  ModalCloseButton,
   ModalBody,
 } from '@/components/ui/modal';
 import { Pressable } from '@/components/ui/pressable';
@@ -241,6 +240,64 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
   const emailStatus = emailNotice ?? (emailDirty && !emailLooksValid ? 'Enter a valid email address.' : '');
   const emailStatusTone: FieldTone = emailNotice || (emailDirty && !emailLooksValid) ? 'error' : 'neutral';
 
+  // --- Seeding from a linked account --------------------------------------
+  // An account created purely through Google has no profile row content of its
+  // own -- Supabase stores the provider's name and address on the *identity*,
+  // not in public.profiles. So when a field is still unset, take it from the
+  // first linked identity rather than making the user retype what Google
+  // already told us. Full name seeds the username underneath it too, the same
+  // cascade as typing a name by hand.
+  //
+  // Only ever fills blanks: a value already on the profile always wins, since
+  // the user chose it and the provider didn't.
+  const identitySeededRef = React.useRef(false);
+
+  useEffect(() => {
+    if (!isOpen) {
+      identitySeededRef.current = false;
+      return;
+    }
+    if (identitySeededRef.current) return;
+    if (!identities || identities.length === 0 || !profile) return;
+
+    const source = identities.find((i) => i.fullName || i.email);
+    if (!source) return;
+    identitySeededRef.current = true;
+
+    if (!profile.full_name && source.fullName) {
+      // Routed through the same handler as typing, so the username cascade
+      // and the debounced autosave both happen exactly as they normally do.
+      handleFullNameChange(source.fullName);
+    }
+    if (!session?.user.email && source.email) {
+      setEmail(source.email);
+    }
+  }, [isOpen, identities, profile, session?.user.email]);
+
+  // --- Required fields -----------------------------------------------------
+  // All three must have a value before the sheet will close. The rejection is
+  // shown by pulsing the offending field's border pink rather than adding a
+  // message: the fields already reserve one status line each, and an error
+  // string there would push the "Available"/rate-limit text out of the way.
+  // Colour is a weak signal on its own, but this one is paired with the tap
+  // visibly not working, which is the actual message.
+  const [flash, setFlash] = useState(0);
+  const missingFullName = fullName.trim().length === 0;
+  const missingUsername = username.trim().length === 0;
+  const missingEmail = email.trim().length === 0;
+  const hasEmptyField = missingFullName || missingUsername || missingEmail;
+
+  function handleAttemptClose() {
+    // Signing out is the deliberate exception -- see handleSignOut, which
+    // closes directly. Someone leaving the account shouldn't be held hostage
+    // by a profile they're abandoning anyway.
+    if (hasEmptyField) {
+      setFlash((n) => n + 1);
+      return;
+    }
+    onClose();
+  }
+
   function handleCommitEmail() {
     // Deliberately says so out loud rather than doing nothing. A control that
     // silently fails reads as broken -- exactly how the Link button looked
@@ -352,27 +409,37 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
     // screen rather than floating. mt-auto is what pushes it down inside the
     // modal's centering container. ROUNDED_LG is shared with every button
     // below so the sheet and its controls agree on one radius.
-    <Modal isOpen={isOpen} onClose={onClose} size="full">
+    // The pb-* below is the gap under the Log Out button -- the sheet's bottom
+    // padding is what sits beneath the pinned button, so that one value is the
+    // button's height off the bottom edge.
+    <Modal isOpen={isOpen} onClose={handleAttemptClose} size="full">
       <ModalBackdrop />
-      <ModalContent className="w-full max-w-full h-4/5 mt-auto mb-0 mx-0 rounded-t-2xl rounded-b-none border-0 px-5 pb-4">
+      <ModalContent className="w-full max-w-full h-4/5 mt-auto mb-0 mx-0 rounded-t-2xl rounded-b-none border-0 px-5 pb-13">
         <ModalHeader>
           <RNText className="text-base font-semibold text-gray-900">Manage Account</RNText>
-          <ModalCloseButton>
+          {/* A plain Pressable, not ModalCloseButton: that one closes through
+              the modal's own context and would bypass the required-field
+              check, so the X and the backdrop would disagree. */}
+          <Pressable onPress={handleAttemptClose} className="p-1 -mr-1">
             <Icon as={X} className="text-gray-400 w-5 h-5" />
-          </ModalCloseButton>
+          </Pressable>
         </ModalHeader>
 
         {/* flex-1 is what lets the Log Out button's mt-auto push it to the
             bottom of the sheet instead of sitting directly under the last
             row with dead space beneath it. */}
-        <ModalBody className="flex-1 gap-6 pt-4 pb-6">
+        {/* gap-3 throughout, on the field groups and on the separator alike,
+            so every block in the sheet is separated by the same 12px -- the
+            separator sits centred in an identical gap rather than in a wider
+            section break of its own. */}
+        <ModalBody className="flex-1 gap-3 pt-4 pb-6">
           {profileError && (
             <HStack className="items-center justify-between bg-red-50 rounded-2xl px-4 py-3">
-              <RNText className="text-xs text-red-600 flex-1 pr-2">
+              <RNText className="text-xs text-red-500 flex-1 pr-2">
                 Couldn't load your profile: {profileError}
               </RNText>
               <Pressable onPress={refetch} className="py-1.5 px-3 rounded-xl bg-red-100">
-                <RNText className="text-xs font-medium text-red-700">Retry</RNText>
+                <RNText className="text-xs font-medium text-red-500">Retry</RNText>
               </Pressable>
             </HStack>
           )}
@@ -387,6 +454,7 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
               value={fullName}
               onChangeText={handleFullNameChange}
               placeholder="Full name"
+              flash={missingFullName ? flash : 0}
             />
 
             <AccountField
@@ -399,6 +467,7 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
               onCommit={saveUsername}
               status={usernameStatusText}
               statusTone={usernameStatusTone}
+              flash={missingUsername ? flash : 0}
             />
 
             <AccountField
@@ -412,8 +481,16 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
               onCommit={handleCommitEmail}
               status={emailStatus}
               statusTone={emailStatusTone}
+              flash={missingEmail ? flash : 0}
             />
           </VStack>
+
+          {/* Divides "who you are" from "how you sign in" -- two different
+              kinds of setting that otherwise read as one long list. It's a
+              plain sibling of the field groups, so ModalBody's gap-3 puts the
+              same 12px above and below it as sits between any two fields; no
+              margin of its own, which would make the spacing asymmetric. */}
+          <View className="h-px bg-gray-200" />
 
           {/* Email sign-in isn't listed. It's always available and can't be
               turned off, so a row for it would be inert -- and the address it
@@ -435,7 +512,7 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
                   disabled={identityBusy || !canUnlink(identities)}
                   className="px-4 py-2 rounded-xl active:bg-gray-100 disabled:opacity-40"
                 >
-                  <RNText className="text-sm font-medium text-red-600">Remove</RNText>
+                  <RNText className="text-sm font-medium text-red-500">Remove</RNText>
                 </Pressable>
               ) : (
                 <Pressable
@@ -481,7 +558,7 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
             action without pretending to be a safe one. */}
         <Pressable
           onPress={handleSignOut}
-          className="w-4/5 self-center py-3.5 rounded-2xl bg-red-600 flex-row items-center justify-center gap-2 active:bg-red-700"
+          className="w-4/5 self-center py-3.5 rounded-2xl bg-red-500 flex-row items-center justify-center gap-2 active:bg-red-700"
         >
           <Icon as={LogOut} className="text-white w-4 h-4" />
           <RNText className="text-base font-semibold text-white">Log Out</RNText>

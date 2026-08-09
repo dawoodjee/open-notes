@@ -22,6 +22,8 @@ export interface AccountFieldProps {
    *  shift vertically as messages come and go. */
   status?: string;
   statusTone?: FieldTone;
+  /** Increment to pulse the border pink -- see the note on `flash` below. */
+  flash?: number;
 }
 
 /**
@@ -49,7 +51,27 @@ export default function AccountField({
   onCommit,
   status,
   statusTone = 'neutral',
+  flash = 0,
 }: AccountFieldProps) {
+  // Pulses the border pink twice when `flash` changes, then returns to normal.
+  //
+  // A counter rather than a boolean: the same field can be rejected twice in a
+  // row (tap close, tap close again), and a boolean that's already true won't
+  // re-trigger an effect -- the second tap would look like nothing happened.
+  // Bumping a number always registers as a change.
+  const [isFlashing, setIsFlashing] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!flash) return;
+    const timers = [true, false, true, false].map((on, i) =>
+      setTimeout(() => setIsFlashing(on), i * 160)
+    );
+    return () => {
+      timers.forEach(clearTimeout);
+      setIsFlashing(false);
+    };
+  }, [flash]);
+
   const statusColor =
     statusTone === 'ok'
       ? 'text-green-600'
@@ -59,7 +81,11 @@ export default function AccountField({
 
   return (
     <VStack className="gap-1.5">
-      <Input className="rounded-2xl h-12 pl-4 pr-1.5">
+      <Input
+        className={`rounded-2xl h-12 pl-4 pr-1.5 ${
+          isFlashing ? 'border-pink-500 bg-pink-50' : ''
+        }`}
+      >
         <InputField
           value={value}
           onChangeText={onChangeText}

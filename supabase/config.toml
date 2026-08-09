@@ -156,7 +156,20 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "http://127.0.0.1:3000"
+# Deliberately the app's own scheme, not the CLI default localhost URL.
+#
+# site_url is more than "your website": it's the fallback GoTrue redirects to
+# when it *can't* trust the requested redirect. The case that matters is the
+# five-minute OAuth state window -- finish signing in with Google after it
+# lapses and GoTrue rejects the state, which means it no longer has a verified
+# redirect target, so it falls back here. At the default 127.0.0.1:3000 that
+# stranded the user on a dead Safari page with no route back into the app.
+# Pointing it at notes:// means even the failure lands back in the app, where
+# lib/auth/oauth.ts reads the error off the URL and says what happened.
+#
+# Not a loosening of the allow-list: notes:// is already an accepted redirect
+# on the line below. This app has no website to fall back to.
+site_url = "notes://"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.

@@ -305,6 +305,13 @@ create publication powersync for table public.notes;
 -- Set via `alter role powersync_role password '<value>';` by hand, using the
 -- POWERSYNC_REPLICATION_PASSWORD value in the repo's root .env (gitignored)
 -- -- same pattern as the Google OAuth secret.
+--
+-- This has to be re-run after anything that recreates the database volume
+-- (`supabase db reset`, `supabase stop --no-backup`, deleting the volume).
+-- The role comes back from this migration with a null password, so PowerSync
+-- fails with `28P01 password authentication failed for user "powersync_role"`
+-- and replicates nothing -- while every other container looks perfectly
+-- healthy, which makes it a confusing failure to walk into cold.
 create role powersync_role with replication bypassrls login password null;
 grant usage on schema public to powersync_role;
 grant select on public.notes to powersync_role;

@@ -2,7 +2,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { UserIdentity } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
 import { withTimeout } from './withTimeout';
-import { REDIRECT_TO } from './oauth';
+import { REDIRECT_TO, openOAuthSession } from './oauth';
 
 export interface IdentitySummary {
   provider: string;
@@ -11,6 +11,9 @@ export interface IdentitySummary {
    *  from the account's primary email; linking a Google account under a
    *  different address is the main reason to link at all. */
   email: string | null;
+  /** The display name the provider gave us, used to seed an unset full name.
+   *  Google returns it under either key depending on the scopes granted. */
+  fullName: string | null;
 }
 
 export async function listIdentities(): Promise<IdentitySummary[]> {
@@ -25,6 +28,10 @@ export async function listIdentities(): Promise<IdentitySummary[]> {
     provider: i.provider,
     identityId: i.identity_id,
     email: (i.identity_data?.email as string | undefined) ?? null,
+    fullName:
+      (i.identity_data?.full_name as string | undefined) ??
+      (i.identity_data?.name as string | undefined) ??
+      null,
   }));
 }
 
@@ -38,15 +45,13 @@ export function canUnlink(identities: IdentitySummary[]): boolean {
   return identities.length > 1;
 }
 
-export class IdentityAlreadyLinkedError extends Error {
-  constructor(provider: string) {
-    super(
-      `That ${provider} account is already linked to another account. ` +
-        `Sign in to that account instead, or unlink it there first.`
-    );
-    this.name = 'IdentityAlreadyLinkedError';
-  }
-}
+// One class, not two. The same rejection can arrive from two places -- up
+// front from linkIdentity(), or later on the redirect URL once Google has
+// said who signed in -- and callers shouldn't have to know which. It lives in
+// oauth.ts because that's where the redirect parsing happens; importing the
+// other way round would make the two modules circular.
+export { OAuthIdentityAlreadyLinkedError as IdentityAlreadyLinkedError } from './oauthErrors';
+import { OAuthIdentityAlreadyLinkedError as IdentityAlreadyLinkedError } from './oauthErrors';
 
 /**
  * Link an additional sign-in provider to the account you're already signed
@@ -71,19 +76,14 @@ export async function linkGoogle(): Promise<'success' | 'cancel' | 'dismiss'> {
   }
   if (!data?.url) throw new Error('No OAuth URL returned');
 
-  const result = await WebBrowser.openAuthSessionAsync(data.url, REDIRECT_TO);
-
-  if (result.type === 'success') {
-    // The redirect carries an error rather than tokens when the identity is
-    // already spoken for -- the failure surfaces here, not from linkIdentity
-    // above, because the collision is only detected once the provider has
-    // actually identified who signed in.
-    if (result.url.includes('error') && /identity_already_exists|already.+linked/i.test(result.url)) {
-      throw new IdentityAlreadyLinkedError('Google');
-    }
-  }
-
-  return result.type as 'success' | 'cancel' | 'dismiss';
+  // Shared with first-time sign-in (lib/auth/oauth.ts). It inspects the
+  // redirect URL for the errors that arrive *as* a successful redirect --
+  // notably the identity already being spoken for, which surfaces here rather
+  // than from linkIdentity above, because the collision is only detectable
+  // once the provider has actually identified who signed in. It also raises
+  // OAuthExpiredError when the five-minute state window has run out.
+  const result = await openOAuthSession(data.url, 'Google');
+  return result.type;
 }
 
 export async function unlinkIdentity(identity: IdentitySummary): Promise<void> {
