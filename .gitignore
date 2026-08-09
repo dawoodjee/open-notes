@@ -44,5 +44,6 @@ app-example
 /ios
 /android
 
-# scratch db from scripts/verify-sync.ts (Stage 5 Phase 1)
-scripts/.verify-sync.db*
+# scratch dbs from the scripts/verify-*.ts checks (Stage 5). These are
+# throwaway local PowerSync databases recreated on every run.
+scripts/.verify-*.db*
