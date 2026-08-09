@@ -39,10 +39,37 @@ export const syncIssuesTable = new Table(
   { localOnly: true }
 );
 
+// The "common ancestor" a 3-way merge needs: for each note, the body exactly
+// as the server last had it. Updated after every successful push and every
+// pull, so it always represents the last point where this device and the
+// server agreed.
+//
+// Without it, resolving a conflict means choosing between two bodies with no
+// way to tell which parts each side actually changed -- that's last-write-
+// wins, and it silently discards a whole edit even when the two devices
+// touched completely different paragraphs. With it, we can diff local
+// against the ancestor to get *this device's edits*, then replay just those
+// onto the server's current text.
+//
+// localOnly for the same reason ui_state is: it describes what this
+// particular device last saw, so syncing it would be meaningless (and
+// there's no Postgres column for it). A device with no row here simply has
+// no ancestor and falls back to overwrite -- correct, since a missing
+// ancestor means we've never seen a server version to diff against.
+export const noteSyncBaseTable = new Table(
+  {
+    note_id: column.text,
+    body: column.text, // last body the server is known to have had
+    updated_at: column.text, // ISO-8601, when this ancestor was recorded
+  },
+  { localOnly: true }
+);
+
 export const AppSchema = new Schema({
   notes: notesTable,
   ui_state: uiStateTable,
   sync_issues: syncIssuesTable,
+  note_sync_base: noteSyncBaseTable,
 });
 
 export type Database = (typeof AppSchema)['types'];

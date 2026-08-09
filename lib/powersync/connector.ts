@@ -7,6 +7,8 @@ import {
 } from '@powersync/common';
 import { supabase } from '@/lib/supabase/client';
 import { getCurrentSession } from '@/lib/auth/currentUser';
+import { mergeBody } from './mergeBody';
+import { parseNoteContent } from '@/types/note';
 import * as Crypto from 'expo-crypto';
 
 const NOTES_TABLE = 'notes';
@@ -84,6 +86,42 @@ async function clearSyncIssue(database: AbstractPowerSyncDatabase, noteId: strin
   await database.execute(`delete from sync_issues where note_id = ?`, [noteId]);
 }
 
+// --- note_sync_base: the last body this device and the server agreed on ---
+//
+// Delete-then-insert rather than upsert, for the same reason as sync_issues:
+// PowerSync tables are SQLite views over internal storage, and views have no
+// ON CONFLICT. (See the project note on this -- it type-checks fine and then
+// fails on device, which is a nasty way to find out.)
+
+async function getSyncBase(
+  database: AbstractPowerSyncDatabase,
+  noteId: string
+): Promise<string | null> {
+  const row = await database.getOptional<{ body: string }>(
+    'SELECT body FROM note_sync_base WHERE note_id = ?',
+    [noteId]
+  );
+  return row?.body ?? null;
+}
+
+async function setSyncBase(
+  database: AbstractPowerSyncDatabase,
+  noteId: string,
+  body: string
+): Promise<void> {
+  await database.writeTransaction(async (tx) => {
+    await tx.execute('DELETE FROM note_sync_base WHERE note_id = ?', [noteId]);
+    await tx.execute(
+      'INSERT INTO note_sync_base (id, note_id, body, updated_at) VALUES (?, ?, ?, ?)',
+      [Crypto.randomUUID(), noteId, body, new Date().toISOString()]
+    );
+  });
+}
+
+async function clearSyncBase(database: AbstractPowerSyncDatabase, noteId: string): Promise<void> {
+  await database.execute('DELETE FROM note_sync_base WHERE note_id = ?', [noteId]);
+}
+
 async function uploadEntry(database: AbstractPowerSyncDatabase, entry: CrudEntry) {
   const table = supabase.from(NOTES_TABLE);
 
@@ -118,16 +156,69 @@ async function uploadEntry(database: AbstractPowerSyncDatabase, entry: CrudEntry
       // resurrect the row server-side.
       if (!row) break;
 
+      const payload: Record<string, any> = { id: entry.id, ...pickNotesColumns(row) };
+
+      // Before overwriting the server's body, check whether it moved since we
+      // last agreed with it -- another device may have edited this same note
+      // while we were offline. mergeBody replays only *our* changes onto
+      // their current text, so edits in different paragraphs both survive
+      // instead of the later upload silently erasing the earlier one.
+      const { data: remote, error: readError } = await table
+        .select('body')
+        .eq('id', entry.id)
+        .maybeSingle();
+      if (readError) throw readError;
+
+      if (remote && typeof payload.body === 'string') {
+        const base = await getSyncBase(database, entry.id);
+        const result = mergeBody(base, payload.body, remote.body ?? '');
+
+        if (result.outcome === 'partial') {
+          // Not fatal -- the merge still happened and most of the edit
+          // survived -- but the user has provably lost some text, which is
+          // exactly the kind of thing that must not live only in a dev log.
+          await recordSyncIssue(
+            database,
+            entry.id,
+            'Some offline edits to this note could not be merged with changes from another device.'
+          );
+        }
+
+        if (result.body !== payload.body) {
+          payload.body = result.body;
+          // Keep title consistent with the merged body -- title is derived
+          // from body (parseNoteContent), so shipping a merged body with the
+          // pre-merge title would make the two disagree.
+          payload.title = parseNoteContent(result.body).title;
+          // The merged text is also what this device should now show;
+          // otherwise the other device's changes stay invisible here until
+          // the next pull happens to overwrite them.
+          await database.execute('UPDATE notes SET body = ?, title = ? WHERE id = ?', [
+            payload.body,
+            payload.title,
+            entry.id,
+          ]);
+        }
+      }
+
       // upsert(), never a bare update(): a note that was blocked by RLS while
       // unowned was never inserted server-side, so its first successful write
       // is a PATCH against a row Postgres has never seen.
-      const { error } = await table.upsert({ id: entry.id, ...pickNotesColumns(row) });
+      const { error } = await table.upsert(payload);
       if (error) throw error;
+
+      // Record the new common ancestor only after the write is confirmed --
+      // claiming agreement we never actually reached would make the *next*
+      // merge diff against a version the server never had.
+      if (typeof payload.body === 'string') {
+        await setSyncBase(database, entry.id, payload.body);
+      }
       break;
     }
     case UpdateType.DELETE: {
       const { error } = await table.delete().eq('id', entry.id);
       if (error) throw error;
+      await clearSyncBase(database, entry.id);
       break;
     }
   }

@@ -26,6 +26,13 @@ import {
   suggestUsername,
 } from '@/lib/auth/username';
 import { getPendingWriteCount, getPendingWrites, logout } from '@/lib/auth/logout';
+import {
+  IdentitySummary,
+  canUnlink,
+  linkGoogle,
+  listIdentities,
+  unlinkIdentity,
+} from '@/lib/auth/identities';
 
 export interface ManageAccountDialogProps {
   isOpen: boolean;
@@ -53,6 +60,69 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
   useEffect(() => {
     if (isOpen) refetch();
   }, [isOpen, refetch]);
+
+  const [identities, setIdentities] = useState<IdentitySummary[] | null>(null);
+  const [identityBusy, setIdentityBusy] = useState(false);
+  const [identityError, setIdentityError] = useState<string | null>(null);
+
+  const loadIdentities = React.useCallback(async () => {
+    setIdentityError(null);
+    try {
+      setIdentities(await listIdentities());
+    } catch (err: any) {
+      setIdentities(null);
+      setIdentityError(err?.message ?? 'Could not load linked accounts');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) void loadIdentities();
+  }, [isOpen, loadIdentities]);
+
+  const googleIdentity = identities?.find((i) => i.provider === 'google') ?? null;
+
+  async function handleLinkGoogle() {
+    setIdentityBusy(true);
+    setIdentityError(null);
+    try {
+      const result = await linkGoogle();
+      if (result === 'success') await loadIdentities();
+    } catch (err: any) {
+      setIdentityError(err?.message ?? 'Could not link that account');
+    } finally {
+      setIdentityBusy(false);
+    }
+  }
+
+  function handleUnlinkGoogle() {
+    if (!googleIdentity) return;
+    // Unlinking removes a way into the account, so it gets the same
+    // explicit-confirmation treatment as signing out with unsynced work --
+    // both are easy to tap and annoying to undo.
+    Alert.alert(
+      'Unlink Google?',
+      `You'll no longer be able to sign in with ${googleIdentity.email ?? 'this Google account'}. Your notes aren't affected.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unlink',
+          style: 'destructive',
+          onPress: async () => {
+            setIdentityBusy(true);
+            setIdentityError(null);
+            try {
+              await unlinkIdentity(googleIdentity);
+              await loadIdentities();
+            } catch (err: any) {
+              setIdentityError(err?.message ?? 'Could not unlink that account');
+            } finally {
+              setIdentityBusy(false);
+            }
+          },
+        },
+      ]
+    );
+  }
 
   // Seed fields from the loaded profile. If username is still unset,
   // pre-fill (not auto-submit) a suggestion: sanitized full_name if one
@@ -263,6 +333,67 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
           <VStack className="gap-1.5">
             <RNText className="text-xs font-semibold text-gray-500 uppercase">Email</RNText>
             <RNText className="text-sm text-gray-500">{session.user.email}</RNText>
+          </VStack>
+
+          <VStack className="gap-1.5">
+            <RNText className="text-xs font-semibold text-gray-500 uppercase">
+              Sign-in methods
+            </RNText>
+
+            {/* Email OTP is always present -- it's how the account exists at
+                all -- so it's shown as a fact, not something to manage. */}
+            <HStack className="items-center justify-between py-1">
+              <RNText className="text-sm text-gray-700">Email code</RNText>
+              <RNText className="text-xs text-gray-400">Always on</RNText>
+            </HStack>
+
+            <HStack className="items-center justify-between py-1">
+              <VStack className="flex-1">
+                <RNText className="text-sm text-gray-700">Google</RNText>
+                {googleIdentity?.email && (
+                  <RNText className="text-xs text-gray-400">{googleIdentity.email}</RNText>
+                )}
+              </VStack>
+
+              {identities === null ? (
+                <RNText className="text-xs text-gray-400">…</RNText>
+              ) : googleIdentity ? (
+                <Pressable
+                  onPress={handleUnlinkGoogle}
+                  disabled={identityBusy || !canUnlink(identities)}
+                  className="px-3 py-1.5 rounded-md active:bg-gray-100 disabled:opacity-40"
+                >
+                  <RNText className="text-xs font-medium text-red-600">Unlink</RNText>
+                </Pressable>
+              ) : (
+                <Pressable
+                  onPress={handleLinkGoogle}
+                  disabled={identityBusy}
+                  className="px-3 py-1.5 rounded-md border border-gray-300 active:bg-gray-50 disabled:opacity-40"
+                >
+                  <RNText className="text-xs font-medium text-gray-800">Link</RNText>
+                </Pressable>
+              )}
+            </HStack>
+
+            {/* Explains a disabled Unlink rather than leaving it inert and
+                unexplained -- Supabase refuses to remove an account's last
+                identity, and a greyed-out button with no reason is worse
+                than the rejection it's preventing. */}
+            {googleIdentity && identities !== null && !canUnlink(identities) && (
+              <RNText className="text-xs text-gray-400">
+                This is your only sign-in method, so it can't be unlinked.
+              </RNText>
+            )}
+
+            <HStack className="items-center justify-between py-1">
+              <RNText className="text-sm text-gray-400">Apple</RNText>
+              <RNText className="text-xs text-gray-400">Not available yet</RNText>
+            </HStack>
+
+            {identityError && (
+              <RNText className="text-xs text-red-500">{identityError}</RNText>
+            )}
           </VStack>
 
           <Pressable

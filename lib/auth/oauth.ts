@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase/client';
 // Must exactly match an entry in supabase/config.toml's
 // additional_redirect_urls (already registered there in Stage 4,
 // specifically for this) and app.json's "scheme".
-const REDIRECT_TO = 'notes://';
+export const REDIRECT_TO = 'notes://';
 
 // RN has no browser location/hash the way a web app does -- the tokens come
 // back appended to the redirect URL as a fragment (#access_token=...), and
