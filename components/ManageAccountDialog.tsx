@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, View, Text as RNText } from 'react-native';
+import { Alert, Text as RNText } from 'react-native';
 import {
   Modal,
   ModalBackdrop,
@@ -467,10 +467,12 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
         {/* flex-1 is what lets the Log Out button's mt-auto push it to the
             bottom of the sheet instead of sitting directly under the last
             row with dead space beneath it. */}
-        {/* gap-3 throughout, on the field groups and on the separator alike,
-            so every block in the sheet is separated by the same 12px -- the
-            separator sits centred in an identical gap rather than in a wider
-            section break of its own. */}
+        {/* Note that gap-3 here does NOT space these children apart, however
+            much it looks like it should: ModalBody is a ScrollView, NativeWind
+            maps className to the component's own style, and a ScrollView lays
+            its children out in an internal content container rather than in
+            itself. The spacing you see comes from the VStacks below. Left in
+            place only because pt/pb do apply. */}
         <ModalBody className="flex-1 gap-3 pt-4 pb-6">
           {profileError && (
             <HStack className="items-center justify-between bg-red-50 rounded-2xl px-4 py-3">
@@ -524,12 +526,9 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
             />
           </VStack>
 
-          {/* Divides "who you are" from "how you sign in" -- two different
-              kinds of setting that otherwise read as one long list. It's a
-              plain sibling of the field groups, so ModalBody's gap-3 puts the
-              same 12px above and below it as sits between any two fields; no
-              margin of its own, which would make the spacing asymmetric. */}
-          {/*<View className="h-px bg-gray-200" />*/}
+          {/* No rule between the fields and the sign-in methods: the change in
+              row shape already separates them, and a line made the sheet look
+              busier without telling you anything the layout doesn't. */}
 
           {/* Email sign-in isn't listed. It's always available and can't be
               turned off, so a row for it would be inert -- and the address it

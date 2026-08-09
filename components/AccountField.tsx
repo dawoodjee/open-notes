@@ -1,5 +1,5 @@
 import React from 'react';
-import { Text as RNText } from 'react-native';
+import { Animated, Easing, StyleSheet, Text as RNText, View } from 'react-native';
 import { Input, InputField, InputSlot } from '@/components/ui/input';
 import { VStack } from '@/components/ui/vstack';
 import { Icon } from '@/components/ui/icon';
@@ -53,24 +53,56 @@ export default function AccountField({
   statusTone = 'neutral',
   flash = 0,
 }: AccountFieldProps) {
-  // Pulses the border pink twice when `flash` changes, then returns to normal.
+  // Pulses a pink border twice when `flash` changes, then fades back out.
   //
   // A counter rather than a boolean: the same field can be rejected twice in a
   // row (tap close, tap close again), and a boolean that's already true won't
   // re-trigger an effect -- the second tap would look like nothing happened.
   // Bumping a number always registers as a change.
-  const [isFlashing, setIsFlashing] = React.useState(false);
+  //
+  // Animated rather than toggling a class on a timer. Snapping between two
+  // colours every 160ms read as a glitch rather than a signal; easing the
+  // opacity in and out over about a second is long enough for the eye to
+  // follow to the field that's actually the problem, which is the whole job
+  // of this animation.
+  //
+  // The pink lives on an overlay rather than on the Input itself. The input's
+  // own border is styled by Gluestack and changes with focus state, so
+  // animating it would mean fighting that; a sibling layer on top composites
+  // cleanly and can't disturb the layout. pointerEvents="none" keeps it from
+  // swallowing taps meant for the field beneath.
+  //
+  // useNativeDriver works here only because this animates opacity. Layout and
+  // colour properties can't cross to the native thread, so the same trick on
+  // borderColor would have to run in JS and would stutter under load --
+  // another reason the pink is a separate layer being faded rather than the
+  // input's own border being recoloured.
+  const flashOpacity = React.useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
     if (!flash) return;
-    const timers = [true, false, true, false].map((on, i) =>
-      setTimeout(() => setIsFlashing(on), i * 160)
-    );
+    const pulse = (toValue: number, duration: number) =>
+      Animated.timing(flashOpacity, {
+        toValue,
+        duration,
+        easing: Easing.inOut(Easing.ease),
+        useNativeDriver: true,
+      });
+
+    // Two pulses, ~1.1s total, with a longer tail on the last fade so it
+    // settles rather than stopping dead.
+    const animation = Animated.sequence([
+      pulse(1, 260),
+      pulse(0, 240),
+      pulse(1, 260),
+      pulse(0, 380),
+    ]);
+    animation.start();
     return () => {
-      timers.forEach(clearTimeout);
-      setIsFlashing(false);
+      animation.stop();
+      flashOpacity.setValue(0);
     };
-  }, [flash]);
+  }, [flash, flashOpacity]);
 
   const statusColor =
     statusTone === 'ok'
@@ -81,31 +113,35 @@ export default function AccountField({
 
   return (
     <VStack className="gap-1.5">
-      <Input
-        className={`rounded-2xl h-12 pl-4 pr-1.5 ${
-          isFlashing ? 'border-pink-500 bg-pink-50' : ''
-        }`}
-      >
-        <InputField
-          value={value}
-          onChangeText={onChangeText}
-          placeholder={placeholder}
-          autoCapitalize={autoCapitalize}
-          keyboardType={keyboardType}
-          className="text-base"
+      <View>
+        <Input className="rounded-2xl h-12 pl-4 pr-1.5">
+          <InputField
+            value={value}
+            onChangeText={onChangeText}
+            placeholder={placeholder}
+            autoCapitalize={autoCapitalize}
+            keyboardType={keyboardType}
+            className="text-base"
+          />
+          {showAction && (
+            <InputSlot
+              onPress={canCommit ? onCommit : undefined}
+              disabled={!canCommit}
+              className={`w-9 h-9 rounded-xl items-center justify-center ${
+                canCommit ? 'bg-lime-500 active:bg-lime-600' : 'bg-gray-300'
+              }`}
+            >
+              <Icon as={canCommit ? Check : X} className="text-white w-4 h-4" />
+            </InputSlot>
+          )}
+        </Input>
+
+        <Animated.View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFillObject, { opacity: flashOpacity }]}
+          className="rounded-2xl border-2 border-pink-500"
         />
-        {showAction && (
-          <InputSlot
-            onPress={canCommit ? onCommit : undefined}
-            disabled={!canCommit}
-            className={`w-9 h-9 rounded-xl items-center justify-center ${
-              canCommit ? 'bg-lime-500 active:bg-lime-600' : 'bg-gray-300'
-            }`}
-          >
-            <Icon as={canCommit ? Check : X} className="text-white w-4 h-4" />
-          </InputSlot>
-        )}
-      </Input>
+      </View>
 
       <RNText className={`text-xs px-1 h-4 ${statusColor}`}>{status ?? ''}</RNText>
     </VStack>
