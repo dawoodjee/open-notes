@@ -70,3 +70,6 @@ Don't read node_modules/, android/, ios/, .expo/, assets/, or lock files unless 
 
 ## Follow-up questions
 If I ask "why" or push back, that's a continuation of the conversation, not a new task — answer in chat and only touch code again once I say to proceed.
+
+## Environments
+There are two backends — a wipeable local dev stack and a live cloud stack holding my real notes. Read `docs/two-stacks.md` before touching server config, migrations, sync rules, or builds.
