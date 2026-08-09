@@ -490,7 +490,7 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
               plain sibling of the field groups, so ModalBody's gap-3 puts the
               same 12px above and below it as sits between any two fields; no
               margin of its own, which would make the spacing asymmetric. */}
-          <View className="h-px bg-gray-200" />
+          {/*<View className="h-px bg-gray-200" />*/}
 
           {/* Email sign-in isn't listed. It's always available and can't be
               turned off, so a row for it would be inert -- and the address it
