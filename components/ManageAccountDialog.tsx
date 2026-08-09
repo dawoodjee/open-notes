@@ -283,24 +283,28 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
     if (!source) return;
     identitySeededRef.current = true;
 
-    // Still gated on the name being unset, even though this only runs for an
-    // account with no username. Setup can be interrupted: the full name
-    // autosaves as you type, the username does not (it needs the tick), so
-    // "typed a name, killed the app, came back" leaves a saved name and no
-    // username. Without this check the provider's name would overwrite the
-    // one they actually typed.
+    // The name and the username are seeded on separate conditions, because
+    // setup can be interrupted halfway. The full name autosaves as you type;
+    // the username doesn't (it needs the tick). So "typed a name, killed the
+    // app, came back" leaves a saved name and no username -- and on reopening,
+    // the name must NOT be overwritten by the provider's version, while the
+    // username still needs suggesting. Gating both on the same condition gets
+    // one of those two cases wrong whichever way you pick.
     if (!profile.full_name && source.fullName) {
       // Routed through the same handler as typing, so the username cascade
       // and the debounced autosave both happen exactly as they normally do.
       handleFullNameChange(source.fullName);
+    }
 
-      // ...then replace the cascaded guess with one that's actually free.
-      // "Adam Dawoodjee" sanitizes to adam_dawoodjee for everyone called
-      // that, so the very first thing a new user sees would otherwise be
-      // their own name marked "taken", with a grey tick and no suggestion of
-      // what to do about a value they never chose.
+    // Whatever name we now have -- theirs if they typed one, the provider's
+    // otherwise -- turned into a username that's actually free. "Adam
+    // Dawoodjee" sanitizes to adam_dawoodjee for everyone called that, so
+    // without this the first thing a new user sees is their own name marked
+    // "taken", with a grey tick and no hint about a value they never chose.
+    const nameForUsername = profile.full_name || source.fullName;
+    if (nameForUsername) {
       void suggestAvailableUsername(
-        sanitizeUsername(source.fullName.replace(/\s+/g, '_')),
+        sanitizeUsername(nameForUsername.replace(/\s+/g, '_')),
         session?.user.id
       ).then((free) => {
         // Only if they haven't started typing in the meantime -- the check is
