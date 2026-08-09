@@ -1,4 +1,4 @@
-import { powersync } from '@/lib/powersync/db';
+import { getPowerSync } from '@/lib/powersync/db';
 import { supabase } from '@/lib/supabase/client';
 
 export interface PendingWrite {
@@ -18,7 +18,7 @@ export interface PendingWrite {
 // Both keys are accepted below so a future SDK change in either direction
 // can't silently reintroduce a data-loss path.
 export async function getPendingWrites(): Promise<PendingWrite[]> {
-  const rows = await powersync.getAll<{ data: string }>('SELECT data FROM ps_crud');
+  const rows = await getPowerSync().getAll<{ data: string }>('SELECT data FROM ps_crud');
 
   const noteIds = new Set<string>();
   for (const row of rows) {
@@ -39,7 +39,7 @@ export async function getPendingWrites(): Promise<PendingWrite[]> {
   const placeholders = Array.from(noteIds)
     .map(() => '?')
     .join(',');
-  const titled = await powersync.getAll<{ id: string; title: string }>(
+  const titled = await getPowerSync().getAll<{ id: string; title: string }>(
     `SELECT id, title FROM notes WHERE id IN (${placeholders})`,
     Array.from(noteIds)
   );
@@ -52,7 +52,7 @@ export async function getPendingWrites(): Promise<PendingWrite[]> {
 }
 
 export async function getPendingWriteCount(): Promise<number> {
-  const row = await powersync.get<{ count: number }>('SELECT count(*) as count FROM ps_crud');
+  const row = await getPowerSync().get<{ count: number }>('SELECT count(*) as count FROM ps_crud');
   return row.count;
 }
 
@@ -69,7 +69,7 @@ export async function getPendingWriteCount(): Promise<number> {
  * it trusts the caller already got consent.
  */
 export async function logout(): Promise<void> {
-  await powersync.disconnectAndClear();
+  await getPowerSync().disconnectAndClear();
 
   // A global sign-out revokes the refresh token server-side, which is the
   // stronger guarantee and the default. But it needs the network, and

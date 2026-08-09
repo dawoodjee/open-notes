@@ -22,7 +22,7 @@ import {
   Wrench,
   AlertTriangle,
 } from 'lucide-react-native';
-import { powersync } from '@/lib/powersync/db';
+import { getPowerSync } from '@/lib/powersync/db';
 
 export interface SettingsDialogProps {
   isOpen: boolean;
@@ -66,7 +66,7 @@ function AdvancedView({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     const abortController = new AbortController();
-    powersync.watch(
+    getPowerSync().watch(
       'SELECT id, note_id, message, occurred_at FROM sync_issues ORDER BY occurred_at DESC',
       [],
       {
@@ -79,7 +79,7 @@ function AdvancedView({ onBack }: { onBack: () => void }) {
   }, []);
 
   const handleClear = async () => {
-    await powersync.execute('DELETE FROM sync_issues');
+    await getPowerSync().execute('DELETE FROM sync_issues');
   };
 
   return (

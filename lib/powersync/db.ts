@@ -4,20 +4,71 @@ import * as Crypto from 'expo-crypto';
 import { AppSchema } from './schema';
 import { connector } from './connector';
 import { getCurrentUserId } from '@/lib/auth/currentUser';
+import { getDatabaseKey } from '@/lib/crypto/vault';
+import { ENCRYPTED_DB_FILENAME, migrateToEncrypted } from './migrateToEncrypted';
 
-export const powersync = new PowerSyncDatabase({
-  schema: AppSchema,
-  database: {
-    dbFilename: 'notes.db',
-  },
-});
+// Note the "-v2": the encrypted database is a different file from the
+// pre-Stage-6 plaintext one. See migrateToEncrypted.ts for why the format
+// change gets a new filename instead of an in-place conversion.
+export const DB_FILENAME = ENCRYPTED_DB_FILENAME;
 
-let isInitialized = false;
+/**
+ * The database instance is built lazily, not at module load, and that's a
+ * Stage 6 requirement rather than a style choice.
+ *
+ * SQLCipher needs the encryption key at open time, and that key is derived
+ * from the vault's data key -- which doesn't exist until the user has entered
+ * their PIN. A module-level `new PowerSyncDatabase(...)` would run on import,
+ * long before any of that, so there would be no key to give it.
+ */
+let instance: PowerSyncDatabase | null = null;
 
+export function getPowerSync(): PowerSyncDatabase {
+  if (!instance) {
+    throw new Error('PowerSync is not initialised yet -- unlock the vault first.');
+  }
+  return instance;
+}
+
+export function isPowerSyncReady(): boolean {
+  return instance !== null;
+}
+
+/**
+ * Safe to call repeatedly; only the first call does anything.
+ *
+ * Must run AFTER the vault is unlocked. getDatabaseKey() throws otherwise,
+ * which is the behaviour we want -- opening the database unencrypted because
+ * a key wasn't ready is exactly the silent failure this stage exists to
+ * prevent.
+ */
 export async function initPowerSync(): Promise<void> {
-  if (isInitialized) return;
-  await powersync.init();
-  isInitialized = true;
+  if (instance) return;
+
+  // Converts a pre-Stage-6 plaintext notes.db, if one is present. SQLCipher
+  // cannot open an unencrypted file, so without this every note written
+  // before this stage would be unreachable on first launch.
+  await migrateToEncrypted(getDatabaseKey());
+
+  instance = new PowerSyncDatabase({
+    schema: AppSchema,
+    database: {
+      dbFilename: DB_FILENAME,
+      // Note the nesting: sqliteOptions belongs to the op-sqlite adapter's
+      // open options, NOT to PowerSyncDatabase's root options. Put it at the
+      // top level and TypeScript rejects it; the encryption would simply
+      // never be configured.
+      //
+      // Whole-file encryption: SQLCipher works at the page level, so notes,
+      // ui_state, sync_issues and note_sync_base are all covered by this one
+      // option -- there is nothing table-specific to configure.
+      sqliteOptions: {
+        encryptionKey: getDatabaseKey(),
+      },
+    },
+  });
+
+  await instance.init();
 }
 
 // Not called from initPowerSync -- connecting is an auth-state decision
@@ -25,7 +76,7 @@ export async function initPowerSync(): Promise<void> {
 // unconditionally at app boot. The app keeps working fully offline/local-only
 // without this ever being called, exactly as it did before Stage 5.
 export async function connectPowerSync(): Promise<void> {
-  await powersync.connect(connector);
+  await getPowerSync().connect(connector);
   startSyncBaseTracking();
 }
 
@@ -55,7 +106,7 @@ function startSyncBaseTracking(): void {
   if (syncBaseTrackingStarted) return;
   syncBaseTrackingStarted = true;
 
-  powersync.registerListener({
+  getPowerSync().registerListener({
     statusChanged: (status) => {
       if (!status.connected || status.dataFlowStatus?.uploading) return;
       void refreshSyncBaseIfSettled();
@@ -69,16 +120,16 @@ async function refreshSyncBaseIfSettled(): Promise<void> {
   if (refreshInFlight) return;
   refreshInFlight = true;
   try {
-    const pending = await powersync.get<{ count: number }>(
+    const pending = await getPowerSync().get<{ count: number }>(
       'SELECT count(*) as count FROM ps_crud'
     );
     if (pending.count > 0) return;
 
-    const notes = await powersync.getAll<{ id: string; body: string }>(
+    const notes = await getPowerSync().getAll<{ id: string; body: string }>(
       'SELECT id, body FROM notes'
     );
 
-    await powersync.writeTransaction(async (tx) => {
+    await getPowerSync().writeTransaction(async (tx) => {
       for (const note of notes) {
         const existing = await tx.getOptional<{ body: string }>(
           'SELECT body FROM note_sync_base WHERE note_id = ?',
@@ -121,12 +172,12 @@ async function refreshSyncBaseIfSettled(): Promise<void> {
  * would happily hand the previous account's notes to the new one.
  */
 export async function claimUnownedNotes(userId: string): Promise<number> {
-  const unowned = await powersync.getAll<{ id: string }>(
+  const unowned = await getPowerSync().getAll<{ id: string }>(
     'SELECT id FROM notes WHERE user_id IS NULL'
   );
   if (unowned.length === 0) return 0;
 
-  await powersync.execute('UPDATE notes SET user_id = ? WHERE user_id IS NULL', [userId]);
+  await getPowerSync().execute('UPDATE notes SET user_id = ? WHERE user_id IS NULL', [userId]);
   return unowned.length;
 }
 
@@ -159,7 +210,7 @@ export async function createNoteInDB(): Promise<Note> {
   // the next checkpoint because the server never echoes it back (it isn't in
   // any sync bucket). The note vanishes seconds after being created.
   const userId = getCurrentUserId();
-  await powersync.execute(
+  await getPowerSync().execute(
     `INSERT INTO notes (id, user_id, body, title, created_at, updated_at, is_trashed)
      VALUES (?, ?, ?, ?, ?, ?, 0)`,
     [id, userId, body, title, now, now]
@@ -180,7 +231,7 @@ export async function updateNoteInDB(id: string, body: string): Promise<void> {
   const { title } = parseNoteContent(body);
   const now = new Date().toISOString();
 
-  await powersync.execute(
+  await getPowerSync().execute(
     `UPDATE notes SET body = ?, title = ?, updated_at = ? WHERE id = ?`,
     [body, title, now, id]
   );
@@ -189,7 +240,7 @@ export async function updateNoteInDB(id: string, body: string): Promise<void> {
 // updated_at doubles as "when was this trashed" — see types/note.ts.
 export async function trashNoteInDB(id: string): Promise<void> {
   const now = new Date().toISOString();
-  await powersync.execute(
+  await getPowerSync().execute(
     `UPDATE notes SET is_trashed = 1, updated_at = ? WHERE id = ?`,
     [now, id]
   );
@@ -197,18 +248,18 @@ export async function trashNoteInDB(id: string): Promise<void> {
 
 export async function restoreNoteInDB(id: string): Promise<void> {
   const now = new Date().toISOString();
-  await powersync.execute(
+  await getPowerSync().execute(
     `UPDATE notes SET is_trashed = 0, updated_at = ? WHERE id = ?`,
     [now, id]
   );
 }
 
 export async function permanentDeleteNoteInDB(id: string): Promise<void> {
-  await powersync.execute('DELETE FROM notes WHERE id = ?', [id]);
+  await getPowerSync().execute('DELETE FROM notes WHERE id = ?', [id]);
 }
 
 export async function emptyTrashInDB(): Promise<void> {
-  await powersync.execute('DELETE FROM notes WHERE is_trashed = 1');
+  await getPowerSync().execute('DELETE FROM notes WHERE is_trashed = 1');
 }
 
 export interface UiState {
@@ -217,7 +268,7 @@ export interface UiState {
 }
 
 export async function getUiState(): Promise<UiState> {
-  const row = await powersync.getOptional<any>(
+  const row = await getPowerSync().getOptional<any>(
     'SELECT last_opened_note_id, editor_scroll_offset FROM ui_state WHERE id = ?',
     ['singleton']
   );
@@ -232,7 +283,7 @@ export async function getUiState(): Promise<UiState> {
 // storage), which support INSERT/UPDATE/DELETE but not UPSERT — so this
 // read-merge-writes rather than using ON CONFLICT.
 export async function saveUiState(partial: Partial<UiState>): Promise<void> {
-  await powersync.writeTransaction(async (tx) => {
+  await getPowerSync().writeTransaction(async (tx) => {
     const existing = await tx.getOptional<any>(
       'SELECT last_opened_note_id, editor_scroll_offset FROM ui_state WHERE id = ?',
       ['singleton']

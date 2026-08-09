@@ -12,7 +12,7 @@ import { HStack } from '@/components/ui/hstack';
 import { initialNotesState, notesReducer } from '@/types/notesStore';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  powersync,
+  getPowerSync,
   initPowerSync,
   mapRowToNote,
   createNoteInDB,
@@ -78,7 +78,7 @@ export default function NotesLayout() {
         const uiState = await getUiState();
         restoredEditorScrollRef.current = uiState.editorScrollOffset;
         if (uiState.lastOpenedNoteId) {
-          const stillExists = await powersync.getOptional<{ id: string }>(
+          const stillExists = await getPowerSync().getOptional<{ id: string }>(
             'SELECT id FROM notes WHERE id = ?',
             [uiState.lastOpenedNoteId]
           );
@@ -87,7 +87,7 @@ export default function NotesLayout() {
           }
         }
 
-        powersync.watch(
+        getPowerSync().watch(
           'SELECT * FROM notes ORDER BY updated_at DESC',
           [],
           {

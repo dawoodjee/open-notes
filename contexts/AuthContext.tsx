@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
-import { powersync, connectPowerSync, claimUnownedNotes } from '@/lib/powersync/db';
+import { getPowerSync, connectPowerSync, claimUnownedNotes } from '@/lib/powersync/db';
 import { getCurrentSession, setCurrentSession } from '@/lib/auth/currentUser';
 
 interface AuthContextValue {
@@ -28,11 +28,11 @@ export function useAuth() {
 let inFlight: Promise<void> | null = null;
 
 /**
- * The ONLY function in this codebase allowed to call powersync.connect() or
+ * The ONLY function in this codebase allowed to call getPowerSync().connect() or
  * change which session is "current" locally. Every path that can produce a
  * session -- OTP verify, OAuth callback, app-boot restore, and Supabase's own
  * hourly TOKEN_REFRESHED event -- funnels through this via onAuthStateChange
- * below. No other file calls powersync.connect() or writes session state
+ * below. No other file calls getPowerSync().connect() or writes session state
  * directly (grep for `.connect(` to confirm -- lib/powersync/db.ts's
  * connectPowerSync() has exactly one caller: this function).
  *
@@ -61,7 +61,7 @@ async function becomeAuthenticatedLocally(
     const isFirstConnect = previousSession === null;
 
     if (isAccountSwitch) {
-      await powersync.disconnectAndClear();
+      await getPowerSync().disconnectAndClear();
     }
 
     setCurrentSession(newSession);
@@ -122,7 +122,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await becomeAuthenticatedLocally(newSession, setSession);
       } else if (event === 'SIGNED_OUT' || (event === 'INITIAL_SESSION' && !newSession)) {
         // logout() (see lib/auth/logout.ts) already ran
-        // powersync.disconnectAndClear() before calling supabase.auth.signOut()
+        // getPowerSync().disconnectAndClear() before calling supabase.auth.signOut()
         // -- by the time this fires, local state is already clean. This just
         // mirrors that into React/module state.
         setCurrentSession(null);

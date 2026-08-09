@@ -86,6 +86,20 @@
     "ws": "^8.21.3"
   },
   "private": true,
+  "//op-sqlite": [
+    "Compile-time switch, read by node_modules/@op-engineering/op-sqlite/op-sqlite.podspec",
+    "(line 55) and the Android CMake equivalent. It swaps the bundled stock SQLite",
+    "amalgamation for SQLCipher's and defines OP_SQLITE_USE_SQLCIPHER=1.",
+    "",
+    "Changing this REQUIRES a native rebuild -- pod install + expo run:ios. Metro",
+    "reloads will not pick it up. Without the flag, the encryptionKey passed in",
+    "lib/powersync/db.ts is accepted and silently ignored, and every note is stored",
+    "in the clear. lib/powersync/migrateToEncrypted.ts asserts isSQLCipher() at",
+    "startup so that misconfiguration fails loudly instead."
+  ],
+  "op-sqlite": {
+    "sqlcipher": true
+  },
   "allowScripts": {
     "fsevents@2.3.3": true,
     "unrs-resolver@1.12.2": true,
