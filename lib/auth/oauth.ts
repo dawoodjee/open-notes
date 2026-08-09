@@ -91,10 +91,30 @@ async function createSessionFromUrl(url: string) {
   if (setError) throw setError;
 }
 
+/**
+ * Google's `prompt=select_account` -- always show the account chooser.
+ *
+ * Without it the flow silently reuses whichever Google account the system
+ * browser is already signed into: tapping the button just... completes, with
+ * no visible choice. That's wrong twice over. Someone with a personal and a
+ * work account can't reach the one they meant, and "Link" in particular reads
+ * as broken when it returns instantly having picked for you.
+ *
+ * The reason it happens is that the OAuth flow runs in the shared system
+ * browser, which carries Google's existing cookies. This asks Google to show
+ * the picker regardless of them. (`prompt=consent` would also re-ask for
+ * scope approval, which isn't wanted -- we only want the account choice.)
+ */
+export const GOOGLE_PROMPT = { prompt: 'select_account' };
+
 export async function signInWithGoogle() {
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
-    options: { redirectTo: REDIRECT_TO, skipBrowserRedirect: true },
+    options: {
+      redirectTo: REDIRECT_TO,
+      skipBrowserRedirect: true,
+      queryParams: GOOGLE_PROMPT,
+    },
   });
   if (error) throw error;
   if (!data.url) throw new Error('No OAuth URL returned');

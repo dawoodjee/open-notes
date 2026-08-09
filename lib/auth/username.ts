@@ -20,17 +20,38 @@ export function sanitizeUsername(raw: string): string {
     .slice(0, 20);
 }
 
-// Not copied raw from full_name (a display label with no charset
-// restriction) -- sanitized through the same rules a manually-typed username
-// would need to satisfy, then treated exactly like any other candidate: a
-// starting suggestion the availability check and unique-violation fallback
-// both still apply to.
-export function suggestUsername(fullName: string | null, email: string): string {
-  const fromFullName = fullName ? sanitizeUsername(fullName.replace(/\s+/g, '_')) : '';
-  if (fromFullName.length >= 3) return fromFullName;
+/**
+ * Turn a starting suggestion into one that's actually free, by trying
+ * `base`, `base2`, `base3`... until the availability check clears.
+ *
+ * Only for values the app proposes on the user's behalf -- notably the
+ * username seeded from a provider's full name at signup. A suggestion that
+ * lands on a taken name is a dead end: the tick is grey, the message says
+ * "taken", and nothing tells the person what to do about a name they never
+ * typed. Common real names collide constantly, so this isn't an edge case.
+ *
+ * Never used for what someone types themselves. Silently rewriting a chosen
+ * username to `adam_dawoodjee3` would be worse than telling them it's taken.
+ *
+ * Gives up after a few tries and returns the last candidate rather than
+ * looping: the field stays editable, the availability check still runs, and
+ * the unique violation on save is still the real guarantee.
+ */
+export async function suggestAvailableUsername(
+  base: string,
+  excludeUserId?: string
+): Promise<string> {
+  const root = sanitizeUsername(base);
+  if (root.length < 3) return root;
 
-  const localPart = email.split('@')[0] ?? '';
-  return sanitizeUsername(localPart);
+  for (let n = 1; n <= 5; n++) {
+    // Truncate before appending, so a 20-char base doesn't produce an
+    // over-length candidate that the DB's length constraint would reject.
+    const suffix = n === 1 ? '' : String(n);
+    const candidate = root.slice(0, 20 - suffix.length) + suffix;
+    if (await checkUsernameAvailable(candidate, excludeUserId)) return candidate;
+  }
+  return root;
 }
 
 // UX only -- a fast, non-authoritative hint while typing. The DB's unique

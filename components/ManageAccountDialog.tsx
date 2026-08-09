@@ -22,6 +22,7 @@ import {
   checkUsernameAvailable,
   formatRateLimitRemaining,
   sanitizeUsername,
+  suggestAvailableUsername,
 } from '@/lib/auth/username';
 import { getPendingWriteCount, getPendingWrites, logout } from '@/lib/auth/logout';
 import {
@@ -49,12 +50,11 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
   const [usernameError, setUsernameError] = useState<string | null>(null);
   const [fullNameStatus, setFullNameStatus] = useState<FieldStatus>('idle');
 
-  // This component mounts as soon as login happens (AvatarMenuTrigger
-  // renders it whenever isLoggedIn is true, not only while open), which can
-  // race ahead of the post-signup username prompt in app/enable-sync.tsx --
-  // both fire off the same SIGNED_IN event. Refetching on every open (not
-  // just once at mount) means the fields never show a stale pre-prompt
-  // snapshot from that race.
+  // This component mounts as soon as login happens (AvatarMenuTrigger renders
+  // it whenever isLoggedIn is true, not only while open), so a fetch at mount
+  // can land before the profile row exists or before a sign-in has finished
+  // populating it. Refetching on every open, rather than once at mount, means
+  // the fields always reflect the account as it is right now.
   useEffect(() => {
     if (isOpen) refetch();
   }, [isOpen, refetch]);
@@ -293,6 +293,20 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
       // Routed through the same handler as typing, so the username cascade
       // and the debounced autosave both happen exactly as they normally do.
       handleFullNameChange(source.fullName);
+
+      // ...then replace the cascaded guess with one that's actually free.
+      // "Adam Dawoodjee" sanitizes to adam_dawoodjee for everyone called
+      // that, so the very first thing a new user sees would otherwise be
+      // their own name marked "taken", with a grey tick and no suggestion of
+      // what to do about a value they never chose.
+      void suggestAvailableUsername(
+        sanitizeUsername(source.fullName.replace(/\s+/g, '_')),
+        session?.user.id
+      ).then((free) => {
+        // Only if they haven't started typing in the meantime -- the check is
+        // a network round-trip, and their choice always wins over ours.
+        setUsername((current) => (usernameEdited ? current : free));
+      });
     }
     if (!session?.user.email && source.email) {
       setEmail(source.email);

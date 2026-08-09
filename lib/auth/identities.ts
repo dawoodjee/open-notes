@@ -2,7 +2,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { UserIdentity } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
 import { withTimeout } from './withTimeout';
-import { REDIRECT_TO, openOAuthSession } from './oauth';
+import { GOOGLE_PROMPT, REDIRECT_TO, openOAuthSession } from './oauth';
 
 export interface IdentitySummary {
   provider: string;
@@ -74,7 +74,15 @@ import { OAuthIdentityAlreadyLinkedError as IdentityAlreadyLinkedError } from '.
 export async function linkGoogle(): Promise<'success' | 'cancel' | 'dismiss'> {
   const { data, error } = await supabase.auth.linkIdentity({
     provider: 'google',
-    options: { redirectTo: REDIRECT_TO, skipBrowserRedirect: true },
+    options: {
+      redirectTo: REDIRECT_TO,
+      skipBrowserRedirect: true,
+      // Force the account chooser -- see GOOGLE_PROMPT in oauth.ts. It matters
+      // more here than at sign-in: linking a *second* account is the whole
+      // point, so silently reusing the browser's current one defeats the
+      // feature entirely.
+      queryParams: GOOGLE_PROMPT,
+    },
   });
 
   if (error) {
