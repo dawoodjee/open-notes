@@ -213,5 +213,44 @@ console.log('\n--- cross-check ---');
   check('a note encrypted under one path decrypts under the other', decrypt(encrypt(note, viaPin), viaCode) === note);
 }
 
+// --- changing the PIN is a re-wrap, not a re-encryption ---------------------
+console.log('\n--- change PIN ---');
+{
+  const dataKey = generateDataKey();
+  const oldSalt = generateSalt();
+  const note = '<p>a note written before the PIN changed</p>';
+  const storedCiphertext = encrypt(note, dataKey);
+
+  // Re-wrap: unwrap under the old PIN, wrap under the new one. Exactly what
+  // lib/crypto/vault.ts changePin() does.
+  const unwrapped = unwrapDataKeyWithPin(
+    wrapDataKeyWithPin(dataKey, '111111', oldSalt),
+    '111111',
+    oldSalt
+  );
+  const newSalt = generateSalt();
+  const rewrapped = wrapDataKeyWithPin(unwrapped, '999999', newSalt);
+  const afterChange = unwrapDataKeyWithPin(rewrapped, '999999', newSalt);
+
+  check(
+    'the data key is unchanged by a PIN change',
+    dataKey.every((b, i) => afterChange[i] === b)
+  );
+  // The consequence that matters: every note's stored bytes stay valid and
+  // untouched, so nothing needs re-encrypting and nothing gets re-uploaded.
+  check(
+    'notes encrypted before the change still decrypt after it',
+    decrypt(storedCiphertext, afterChange) === note
+  );
+  check('the old PIN no longer works', (() => {
+    try {
+      unwrapDataKeyWithPin(rewrapped, '111111', newSalt);
+      return false;
+    } catch {
+      return true;
+    }
+  })());
+}
+
 console.log(`\n${failed === 0 ? 'PASS' : 'FAIL'} -- ${failed} failing check(s)`);
 process.exit(failed === 0 ? 0 : 1);

@@ -7,7 +7,7 @@ import {
   isUnlocked as vaultIsUnlocked,
   unlockWithPin,
 } from '@/lib/crypto/vault';
-import { initPowerSync } from '@/lib/powersync/db';
+import { getUiState, initPowerSync, isPowerSyncReady, saveUiState } from '@/lib/powersync/db';
 
 /**
  * Owns the lock state of the app.
@@ -31,10 +31,25 @@ import { initPowerSync } from '@/lib/powersync/db';
 
 const LOCK_AFTER_MS = 5 * 60 * 1000;
 
+/**
+ * How long the PIN can go untyped before we ask for it on purpose.
+ *
+ * The vault stays unlocked across short backgrounding, so someone can use the
+ * app daily for months and never type the PIN once. Then the day they need it
+ * -- a new phone, a restore -- it's gone, and the only way back in is the
+ * recovery code they filed away and probably can't find either. A periodic
+ * check is cheap insurance against that.
+ */
+const PIN_REMINDER_MS = 14 * 24 * 60 * 60 * 1000;
+
 export type VaultStatus = 'loading' | 'needs-setup' | 'locked' | 'unlocked';
+
+/** Why the lock screen is showing, so it can explain itself. */
+export type LockReason = 'normal' | 'reminder';
 
 interface VaultContextValue {
   status: VaultStatus;
+  lockReason: LockReason;
   /** True once the vault has been unlocked at least once this launch. */
   hasBooted: boolean;
   /** Returns the recovery code. Does NOT finish setup -- see finishSetup. */
@@ -55,6 +70,7 @@ export function useVault() {
 
 export function VaultProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<VaultStatus>('loading');
+  const [lockReason, setLockReason] = useState<LockReason>('normal');
   const [hasBooted, setHasBooted] = useState(false);
   const backgroundedAt = useRef<number | null>(null);
 
@@ -84,10 +100,33 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       const away = Date.now() - backgroundedAt.current;
       backgroundedAt.current = null;
       if (away >= LOCK_AFTER_MS && vaultIsUnlocked()) {
+        setLockReason('normal');
         setStatus('locked');
+        return;
       }
+
+      // Otherwise: has it simply been too long since the PIN was last typed?
+      void (async () => {
+        if (!isPowerSyncReady() || !vaultIsUnlocked()) return;
+        const { lastPinEntryAt } = await getUiState();
+        if (!lastPinEntryAt) return;
+        if (Date.now() - new Date(lastPinEntryAt).getTime() < PIN_REMINDER_MS) return;
+        setLockReason('reminder');
+        setStatus('locked');
+      })();
     });
     return () => subscription.remove();
+  }, []);
+
+  /** Only ever records WHEN the PIN was entered. The PIN itself is never
+   *  stored, logged, or transmitted anywhere. */
+  const recordPinEntry = useCallback(async () => {
+    try {
+      await saveUiState({ lastPinEntryAt: new Date().toISOString() });
+    } catch {
+      // A missed timestamp costs an earlier-than-needed reminder, which is
+      // not worth failing an unlock over.
+    }
   }, []);
 
   const beginSetup = useCallback(async (pin: string) => {
@@ -101,9 +140,10 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     // over -- see StoredVault.setupComplete.
     await markSetupComplete();
     await initPowerSync();
+    await recordPinEntry();
     setHasBooted(true);
     setStatus('unlocked');
-  }, []);
+  }, [recordPinEntry]);
 
   const unlock = useCallback(async (pin: string) => {
     // Always verifies against the wrapped blob rather than trusting the
@@ -113,14 +153,21 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     // No-op after the first call, which is what makes the cold-launch path
     // and the re-lock path the same code.
     await initPowerSync();
+    await recordPinEntry();
     setHasBooted(true);
+    setLockReason('normal');
     setStatus('unlocked');
+  }, [recordPinEntry]);
+
+  const lock = useCallback(() => {
+    setLockReason('normal');
+    setStatus('locked');
   }, []);
 
-  const lock = useCallback(() => setStatus('locked'), []);
-
   return (
-    <VaultContext.Provider value={{ status, hasBooted, beginSetup, finishSetup, unlock, lock }}>
+    <VaultContext.Provider
+      value={{ status, lockReason, hasBooted, beginSetup, finishSetup, unlock, lock }}
+    >
       {children}
     </VaultContext.Provider>
   );

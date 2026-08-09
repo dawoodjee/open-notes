@@ -5,6 +5,7 @@ import { AppSchema } from './schema';
 import { connector } from './connector';
 import { getCurrentUserId } from '@/lib/auth/currentUser';
 import { getDatabaseKey } from '@/lib/crypto/vault';
+import { encryptField, tryDecryptField } from '@/lib/crypto/noteCrypto';
 import { ENCRYPTED_DB_FILENAME, migrateToEncrypted } from './migrateToEncrypted';
 
 // Note the "-v2": the encrypted database is a different file from the
@@ -131,16 +132,24 @@ async function refreshSyncBaseIfSettled(): Promise<void> {
 
     await getPowerSync().writeTransaction(async (tx) => {
       for (const note of notes) {
+        // note.body is an envelope; the ancestor must be plaintext, because
+        // the next 3-way merge diffs against it and diffing ciphertext is
+        // meaningless. Skip anything that won't decrypt rather than writing
+        // a corrupt ancestor -- a missing ancestor degrades to overwrite,
+        // which is recoverable; a wrong one silently mangles future merges.
+        const plain = tryDecryptField(note.body);
+        if (!plain.ok) continue;
+
         const existing = await tx.getOptional<{ body: string }>(
           'SELECT body FROM note_sync_base WHERE note_id = ?',
           [note.id]
         );
-        if (existing?.body === (note.body ?? '')) continue;
+        if (existing?.body === plain.text) continue;
 
         await tx.execute('DELETE FROM note_sync_base WHERE note_id = ?', [note.id]);
         await tx.execute(
           'INSERT INTO note_sync_base (id, note_id, body, updated_at) VALUES (?, ?, ?, ?)',
-          [Crypto.randomUUID(), note.id, note.body ?? '', new Date().toISOString()]
+          [Crypto.randomUUID(), note.id, plain.text, new Date().toISOString()]
         );
       }
       // Notes deleted server-side leave no ancestor to keep.
@@ -181,15 +190,31 @@ export async function claimUnownedNotes(userId: string): Promise<number> {
   return unowned.length;
 }
 
+/**
+ * The single point where stored ciphertext becomes readable app data.
+ *
+ * Stays synchronous -- noble's AES-GCM is sync, and making this async would
+ * ripple into PowerSync's watch() callback and every consumer of it for no
+ * benefit.
+ */
 export function mapRowToNote(row: any): Note {
+  const body = tryDecryptField(row.body);
+  const title = tryDecryptField(row.title);
+  const decryptFailed = !body.ok || !title.ok;
+
   return {
     id: row.id,
     userId: row.user_id ?? null,
-    body: row.body ?? '',
-    title: row.title ?? '',
+    body: body.text,
+    title: title.text,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     isTrashed: Boolean(row.is_trashed),
+    // Surfaced rather than swallowed. An undecryptable note must not look
+    // like an empty note: the editor would happily save over it, turning a
+    // temporary key problem into permanent data loss. updateNoteInDB refuses
+    // such writes independently (see there), but the UI deserves to know too.
+    decryptFailed,
   };
 }
 
@@ -213,7 +238,7 @@ export async function createNoteInDB(): Promise<Note> {
   await getPowerSync().execute(
     `INSERT INTO notes (id, user_id, body, title, created_at, updated_at, is_trashed)
      VALUES (?, ?, ?, ?, ?, ?, 0)`,
-    [id, userId, body, title, now, now]
+    [id, userId, encryptField(body), encryptField(title), now, now]
   );
 
   return {
@@ -227,13 +252,47 @@ export async function createNoteInDB(): Promise<Note> {
   };
 }
 
+/**
+ * Takes PLAINTEXT and stores ciphertext. Callers (the editor) never see an
+ * envelope.
+ *
+ * Two guards, both load-bearing:
+ *
+ * 1. Refuses to write over content it could not decrypt. Otherwise a locked
+ *    vault or a foreign data key would present the note as empty, the editor
+ *    would autosave that emptiness, and a recoverable key problem would
+ *    become permanent data loss.
+ *
+ * 2. Returns early when the plaintext is unchanged. This is why the no-op
+ *    re-save question matters: AES-GCM uses a fresh random nonce every time,
+ *    so re-encrypting identical text produces different bytes. Without this
+ *    check, opening a note and closing it would write new ciphertext, queue
+ *    an upload, and look like a real edit to every other device. Comparing
+ *    plaintext -- not ciphertext -- is the only comparison that means
+ *    anything here.
+ */
 export async function updateNoteInDB(id: string, body: string): Promise<void> {
+  const existing = await getPowerSync().getOptional<{ body: string }>(
+    'SELECT body FROM notes WHERE id = ?',
+    [id]
+  );
+
+  if (existing) {
+    const current = tryDecryptField(existing.body);
+    if (!current.ok) {
+      throw new Error(
+        `Refusing to overwrite note ${id}: its stored content could not be decrypted.`
+      );
+    }
+    if (current.text === body) return;
+  }
+
   const { title } = parseNoteContent(body);
   const now = new Date().toISOString();
 
   await getPowerSync().execute(
     `UPDATE notes SET body = ?, title = ?, updated_at = ? WHERE id = ?`,
-    [body, title, now, id]
+    [encryptField(body), encryptField(title), now, id]
   );
 }
 
@@ -265,17 +324,19 @@ export async function emptyTrashInDB(): Promise<void> {
 export interface UiState {
   lastOpenedNoteId: string | null;
   editorScrollOffset: number;
+  lastPinEntryAt: string | null;
 }
 
 export async function getUiState(): Promise<UiState> {
   const row = await getPowerSync().getOptional<any>(
-    'SELECT last_opened_note_id, editor_scroll_offset FROM ui_state WHERE id = ?',
+    'SELECT last_opened_note_id, editor_scroll_offset, last_pin_entry_at FROM ui_state WHERE id = ?',
     ['singleton']
   );
 
   return {
     lastOpenedNoteId: row?.last_opened_note_id ?? null,
     editorScrollOffset: row?.editor_scroll_offset ?? 0,
+    lastPinEntryAt: row?.last_pin_entry_at ?? null,
   };
 }
 
@@ -285,7 +346,7 @@ export async function getUiState(): Promise<UiState> {
 export async function saveUiState(partial: Partial<UiState>): Promise<void> {
   await getPowerSync().writeTransaction(async (tx) => {
     const existing = await tx.getOptional<any>(
-      'SELECT last_opened_note_id, editor_scroll_offset FROM ui_state WHERE id = ?',
+      'SELECT last_opened_note_id, editor_scroll_offset, last_pin_entry_at FROM ui_state WHERE id = ?',
       ['singleton']
     );
 
@@ -293,16 +354,19 @@ export async function saveUiState(partial: Partial<UiState>): Promise<void> {
       partial.lastOpenedNoteId ?? existing?.last_opened_note_id ?? null;
     const editorScrollOffset =
       partial.editorScrollOffset ?? existing?.editor_scroll_offset ?? 0;
+    const lastPinEntryAt =
+      partial.lastPinEntryAt ?? existing?.last_pin_entry_at ?? null;
 
     if (existing) {
       await tx.execute(
-        `UPDATE ui_state SET last_opened_note_id = ?, editor_scroll_offset = ? WHERE id = ?`,
-        [lastOpenedNoteId, editorScrollOffset, 'singleton']
+        `UPDATE ui_state SET last_opened_note_id = ?, editor_scroll_offset = ?, last_pin_entry_at = ? WHERE id = ?`,
+        [lastOpenedNoteId, editorScrollOffset, lastPinEntryAt, 'singleton']
       );
     } else {
       await tx.execute(
-        `INSERT INTO ui_state (id, last_opened_note_id, editor_scroll_offset) VALUES (?, ?, ?)`,
-        ['singleton', lastOpenedNoteId, editorScrollOffset]
+        `INSERT INTO ui_state (id, last_opened_note_id, editor_scroll_offset, last_pin_entry_at)
+         VALUES (?, ?, ?, ?)`,
+        ['singleton', lastOpenedNoteId, editorScrollOffset, lastPinEntryAt]
       );
     }
   });

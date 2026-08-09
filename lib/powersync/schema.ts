@@ -19,6 +19,13 @@ export const uiStateTable = new Table(
   {
     last_opened_note_id: column.text,
     editor_scroll_offset: column.integer,
+    // ISO-8601. When the PIN was last actually typed, which is not the same
+    // as when the app was last opened -- the vault stays unlocked across
+    // short backgrounding, so someone can use the app for weeks without ever
+    // re-entering it. Drives the periodic reminder (Stage 6), because a PIN
+    // you never type is a PIN you forget, and forgetting it means falling
+    // back to the recovery code.
+    last_pin_entry_at: column.text,
   },
   { localOnly: true }
 );
@@ -56,10 +63,17 @@ export const syncIssuesTable = new Table(
 // there's no Postgres column for it). A device with no row here simply has
 // no ancestor and falls back to overwrite -- correct, since a missing
 // ancestor means we've never seen a server version to diff against.
+// Stage 6 note: this stores PLAINTEXT, while notes.body stores ciphertext.
+// That asymmetry is deliberate, not an oversight. A 3-way merge diffs against
+// the ancestor, and ciphertext has no diffable structure -- one changed
+// character rewrites every subsequent byte, and a fresh nonce rewrites them
+// all regardless. It is safe only because the entire local database file is
+// encrypted at rest by SQLCipher, so "plaintext" here means plaintext inside
+// an encrypted container.
 export const noteSyncBaseTable = new Table(
   {
     note_id: column.text,
-    body: column.text, // last body the server is known to have had
+    body: column.text, // last body the server is known to have had, decrypted
     updated_at: column.text, // ISO-8601, when this ancestor was recorded
   },
   { localOnly: true }

@@ -14,6 +14,13 @@ export interface Note {
   // No separate trashedAt: updatedAt already moves on trash and restore, and a
   // second field could contradict this one. One field = no illegal states.
   isTrashed: boolean;
+
+  // True when the stored ciphertext could not be decrypted with the current
+  // data key -- a locked vault, or content written under a different key.
+  // Distinguishes "this note is empty" from "this note is unreadable right
+  // now", which matters because the first is safe to overwrite and the second
+  // very much is not.
+  decryptFailed?: boolean;
 }
 
 export interface NotesState {

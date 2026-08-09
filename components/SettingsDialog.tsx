@@ -23,6 +23,7 @@ import {
   AlertTriangle,
 } from 'lucide-react-native';
 import { getPowerSync } from '@/lib/powersync/db';
+import { ChangePinView } from '@/components/ChangePinView';
 
 export interface SettingsDialogProps {
   isOpen: boolean;
@@ -120,7 +121,7 @@ function AdvancedView({ onBack }: { onBack: () => void }) {
 }
 
 export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
-  const [view, setView] = useState<'root' | 'advanced'>('root');
+  const [view, setView] = useState<'root' | 'advanced' | 'pin'>('root');
 
   const handleClose = () => {
     setView('root');
@@ -141,8 +142,7 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
             </ModalHeader>
             <ScrollView className="flex-1">
               <ModalBody className="p-0">
-                {/* Change PIN is a stub -- Stage 6 wires the real action. */}
-                <SettingsRow icon={KeyRound} label="Change PIN" onPress={() => {}} />
+                <SettingsRow icon={KeyRound} label="Change PIN" onPress={() => setView('pin')} />
                 {/* Appearance/Theme/Fonts are inert placeholders establishing
                     the scrollable-dialog pattern now, not implemented yet. */}
                 <SettingsRow icon={Palette} label="Appearance" disabled />
@@ -152,6 +152,8 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
               </ModalBody>
             </ScrollView>
           </>
+        ) : view === 'pin' ? (
+          <ChangePinView onBack={() => setView('root')} />
         ) : (
           <AdvancedView onBack={() => setView('root')} />
         )}

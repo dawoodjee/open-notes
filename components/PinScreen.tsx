@@ -11,7 +11,7 @@ export const PIN_LENGTH = 6;
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '⌫'];
 
-function PinPad({
+export function PinPad({
   title,
   subtitle,
   error,
@@ -102,7 +102,7 @@ function penaltyMs(failures: number): number {
 }
 
 export function PinUnlockScreen() {
-  const { unlock } = useVault();
+  const { unlock, lockReason } = useVault();
   const [value, setValue] = useState('');
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -140,10 +140,18 @@ export function PinUnlockScreen() {
     if (value.length === PIN_LENGTH) void submit(value);
   }, [value, submit]);
 
+  // The periodic reminder is the ordinary lock screen with honest copy,
+  // rather than a dismissible banner. A banner asking you to type your PIN
+  // has nowhere to type it, and "remind me later" forever is the outcome that
+  // makes the reminder pointless.
   return (
     <PinPad
-      title="Enter your PIN"
-      subtitle="Your notes are encrypted on this device."
+      title={lockReason === 'reminder' ? 'PIN check' : 'Enter your PIN'}
+      subtitle={
+        lockReason === 'reminder'
+          ? "It's been a while since you typed this. A quick check so you don't forget it."
+          : 'Your notes are encrypted on this device.'
+      }
       error={error}
       busy={busy}
       value={value}

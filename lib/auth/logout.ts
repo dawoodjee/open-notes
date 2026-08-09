@@ -1,5 +1,6 @@
 import { getPowerSync } from '@/lib/powersync/db';
 import { supabase } from '@/lib/supabase/client';
+import { clearNoteCryptoCache, tryDecryptField } from '@/lib/crypto/noteCrypto';
 
 export interface PendingWrite {
   noteId: string;
@@ -43,7 +44,12 @@ export async function getPendingWrites(): Promise<PendingWrite[]> {
     `SELECT id, title FROM notes WHERE id IN (${placeholders})`,
     Array.from(noteIds)
   );
-  const titleById = new Map(titled.map((r) => [r.id, r.title]));
+  // Titles are stored encrypted, so this is the one place outside
+  // mapRowToNote that has to decrypt in JS -- the SQL above can only hand
+  // back envelopes. A title that won't decrypt falls through to the
+  // "Untitled note" default below, which is the right outcome for a warning
+  // dialog: it still tells you something is unsynced, it just can't name it.
+  const titleById = new Map(titled.map((r) => [r.id, tryDecryptField(r.title).text]));
 
   return Array.from(noteIds).map((id) => ({
     noteId: id,
@@ -70,6 +76,13 @@ export async function getPendingWriteCount(): Promise<number> {
  */
 export async function logout(): Promise<void> {
   await getPowerSync().disconnectAndClear();
+
+  // The decrypted-plaintext cache outlives the rows it came from, so it has
+  // to be dropped explicitly. Otherwise the next account signing in on this
+  // device could be served the previous account's note text out of memory --
+  // the in-JS equivalent of the local-data leak that disconnectAndClear()
+  // exists to prevent.
+  clearNoteCryptoCache();
 
   // A global sign-out revokes the refresh token server-side, which is the
   // stronger guarantee and the default. But it needs the network, and
