@@ -283,7 +283,13 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
     if (!source) return;
     identitySeededRef.current = true;
 
-    if (source.fullName) {
+    // Still gated on the name being unset, even though this only runs for an
+    // account with no username. Setup can be interrupted: the full name
+    // autosaves as you type, the username does not (it needs the tick), so
+    // "typed a name, killed the app, came back" leaves a saved name and no
+    // username. Without this check the provider's name would overwrite the
+    // one they actually typed.
+    if (!profile.full_name && source.fullName) {
       // Routed through the same handler as typing, so the username cascade
       // and the debounced autosave both happen exactly as they normally do.
       handleFullNameChange(source.fullName);
@@ -302,8 +308,22 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
   // visibly not working, which is the actual message.
   const [flash, setFlash] = useState(0);
   const missingFullName = fullName.trim().length === 0;
-  const missingUsername = username.trim().length === 0;
   const missingEmail = email.trim().length === 0;
+
+  // Deliberately not just "the box is empty".
+  //
+  // A username only counts once it's been committed with the tick -- unlike
+  // the full name, typing it saves nothing. And the box is rarely empty for a
+  // new account anyway, because the full name auto-fills a suggestion into
+  // it. Testing the text alone would let someone leave setup with a plausible
+  // username on screen and NULL in the database, which is the exact state
+  // this guard exists to prevent.
+  //
+  // So: the account must have a stored username, and the box must not have
+  // since been cleared. An uncommitted *edit* by someone who already has one
+  // doesn't block closing -- it's just discarded, and they still have the
+  // username they arrived with.
+  const missingUsername = !profile?.username || username.trim().length === 0;
   const hasEmptyField = missingFullName || missingUsername || missingEmail;
 
   function handleAttemptClose() {
