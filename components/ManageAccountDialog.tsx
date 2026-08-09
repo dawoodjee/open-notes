@@ -8,13 +8,13 @@ import {
   ModalCloseButton,
   ModalBody,
 } from '@/components/ui/modal';
-import { Input, InputField } from '@/components/ui/input';
 import { Pressable } from '@/components/ui/pressable';
 import { VStack } from '@/components/ui/vstack';
 import { HStack } from '@/components/ui/hstack';
 import { Icon } from '@/components/ui/icon';
 import { X, LogOut } from 'lucide-react-native';
 
+import AccountField, { FieldTone } from '@/components/AccountField';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/lib/auth/useProfile';
 import { supabase } from '@/lib/supabase/client';
@@ -199,13 +199,54 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
     return formatRateLimitRemaining(profile.username_changed_at);
   }, [profile?.username_changed_at]);
 
-  // Username is confirmed with an explicit button, not saved on blur. It's
-  // the one field with a real cost to getting wrong: changing it burns a
-  // 30-day allowance and it's the account's public identifier, so it
-  // shouldn't be committed by the incidental act of tapping elsewhere.
-  // Full name has neither property, so blur is fine there.
-  const showUsernameSave =
-    usernameDirty && username.trim().length >= 3 && usernameStatus !== 'taken';
+  // One status line per field, derived rather than rendered inline, so every
+  // field's message occupies the same fixed slot (see AccountField) and the
+  // layout can't shift as messages appear.
+  const usernameStatusText = (() => {
+    if (usernameStatus === 'checking') return 'Checking availability…';
+    if (usernameStatus === 'available') return 'Available';
+    if (usernameStatus === 'taken') return usernameError ?? 'That username is taken.';
+    if (usernameStatus === 'error') return usernameError ?? '';
+    if (usernameStatus === 'saving') return 'Saving…';
+    if (usernameStatus === 'saved') return 'Saved';
+    return rateLimitMessage;
+  })();
+
+  const usernameStatusTone: FieldTone =
+    usernameStatus === 'available' || usernameStatus === 'saved'
+      ? 'ok'
+      : usernameStatus === 'taken' || usernameStatus === 'error'
+        ? 'error'
+        : 'neutral';
+
+  // --- Email ---------------------------------------------------------------
+  // The field and its commit button are real; the change itself is not wired
+  // up yet (see handleCommitEmail). Availability deliberately isn't checked
+  // as you type the way username's is: there's no public endpoint to ask
+  // whether an address is registered, and adding one would let anyone probe
+  // who has an account. So the button can only reflect "this looks like a
+  // valid address" -- "already in use" is something only the server can tell
+  // us, on submit.
+  const [email, setEmail] = useState('');
+  const [emailNotice, setEmailNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    setEmail(session?.user.email ?? '');
+    setEmailNotice(null);
+  }, [session?.user.email, isOpen]);
+
+  const emailDirty = email.trim() !== (session?.user.email ?? '');
+  const emailLooksValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
+  const emailStatus = emailNotice ?? (emailDirty && !emailLooksValid ? 'Enter a valid email address.' : '');
+  const emailStatusTone: FieldTone = emailNotice || (emailDirty && !emailLooksValid) ? 'error' : 'neutral';
+
+  function handleCommitEmail() {
+    // Deliberately says so out loud rather than doing nothing. A control that
+    // silently fails reads as broken -- exactly how the Link button looked
+    // before manual linking was enabled.
+    setEmailNotice("Changing your email isn't available yet.");
+  }
 
   function saveFullNameIfChanged() {
     if (!fullNameDirty) return;
@@ -313,7 +354,7 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
     // below so the sheet and its controls agree on one radius.
     <Modal isOpen={isOpen} onClose={onClose} size="full">
       <ModalBackdrop />
-      <ModalContent className="w-full max-w-full h-4/5 mt-auto mb-0 mx-0 rounded-t-2xl rounded-b-none border-0 px-5 pb-8">
+      <ModalContent className="w-full max-w-full h-4/5 mt-auto mb-0 mx-0 rounded-t-2xl rounded-b-none border-0 px-5 pb-4">
         <ModalHeader>
           <RNText className="text-base font-semibold text-gray-900">Manage Account</RNText>
           <ModalCloseButton>
@@ -335,74 +376,44 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
               </Pressable>
             </HStack>
           )}
-          {/* Full name before username: it's the human-facing one, and typing
-              it fills the username in below, so the order matches the flow. */}
-          <VStack className="gap-2">
-            <Input className="rounded-2xl h-12 px-4">
-              <InputField
-                value={fullName}
-                onChangeText={handleFullNameChange}
-                onBlur={saveFullNameIfChanged}
-                placeholder="Full name"
-                className="text-base"
-              />
-            </Input>
-            {fullNameStatus === 'saved' && (
-              <RNText className="text-xs text-green-600 px-1">Saved</RNText>
-            )}
+          {/* One group per field: input + its status line, uniform spacing
+              inside, uniform spacing between. Full name leads -- it's the
+              human-facing one, and typing it fills the username below, so the
+              order matches the flow. */}
+          <VStack className="gap-3">
+            {/* No status line: full name autosaves, has no validation and
+                nothing to be unavailable, so a "Saved" flag would be noise. */}
+            <AccountField
+              value={fullName}
+              onChangeText={handleFullNameChange}
+              placeholder="Full name"
+            />
+
+            <AccountField
+              value={username}
+              onChangeText={handleUsernameChange}
+              placeholder="Username"
+              autoCapitalize="none"
+              showAction={usernameDirty}
+              canCommit={usernameStatus === 'available' || usernameStatus === 'saved'}
+              onCommit={saveUsername}
+              status={usernameStatusText}
+              statusTone={usernameStatusTone}
+            />
+
+            <AccountField
+              value={email}
+              onChangeText={setEmail}
+              placeholder="Email"
+              autoCapitalize="none"
+              keyboardType="email-address"
+              showAction={emailDirty}
+              canCommit={emailLooksValid}
+              onCommit={handleCommitEmail}
+              status={emailStatus}
+              statusTone={emailStatusTone}
+            />
           </VStack>
-
-          <VStack className="gap-2">
-            <Input className="rounded-2xl h-12 px-4">
-              <InputField
-                value={username}
-                onChangeText={handleUsernameChange}
-                placeholder="Username"
-                autoCapitalize="none"
-                className="text-base"
-              />
-            </Input>
-
-            {/* Appears only when the username would actually change -- either
-                a genuine edit, or setting one for the first time. Both are
-                covered by "differs from what's stored"; an account with no
-                username has '' stored, so typing one makes it dirty. */}
-            {showUsernameSave && (
-              <Pressable
-                onPress={saveUsername}
-                disabled={usernameStatus === 'saving' || usernameStatus === 'checking'}
-                className="py-3 rounded-2xl bg-lime-500 items-center active:bg-lime-600 disabled:opacity-40"
-              >
-                <RNText className="text-sm font-semibold text-white">
-                  {profile?.username ? 'Change username' : 'Set username'}
-                </RNText>
-              </Pressable>
-            )}
-            {usernameStatus === 'checking' && (
-              <RNText className="text-xs text-gray-400 px-1">Checking availability…</RNText>
-            )}
-            {usernameStatus === 'available' && (
-              <RNText className="text-xs text-green-600 px-1">Available</RNText>
-            )}
-            {usernameStatus === 'taken' && (
-              <RNText className="text-xs text-red-500 px-1">
-                {usernameError ?? 'That username is taken.'}
-              </RNText>
-            )}
-            {usernameStatus === 'error' && (
-              <RNText className="text-xs text-red-500 px-1">{usernameError}</RNText>
-            )}
-            {usernameStatus === 'saved' && (
-              <RNText className="text-xs text-green-600 px-1">Saved</RNText>
-            )}
-            {usernameStatus === 'idle' && rateLimitMessage !== '' && (
-              <RNText className="text-xs text-gray-400 px-1">{rateLimitMessage}</RNText>
-            )}
-          </VStack>
-
-          {/* Email is read-only, so it's plain text rather than a disabled
-              input -- a box you can't type in invites trying. */}
-          <RNText className="text-base text-gray-400 px-1 mt-1">{session.user.email}</RNText>
 
           {/* Email sign-in isn't listed. It's always available and can't be
               turned off, so a row for it would be inert -- and the address it
@@ -449,7 +460,7 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
 
             <HStack className="items-center justify-between py-1">
               <RNText className="text-base text-gray-400">Apple</RNText>
-              <RNText className="text-xs text-gray-400">Not available yet</RNText>
+              <RNText className="text-xs text-gray-400">Not available</RNText>
             </HStack>
 
             {identityError && (
@@ -470,7 +481,7 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
             action without pretending to be a safe one. */}
         <Pressable
           onPress={handleSignOut}
-          className="py-3.5 rounded-2xl bg-red-600 flex-row items-center justify-center gap-2 active:bg-red-700"
+          className="w-4/5 self-center py-3.5 rounded-2xl bg-red-600 flex-row items-center justify-center gap-2 active:bg-red-700"
         >
           <Icon as={LogOut} className="text-white w-4 h-4" />
           <RNText className="text-base font-semibold text-white">Log Out</RNText>
