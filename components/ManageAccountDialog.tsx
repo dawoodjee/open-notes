@@ -564,12 +564,22 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
             </HStack>
 
             {/* Explains a disabled Remove rather than leaving it inert and
-                unexplained -- Supabase refuses to drop an account's last
-                identity, and a greyed-out button with no reason is worse
-                than the rejection it's preventing. */}
+                unexplained -- a greyed-out button with no reason is worse
+                than the rejection it's preventing.
+
+                Careful with the wording: this is NOT "your only way to sign
+                in". An account created through Google has its email set, and
+                email OTP works on it immediately -- verified against the
+                local stack. The limit is narrower than that and belongs to
+                Supabase: it counts rows in auth.identities and refuses to
+                drop the last one ("User must have at least 1 identity after
+                unlinking", 422). Signing in by OTP doesn't add an email
+                identity, so an OAuth-only account stays at exactly one however
+                many times you use email. Saying "only sign-in method" would
+                tell the user something false about their own account. */}
             {googleIdentity && identities !== null && !canUnlink(identities) && (
               <RNText className="text-xs text-gray-400 px-1">
-                This is your only sign-in method, so it can't be removed.
+                This is your only linked account. Link another before removing it.
               </RNText>
             )}
 

@@ -36,10 +36,17 @@ export async function listIdentities(): Promise<IdentitySummary[]> {
 }
 
 /**
- * Supabase refuses to unlink an account's last remaining identity -- that
- * would leave it with no way to sign in at all. The UI disables the action in
- * that case rather than letting the tap round-trip to a rejection, so this is
- * only a helper for that decision, not the enforcement (the server is).
+ * Supabase refuses to unlink an account's last remaining identity: "User must
+ * have at least 1 identity after unlinking" (422). The UI disables the action
+ * in that case rather than letting the tap round-trip to a rejection, so this
+ * is only a helper for that decision, not the enforcement (the server is).
+ *
+ * Note what the rule is NOT. It isn't "you'd have no way to sign in" -- an
+ * account created through Google has its email set and can sign in by OTP
+ * straight away (verified against the local stack). But OTP sign-in doesn't
+ * create an email identity, so such an account sits at exactly one row in
+ * auth.identities forever, and that count is all Supabase looks at. The
+ * user-facing copy has to reflect the real constraint, not the intuitive one.
  */
 export function canUnlink(identities: IdentitySummary[]): boolean {
   return identities.length > 1;
@@ -90,7 +97,7 @@ export async function unlinkIdentity(identity: IdentitySummary): Promise<void> {
   const all = await listIdentities();
   if (!canUnlink(all)) {
     throw new Error(
-      "This is your only way to sign in, so it can't be unlinked. Add another sign-in method first."
+      "This is your only linked account, so it can't be removed. Link another one first."
     );
   }
 
