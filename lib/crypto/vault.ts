@@ -52,6 +52,23 @@ interface StoredVault {
   kdfParams: KdfParams;
   /** Whether wrappedByRecoveryCode has made it to public.user_keys yet. */
   backedUp: boolean;
+  /**
+   * False between createVault() and the user confirming they wrote the
+   * recovery code down.
+   *
+   * Without this flag there's a window that produces an unrecoverable
+   * account: the vault is written to the Keychain the moment the PIN is
+   * chosen, but the recovery code is only ever displayed once, afterwards.
+   * Kill the app in between -- or just walk away from the screen -- and
+   * hasVault() would report a perfectly good vault whose recovery code
+   * nobody has ever seen. The user would be locked out permanently the first
+   * time they forgot the PIN or picked up a second device.
+   *
+   * Treating an unconfirmed vault as no vault at all means setup simply
+   * starts over, which is safe precisely because nothing is encrypted with
+   * the data key until finishSetup() runs initPowerSync().
+   */
+  setupComplete: boolean;
 }
 
 // --- in-memory unlocked state ----------------------------------------------
@@ -101,8 +118,16 @@ async function writeVault(vault: StoredVault): Promise<void> {
   await SecureStore.setItemAsync(VAULT_KEY, JSON.stringify(vault));
 }
 
+/** Deliberately false for a half-finished setup -- see StoredVault.setupComplete. */
 export async function hasVault(): Promise<boolean> {
-  return (await readVault()) !== null;
+  return (await readVault())?.setupComplete === true;
+}
+
+/** Called once the recovery code has been shown AND typed back. */
+export async function markSetupComplete(): Promise<void> {
+  const vault = await readVault();
+  if (!vault) throw new Error('No vault to complete.');
+  await writeVault({ ...vault, setupComplete: true });
 }
 
 /**
@@ -126,6 +151,7 @@ export async function createVault(pin: string): Promise<{ recoveryCode: string }
     recoverySalt,
     kdfParams: SCRYPT_PARAMS,
     backedUp: false,
+    setupComplete: false,
   });
 
   dataKey = key;
@@ -136,7 +162,16 @@ export async function createVault(pin: string): Promise<{ recoveryCode: string }
 export async function unlockWithPin(pin: string): Promise<void> {
   const vault = await readVault();
   if (!vault) throw new Error('No vault on this device.');
+
+  // Timed in dev because scrypt's cost is a deliberate tuning decision, and
+  // Hermes is materially slower at this kind of tight numeric loop than the
+  // Node benchmarks used to pick SCRYPT_PARAMS.N. If this creeps past ~2s the
+  // parameter needs revisiting -- an unlock people do daily can't feel broken.
+  const startedAt = __DEV__ ? Date.now() : 0;
   dataKey = unwrapDataKeyWithPin(vault.wrappedByPin, pin, vault.pinSalt, vault.kdfParams);
+  if (__DEV__) {
+    console.log(`[vault] scrypt N=2^${Math.log2(vault.kdfParams.N)} unlock: ${Date.now() - startedAt}ms`);
+  }
 }
 
 /**
@@ -185,7 +220,8 @@ export async function restoreVaultFromRecovery(
     wrappedByRecoveryCode,
     recoverySalt,
     kdfParams: SCRYPT_PARAMS,
-    backedUp: true, // it came from the server, so it's by definition already there
+    backedUp: true, // it came from the server, so it is by definition already there
+    setupComplete: true,
   });
 
   dataKey = key;

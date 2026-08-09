@@ -51,14 +51,16 @@ function PinPad({
           <View
             key={i}
             className={`w-3.5 h-3.5 rounded-full ${
-              i < value.length ? 'bg-gray-900' : 'bg-gray-300'
+              i < value.length ? 'bg-black' : 'bg-gray-300'
             }`}
           />
         ))}
       </View>
 
+      {/* "Checking…" is progress, not a problem -- it shares the slot with the
+          error so the layout can't shift, but not the error's colour. */}
       <View className="h-8 justify-center">
-        <Text className="text-sm text-red-500 text-center">
+        <Text className={`text-sm text-center ${busy ? 'text-gray-500' : 'text-red-500'}`}>
           {busy ? 'Checking…' : (error ?? '')}
         </Text>
       </View>
@@ -279,7 +281,7 @@ function RecoveryCodeStep({
 
         <Pressable
           onPress={onContinue}
-          className="bg-gray-900 rounded-2xl h-12 items-center justify-center active:opacity-70"
+          className="bg-black rounded-2xl h-12 items-center justify-center active:opacity-70"
         >
           <Text className="text-white font-semibold">I&apos;ve written it down</Text>
         </Pressable>
@@ -310,7 +312,7 @@ function RecoveryCodeStep({
         onPress={() => void onConfirmed()}
         disabled={!matches}
         className={`rounded-2xl h-12 items-center justify-center ${
-          matches ? 'bg-gray-900 active:opacity-70' : 'bg-gray-200'
+          matches ? 'bg-black active:opacity-70' : 'bg-gray-200'
         }`}
       >
         <Text className={`font-semibold ${matches ? 'text-white' : 'text-gray-400'}`}>

@@ -3,6 +3,7 @@ import { AppState, AppStateStatus } from 'react-native';
 import {
   createVault,
   hasVault,
+  markSetupComplete,
   isUnlocked as vaultIsUnlocked,
   unlockWithPin,
 } from '@/lib/crypto/vault';
@@ -95,6 +96,10 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const finishSetup = useCallback(async () => {
+    // Marked complete only here, after the recovery code has been shown and
+    // typed back. Until this runs, hasVault() reports false and setup starts
+    // over -- see StoredVault.setupComplete.
+    await markSetupComplete();
     await initPowerSync();
     setHasBooted(true);
     setStatus('unlocked');
