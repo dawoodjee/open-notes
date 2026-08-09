@@ -47,3 +47,7 @@ app-example
 # scratch dbs from the scripts/verify-*.ts checks (Stage 5). These are
 # throwaway local PowerSync databases recreated on every run.
 scripts/.verify-*.db*
+
+# pg_dumps from scripts/backup-local-data.sh -- real account rows and real
+# note bodies. Never commit these.
+supabase/backups/

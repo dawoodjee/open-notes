@@ -11,6 +11,17 @@
     "preview": {
       "distribution": "internal"
     },
+    "live": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://svbrvtnldkjwtnppsugi.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN2YnJ2dG5sZGtqd3RucHBzdWdpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyOTcxMTgsImV4cCI6MjEwMTg3MzExOH0.kGcDk0TcswmSxoChek27-weJCSuXxzXsQLlw1ZnhBKY",
+        "EXPO_PUBLIC_POWERSYNC_URL": "https://6a78d51353f73afec8a84403.powersync.journeyapps.com"
+      }
+    },
     "production": {
       "autoIncrement": true
     }

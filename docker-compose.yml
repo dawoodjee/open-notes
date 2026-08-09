@@ -6,6 +6,14 @@
 # Start: docker compose up -d
 # Stop:  docker compose down
 
+# Pinned rather than inferred. Compose defaults the project name to the
+# directory name, so running these commands from a git worktree (a sibling
+# directory such as notes-device/) would silently address a *different,
+# non-existent* project: `docker compose restart powersync` prints nothing and
+# exits 0 while restarting nothing at all. Naming it here makes every
+# invocation hit the same containers no matter which checkout it runs from.
+name: notes
+
 services:
   powersync:
     image: journeyapps/powersync-service:latest

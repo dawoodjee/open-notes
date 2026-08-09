@@ -1,0 +1,35 @@
+# Sync Streams config for the LIVE PowerSync Cloud instance.
+#
+# Kept alongside sync-rules.yaml rather than replacing it, because the two
+# stacks are on different config formats and both are real:
+#
+#   sync-rules.yaml   -> local self-hosted service (dev), `bucket_definitions`
+#   sync-streams.yaml -> PowerSync Cloud (live), Sync Streams edition 3
+#
+# The dashboard is the source of truth for what's actually deployed live; this
+# file exists so the live config is reviewable in git rather than living only
+# in a web editor. Keep them in step by hand.
+#
+# Translation notes from the bucket_definitions version:
+#   - `request.user_id()` is now `auth.user_id()` -- same thing, the `sub`
+#     claim of the JWT the client connected with. This is still the actual
+#     security boundary during sync, not Postgres RLS: the replication role
+#     has bypassrls, so RLS never applies at this layer.
+#   - The separate `parameters:` / `data:` split collapses into one `query:`.
+#   - auto_subscribe matters here. Sync Streams normally expect the client to
+#     subscribe explicitly, and the installed client SDK (@powersync/common
+#     2.0.0) predates that API -- it has no subscribe call to make. An
+#     auto_subscribe stream is synced to every client on connect, which is
+#     exactly the old bucket behaviour the app already expects.
+#
+# profiles is absent on purpose: it is not a PowerSync table, the app reads and
+# writes it directly via supabase-js. ui_state is localOnly (see
+# lib/powersync/schema.ts) and never leaves the device.
+
+config:
+  edition: 3
+
+streams:
+  user_notes:
+    auto_subscribe: true
+    query: SELECT * FROM notes WHERE user_id = auth.user_id()
