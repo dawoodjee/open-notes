@@ -82,8 +82,48 @@ export function generateSalt(): string {
 
 // --- PIN path (low entropy -> deliberately slow) ---------------------------
 
+/**
+ * The scrypt implementation, swappable at runtime.
+ *
+ * Why this indirection exists: @noble/hashes' scrypt is pure JavaScript, and
+ * measured on-device it takes **8956ms** for N=2^14 under Hermes -- against
+ * 846ms for the identical parameters under Node. Hermes has no JIT, and
+ * scrypt is exactly the tight integer-mixing loop that punishes that hardest.
+ * Nine seconds on every cold launch is not a usable unlock.
+ *
+ * So the app installs a native implementation at startup (see
+ * ./nativeScrypt.ts). The default stays noble, deliberately, for two reasons:
+ * this file must keep running under plain Node so scripts/verify-crypto.ts can
+ * exercise the real code, and a missing native module should degrade to slow
+ * rather than broken.
+ *
+ * Swapping implementations is safe because scrypt is a specified function
+ * (RFC 7914): the same password, salt and N/r/p produce the same bytes in any
+ * correct implementation. That's what lets an existing vault, wrapped by the
+ * JS version, still be unwrapped by the native one -- and it's asserted
+ * on-device rather than assumed, in nativeScrypt.ts.
+ */
+export type ScryptFn = (
+  password: Uint8Array,
+  salt: Uint8Array,
+  params: { N: number; r: number; p: number; dkLen: number }
+) => Uint8Array;
+
+const nobleScrypt: ScryptFn = (password, salt, params) =>
+  scrypt(password, salt, { N: params.N, r: params.r, p: params.p, dkLen: params.dkLen });
+
+let scryptImpl: ScryptFn = nobleScrypt;
+
+export function setScryptImplementation(fn: ScryptFn): void {
+  scryptImpl = fn;
+}
+
+export function getReferenceScrypt(): ScryptFn {
+  return nobleScrypt;
+}
+
 function deriveKeyFromPin(pin: string, salt: string, params: KdfParams = SCRYPT_PARAMS) {
-  return scrypt(utf8ToBytes(pin), base64ToBytes(salt), {
+  return scryptImpl(utf8ToBytes(pin), base64ToBytes(salt), {
     N: params.N,
     r: params.r,
     p: params.p,

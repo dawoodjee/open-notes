@@ -6,6 +6,7 @@
 import 'react-native-get-random-values';
 
 import * as SecureStore from 'expo-secure-store';
+import { installNativeScrypt } from './nativeScrypt';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/ciphers/utils.js';
@@ -30,6 +31,11 @@ import {
  * device, and it's deliberately thin so there's little here that isn't
  * covered by that script.
  */
+
+// Swap the pure-JS scrypt for the native one before any vault operation can
+// run. Done at module load rather than from a component, so there is no state
+// in which a wrap or unwrap could start on the slow path by accident.
+installNativeScrypt();
 
 const VAULT_KEY = 'notes.vault.v1';
 
