@@ -1,0 +1,15 @@
+bucket_definitions:
+  # One bucket per user. `request.user_id()` reads the `sub` claim out of the
+  # JWT the client connected with, so a client only ever gets handed the rows
+  # matching their own account -- this is the actual security boundary during
+  # sync, not Postgres RLS (see the migration's note on the powersync_role's
+  # bypassrls for why RLS can't apply at the replication layer).
+  #
+  # profiles has no bucket here: it's not a PowerSync table at all, the app
+  # reads/writes it directly via supabase-js. ui_state has no bucket either:
+  # it's declared localOnly in lib/powersync/schema.ts and never leaves the
+  # device by design (see that file's comment on why).
+  user_notes:
+    parameters: select request.user_id() as user_id
+    data:
+      - select * from notes where user_id = bucket.user_id

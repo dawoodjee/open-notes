@@ -43,3 +43,7 @@ app-example
 # generated native folders
 /ios
 /android
+
+# scratch dbs from the scripts/verify-*.ts checks (Stage 5). These are
+# throwaway local PowerSync databases recreated on every run.
+scripts/.verify-*.db*

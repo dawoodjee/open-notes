@@ -1,5 +1,5 @@
-import React from 'react';
-import { Text as RNText } from 'react-native';
+import React, { useRef } from 'react';
+import { Text as RNText, PanResponder } from 'react-native';
 import RichEditor from './RichEditor';
 
 // Gluestack UI Primitives
@@ -26,6 +26,7 @@ import {
 
 // Custom Types
 import { Note } from '@/types/note';
+import AvatarMenuTrigger from './AvatarMenuTrigger';
 
 export interface NoteEditorPaneProps {
   selectedNote: Note | undefined;
@@ -50,6 +51,27 @@ export default function NoteEditorPane({
   initialEditorScrollOffset,
   onEditorScrollOffsetChange,
 }: NoteEditorPaneProps) {
+  // Mobile edge-swipe-back, mirroring iOS's native interactive-pop gesture --
+  // there's no real navigation stack here to provide that for free (list and
+  // editor are conditionally-rendered panes in one screen, not routes).
+  // Claimed only once an actual rightward drag starting near the left edge
+  // is confirmed (onMoveShouldSetPanResponderCapture), not on touch-start --
+  // otherwise every edge tap would be captured before it could reach
+  // anything underneath, including this pane's own back button.
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponderCapture: (evt, gestureState) => {
+        const startX = evt.nativeEvent.pageX - gestureState.dx;
+        return startX < 32 && gestureState.dx > 12 && Math.abs(gestureState.dy) < 24;
+      },
+      onPanResponderRelease: (_evt, gestureState) => {
+        if (gestureState.dx > 80) {
+          onBackToList();
+        }
+      },
+    })
+  ).current;
+
   return (
     <VStack
       className={`
@@ -113,14 +135,12 @@ export default function NoteEditorPane({
               </UIComponentsMenu>
 
               {/* Desktop Avatar */}
-              <Pressable className="hidden md:flex w-8 h-8 rounded-full bg-lime-100 items-center justify-center border border-lime-300">
-                <RNText className="text-xs font-bold text-lime-800">AD</RNText>
-              </Pressable>
+              <AvatarMenuTrigger className="hidden md:flex" />
             </HStack>
           </HStack>
 
           {/* Editor Detail Pane */}
-          <Box className="flex-1">
+          <Box className="flex-1" {...panResponder.panHandlers}>
             <RichEditor
               key={selectedNote.id}
               initialContent={selectedNote.body}

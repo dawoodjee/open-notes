@@ -2,6 +2,8 @@ import { Note, parseNoteContent } from '@/types/note';
 import { PowerSyncDatabase } from '@powersync/react-native';
 import * as Crypto from 'expo-crypto';
 import { AppSchema } from './schema';
+import { connector } from './connector';
+import { getCurrentUserId } from '@/lib/auth/currentUser';
 
 export const powersync = new PowerSyncDatabase({
   schema: AppSchema,
@@ -16,6 +18,116 @@ export async function initPowerSync(): Promise<void> {
   if (isInitialized) return;
   await powersync.init();
   isInitialized = true;
+}
+
+// Not called from initPowerSync -- connecting is an auth-state decision
+// (Phase 2 wires this to login/logout), not something that should happen
+// unconditionally at app boot. The app keeps working fully offline/local-only
+// without this ever being called, exactly as it did before Stage 5.
+export async function connectPowerSync(): Promise<void> {
+  await powersync.connect(connector);
+  startSyncBaseTracking();
+}
+
+let syncBaseTrackingStarted = false;
+
+/**
+ * Keeps note_sync_base (the 3-way merge's common ancestor) fresh after data
+ * arrives FROM the server. The connector already updates it after every
+ * successful push; this covers the other direction.
+ *
+ * It matters because the ancestor is supposed to mean "the last body this
+ * device and the server agreed on". After a pull, local content includes
+ * another device's edits -- if the ancestor still pointed at our last push,
+ * the next merge would diff against it, decide the other device's changes
+ * were ours, and replay them onto a server that already has them. Duplicated
+ * paragraphs, from a merge that was trying to be careful.
+ *
+ * The rule used here is deliberately narrow so it's provable rather than
+ * approximately right: only refresh when the upload queue is completely
+ * empty. An empty queue means this device has no unpushed changes, so local
+ * content IS server content, so local body is exactly the right ancestor. Any
+ * note with a pending write is skipped entirely -- for those, the connector's
+ * post-push update is the correct source, and guessing here would corrupt the
+ * very state the merge depends on.
+ */
+function startSyncBaseTracking(): void {
+  if (syncBaseTrackingStarted) return;
+  syncBaseTrackingStarted = true;
+
+  powersync.registerListener({
+    statusChanged: (status) => {
+      if (!status.connected || status.dataFlowStatus?.uploading) return;
+      void refreshSyncBaseIfSettled();
+    },
+  });
+}
+
+let refreshInFlight = false;
+
+async function refreshSyncBaseIfSettled(): Promise<void> {
+  if (refreshInFlight) return;
+  refreshInFlight = true;
+  try {
+    const pending = await powersync.get<{ count: number }>(
+      'SELECT count(*) as count FROM ps_crud'
+    );
+    if (pending.count > 0) return;
+
+    const notes = await powersync.getAll<{ id: string; body: string }>(
+      'SELECT id, body FROM notes'
+    );
+
+    await powersync.writeTransaction(async (tx) => {
+      for (const note of notes) {
+        const existing = await tx.getOptional<{ body: string }>(
+          'SELECT body FROM note_sync_base WHERE note_id = ?',
+          [note.id]
+        );
+        if (existing?.body === (note.body ?? '')) continue;
+
+        await tx.execute('DELETE FROM note_sync_base WHERE note_id = ?', [note.id]);
+        await tx.execute(
+          'INSERT INTO note_sync_base (id, note_id, body, updated_at) VALUES (?, ?, ?, ?)',
+          [Crypto.randomUUID(), note.id, note.body ?? '', new Date().toISOString()]
+        );
+      }
+      // Notes deleted server-side leave no ancestor to keep.
+      await tx.execute(
+        'DELETE FROM note_sync_base WHERE note_id NOT IN (SELECT id FROM notes)'
+      );
+    });
+  } catch {
+    // Best-effort: a stale ancestor degrades merge quality, it doesn't break
+    // syncing, so this must never take the sync loop down with it.
+  } finally {
+    refreshInFlight = false;
+  }
+}
+
+/**
+ * Attach a newly-signed-in user to every local note that doesn't have an
+ * owner yet -- the notes they wrote before enabling sync.
+ *
+ * Must run BEFORE connectPowerSync(), not after. Once connected, the first
+ * sync checkpoint discards local rows the server doesn't know about, and an
+ * unowned note is unknowable to the server by construction (the sync bucket
+ * is `where user_id = bucket.user_id`). Claiming after connecting would race
+ * that checkpoint and usually lose.
+ *
+ * Purely local SQL, so it only ever touches rows already on this device.
+ * That's safe *because* an account switch clears local storage first (see
+ * becomeAuthenticatedLocally) -- without that ordering, this same statement
+ * would happily hand the previous account's notes to the new one.
+ */
+export async function claimUnownedNotes(userId: string): Promise<number> {
+  const unowned = await powersync.getAll<{ id: string }>(
+    'SELECT id FROM notes WHERE user_id IS NULL'
+  );
+  if (unowned.length === 0) return 0;
+
+  await powersync.execute('UPDATE notes SET user_id = ? WHERE user_id IS NULL', [userId]);
+  return unowned.length;
 }
 
 export function mapRowToNote(row: any): Note {
@@ -36,16 +148,26 @@ export async function createNoteInDB(): Promise<Note> {
   const { title } = parseNoteContent(body);
   const now = new Date().toISOString();
 
-  // user_id stays NULL until an account claims this note in Stage 5.
+  // Stamped with the current owner at creation, NULL only when genuinely
+  // signed out (those get claimed at login -- see claimUnownedNotes below).
+  //
+  // This is not cosmetic. Once PowerSync is connected, every local insert is
+  // queued for upload immediately, and a note with a NULL user_id can never
+  // satisfy the `owners insert their notes` RLS policy -- `auth.uid() = NULL`
+  // is NULL, not true. The rejected op gets dropped, PowerSync treats the
+  // local mutation as handed off, and the row is erased from local storage at
+  // the next checkpoint because the server never echoes it back (it isn't in
+  // any sync bucket). The note vanishes seconds after being created.
+  const userId = getCurrentUserId();
   await powersync.execute(
     `INSERT INTO notes (id, user_id, body, title, created_at, updated_at, is_trashed)
-     VALUES (?, NULL, ?, ?, ?, ?, 0)`,
-    [id, body, title, now, now]
+     VALUES (?, ?, ?, ?, ?, ?, 0)`,
+    [id, userId, body, title, now, now]
   );
 
   return {
     id,
-    userId: null,
+    userId,
     body,
     title,
     createdAt: now,

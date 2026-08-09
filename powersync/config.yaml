@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=https://unpkg.com/@powersync/service-schema@latest/json-schema/powersync-config.json
+#
+# Self-hosted PowerSync service config. Mounted into the container by
+# docker-compose.yml; values with `!env` are read from that compose file's
+# environment at container start (kept out of this file so nothing secret
+# ends up committed).
+
+telemetry:
+  disable_telemetry_sharing: false
+
+# Where PowerSync reads Postgres's write-ahead log from -- this app's local
+# Supabase database, over the internal Docker network Supabase's own CLI
+# created (container hostname `db`, confirmed via `docker inspect
+# supabase_db_notes`), not the host-exposed port 54322.
+replication:
+  connections:
+    - type: postgresql
+      uri: !env PS_DATA_SOURCE_URI
+      sslmode: disable # local dev only -- Supabase's local Postgres has no TLS listener
+
+# Where PowerSync stores its own bucket/checkpoint state. Reusing the same
+# Postgres instance (a separate schema, not a second database to run) rather
+# than adding MongoDB -- Postgres storage is fully supported for this and
+# keeps the local stack to one database. Local dev only: uses the `postgres`
+# superuser for simplicity, same as Supabase's own local DB_URL already does
+# -- a real deployment would scope this to its own least-privilege role.
+storage:
+  type: postgresql
+  uri: !env PS_STORAGE_URI
+  sslmode: disable
+
+port: !env PS_PORT
+
+sync_config:
+  path: sync-rules.yaml
+
+# Verifies the JWT every client connects with. This local Supabase project
+# signs tokens with ES256 (an asymmetric key), confirmed by decoding a real
+# access token's header -- not the legacy shared HS256 secret `supabase
+# status` shows for backwards compatibility. So verification is via
+# Supabase's own JWKS endpoint (its public key), not a shared secret PowerSync
+# would also need a copy of.
+client_auth:
+  jwks_uri: http://kong:8000/auth/v1/.well-known/jwks.json
+  # jwks_uri above is an internal Docker hostname, not a public HTTPS URL --
+  # PowerSync blocks JWKS URIs that resolve to local network addresses by
+  # default (confirmed against @powersync/service-schema, not the "supabase"
+  # flag's own auto-derivation, which needs a Supabase-shaped connection
+  # string we don't have and just gets silently skipped with a warning).
+  block_local_jwks: false
+  audience: ['authenticated']
