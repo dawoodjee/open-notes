@@ -14,7 +14,7 @@ import { AccountKeyRecord } from './keyBackup';
 export interface PendingAdoption {
   record: AccountKeyRecord;
   /** Unwraps with the code, re-encrypts local notes, then connects sync. */
-  complete: (recoveryCode: string, pin: string) => Promise<void>;
+  complete: (recoveryCode: string) => Promise<void>;
   /** Abandons the attempt and signs back out. */
   cancel: () => Promise<void>;
 }

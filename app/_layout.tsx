@@ -3,18 +3,9 @@ import { Stack } from 'expo-router';
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { VaultProvider, useVault } from '@/contexts/VaultContext';
-import { PinSetupScreen, PinUnlockScreen } from '@/components/PinScreen';
+import { LockScreen } from '@/components/LockScreen';
 import { AdoptKeyScreen, usePendingAdoption } from '@/components/AdoptKeyScreen';
-
-function AdoptKeyOverlay() {
-  const pending = usePendingAdoption();
-  if (!pending) return null;
-  return (
-    <View className="absolute inset-0 bg-white">
-      <AdoptKeyScreen />
-    </View>
-  );
-}
+import { SecureAccountScreen, usePendingKeySetup } from '@/components/SecureAccountScreen';
 
 import '@/global.css';
 
@@ -27,6 +18,27 @@ import '@/global.css';
 // "Sync error" logs, which were useful for diagnosis and are still there,
 // just not painted over the UI.
 LogBox.ignoreAllLogs(true);
+
+/**
+ * The two blocking key steps that can follow a sign-in, in priority order.
+ *
+ * Both sit ABOVE the unlocked app rather than replacing it: the account is
+ * signed in and sync is deliberately still disconnected, so the note UI
+ * underneath is this device's own local content and is fine to keep mounted.
+ * They're opaque so none of it shows through.
+ */
+function KeyStepOverlay() {
+  const adoption = usePendingAdoption();
+  const keySetup = usePendingKeySetup();
+
+  if (!adoption && !keySetup) return null;
+
+  return (
+    <View className="absolute inset-0 bg-white">
+      {adoption ? <AdoptKeyScreen /> : <SecureAccountScreen />}
+    </View>
+  );
+}
 
 export default function RootLayout() {
   return (
@@ -41,16 +53,18 @@ export default function RootLayout() {
 /**
  * Decides what the user sees based on lock state.
  *
- * The ordering here is the whole point. Until the vault has been unlocked
- * once, <AuthProvider> must not mount: it restores the Supabase session and
- * calls connectPowerSync(), and PowerSync cannot open the database without
- * the encryption key. Mounting it early wouldn't just be premature, it would
- * throw.
+ * The ordering here is the whole point. Until the keys have been loaded once,
+ * <AuthProvider> must not mount: it restores the Supabase session and calls
+ * connectPowerSync(), and PowerSync cannot open the database without the
+ * encryption key. Mounting it early wouldn't just be premature, it would throw.
  *
- * After that first unlock the app tree stays mounted for the rest of the
+ * After that first load the app tree stays mounted for the rest of the
  * process, and re-locking only paints an overlay over it. That's what keeps
  * background sync alive while locked, and it means unlocking returns you to
  * the note you had open rather than a cold start.
+ *
+ * Note that with the lock off -- the default -- 'locked' never happens, and
+ * this collapses to "show the app".
  */
 function VaultGate() {
   const { status, hasBooted } = useVault();
@@ -70,18 +84,16 @@ function VaultGate() {
         </AuthProvider>
       ) : null}
 
-      {status !== 'unlocked' ? (
+      {status === 'locked' ? (
         // Opaque and absolutely positioned rather than conditional, so the
         // note UI underneath is never briefly visible behind it.
         <View className="absolute inset-0 bg-white">
-          {status === 'needs-setup' ? <PinSetupScreen /> : <PinUnlockScreen />}
+          <LockScreen />
         </View>
       ) : (
-        // Sits above the unlocked app, not instead of it: the account is
-        // signed in and sync is deliberately still disconnected until the
-        // recovery code arrives. Rendered after the lock overlay so a locked
-        // device never shows account content behind it.
-        <AdoptKeyOverlay />
+        // Rendered after the lock overlay so a locked device never shows
+        // account content behind it.
+        <KeyStepOverlay />
       )}
     </View>
   );

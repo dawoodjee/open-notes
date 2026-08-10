@@ -22,6 +22,29 @@ import { isSQLCipher, open } from '@op-engineering/op-sqlite';
 export const LEGACY_DB_FILENAME = 'notes.db';
 export const ENCRYPTED_DB_FILENAME = 'notes-v2.db';
 
+/**
+ * Delete the encrypted database outright, without needing its key.
+ *
+ * Used for exactly one thing: discarding a v1 vault's database when the vault
+ * itself can no longer be opened. A v1 vault wrapped its keys under a 6-digit
+ * PIN, and the PIN screens no longer exist, so there is no way to derive the
+ * SQLCipher key for that file -- it is unreadable by construction and keeping
+ * it would just be a stranded blob taking up space.
+ *
+ * The reason this works without a key: SQLCipher defers key verification to
+ * the first read, so open() succeeds on any file. It's the query that would
+ * fail with "file is not a database", and we never run one.
+ */
+export function wipeLocalDatabase(): void {
+  for (const name of [ENCRYPTED_DB_FILENAME, LEGACY_DB_FILENAME]) {
+    try {
+      open({ name }).delete();
+    } catch {
+      // Already absent, which is the desired end state anyway.
+    }
+  }
+}
+
 export async function migrateToEncrypted(encryptionKey: string): Promise<void> {
   // The single most important line in this file.
   //

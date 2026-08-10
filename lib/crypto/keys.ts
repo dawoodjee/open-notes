@@ -1,4 +1,3 @@
-import { scrypt } from '@noble/hashes/scrypt.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, randomBytes, utf8ToBytes } from '@noble/ciphers/utils.js';
@@ -10,58 +9,61 @@ import { decrypt, encrypt } from './envelope';
  *
  *   dataKey   32 random bytes. Encrypts every note. NEVER stored raw, anywhere.
  *
- *   locally   SecureStore holds an envelope of dataKey wrapped under
- *             scrypt(PIN, salt). See vault.ts.
+ *   locally   SecureStore holds an envelope of dataKey wrapped under a random
+ *             32-byte device key, which itself lives in the OS keychain. See
+ *             vault.ts.
  *
  *   server    public.user_keys.recovery_wrapped_key holds an envelope of the
  *             SAME dataKey wrapped under hkdf(recovery code). That's what
  *             lets a second device decrypt notes it never created.
  *
- * WHY TWO DIFFERENT KDFs -- this is the part worth internalising.
+ * WHY THERE IS NO PASSWORD KDF HERE ANY MORE.
  *
- * A KDF turns a secret into a key. When the secret is *low entropy*, like a
- * 6-digit PIN (a million possibilities), the KDF's job is to be deliberately
- * slow and memory-hungry, so an attacker guessing all million pays a million
- * times that cost. That's scrypt, and it's why the PIN path takes ~1 second
- * on purpose.
+ * A KDF that is deliberately slow -- scrypt, argon2, pbkdf2 -- exists for one
+ * situation: the secret is *low entropy* and an attacker can guess candidates
+ * offline. A 6-digit PIN is exactly that (a million possibilities), so the
+ * earlier design paid ~1 second per unlock to make a million guesses expensive.
  *
- * When the secret is *high entropy*, like the 125-bit recovery code, there is
- * nothing to stretch -- no attacker is enumerating 2^125 candidates no matter
- * how fast the function is. Stretching there would cost seconds of real user
- * time and buy exactly nothing. So the recovery path uses HKDF, which is fast
- * by design and is the right tool for deriving a key from material that's
- * already unguessable.
+ * Both secrets in the model above are now *high entropy* -- 32 random bytes and
+ * a 125-bit recovery code. Nobody enumerates 2^125 candidates however fast the
+ * function is, so stretching would cost real user time and buy exactly nothing.
+ * HKDF is the right tool for deriving a key from material that is already
+ * unguessable, and it is what both paths use.
  *
- * Choosing scrypt for both would look more "secure" and would in fact just be
- * slower. Choosing HKDF for both would be a genuine vulnerability.
+ * The reverse mistake is the dangerous one: HKDF over a low-entropy secret is
+ * a genuine vulnerability. If a password-shaped secret is ever reintroduced
+ * here, it needs scrypt back, not this.
  *
- * ACCEPTED LIMIT, on the record: the 6-digit PIN protects the *local* wrapped
- * key, where the OS keychain is the real barrier. It deliberately does not
- * protect anything stored server-side -- no scrypt parameter makes a million
- * candidates safe against an attacker running native GPU code on a stolen
- * database. That's why the server blob is wrapped under the recovery code and
- * never under the PIN.
+ * ON THE RECORD, since it was a deliberate call: unlock is now the device's own
+ * credential (see lib/auth/deviceAuth.ts), which is a gate rather than a
+ * cryptographic binding. The at-rest protection for the local key is the OS
+ * keychain plus SQLCipher; the server-side blob is protected by the recovery
+ * code and nothing else. No local unlock factor has ever protected the
+ * server-side blob, and none does now.
  */
 
-// Versioned so a future cost increase can be rolled out without stranding
-// existing wrapped keys: the parameters travel with the blob (kdf_params in
-// user_keys, and KdfParams below) rather than being implied by the code.
-export const SCRYPT_PARAMS = {
-  alg: 'scrypt' as const,
-  N: 2 ** 14, // ~890ms under Node; re-confirmed on-device before shipping
-  r: 8,
-  p: 1,
-  dkLen: 32,
+// Travels with the blob (kdf_params in user_keys, and KdfParams below) rather
+// than being implied by the code, so a future change of derivation doesn't
+// strand existing wrapped keys.
+export const RECOVERY_KDF_PARAMS = {
+  alg: 'hkdf-sha256' as const,
 };
 
-export type KdfParams = typeof SCRYPT_PARAMS;
+export type KdfParams = typeof RECOVERY_KDF_PARAMS;
 
 export const SALT_BYTES = 16;
 
-export class WrongPinError extends Error {
+/**
+ * A wrapped blob would not open with the key we had.
+ *
+ * Always an authentication-tag failure from AES-GCM rather than a guess, so it
+ * genuinely means "wrong key or tampered ciphertext" -- there is no separately
+ * stored hash to compare against, and nothing to brute-force offline.
+ */
+export class UnwrapError extends Error {
   constructor() {
-    super('That PIN is incorrect.');
-    this.name = 'WrongPinError';
+    super('That key could not open this data.');
+    this.name = 'UnwrapError';
   }
 }
 
@@ -99,61 +101,15 @@ export function generateSalt(): string {
   return bytesToBase64(randomBytes(SALT_BYTES));
 }
 
-// --- PIN path (low entropy -> deliberately slow) ---------------------------
+// --- Device-key path -------------------------------------------------------
 
 /**
- * The scrypt implementation, swappable at runtime.
- *
- * Why this indirection exists: @noble/hashes' scrypt is pure JavaScript, and
- * measured on-device it takes **8956ms** for N=2^14 under Hermes -- against
- * 846ms for the identical parameters under Node. Hermes has no JIT, and
- * scrypt is exactly the tight integer-mixing loop that punishes that hardest.
- * Nine seconds on every cold launch is not a usable unlock.
- *
- * So the app installs a native implementation at startup (see
- * ./nativeScrypt.ts). The default stays noble, deliberately, for two reasons:
- * this file must keep running under plain Node so scripts/verify-crypto.ts can
- * exercise the real code, and a missing native module should degrade to slow
- * rather than broken.
- *
- * Swapping implementations is safe because scrypt is a specified function
- * (RFC 7914): the same password, salt and N/r/p produce the same bytes in any
- * correct implementation. That's what lets an existing vault, wrapped by the
- * JS version, still be unwrapped by the native one -- and it's asserted
- * on-device rather than assumed, in nativeScrypt.ts.
+ * The device key: 32 random bytes that wrap this device's copy of the data
+ * key. Stored in the OS keychain by vault.ts, never derived from anything the
+ * user types, and never leaves the device.
  */
-export type ScryptFn = (
-  password: Uint8Array,
-  salt: Uint8Array,
-  params: { N: number; r: number; p: number; dkLen: number }
-) => Uint8Array;
-
-const nobleScrypt: ScryptFn = (password, salt, params) =>
-  scrypt(password, salt, { N: params.N, r: params.r, p: params.p, dkLen: params.dkLen });
-
-let scryptImpl: ScryptFn = nobleScrypt;
-
-export function setScryptImplementation(fn: ScryptFn): void {
-  scryptImpl = fn;
-}
-
-export function getReferenceScrypt(): ScryptFn {
-  return nobleScrypt;
-}
-
-/**
- * Exported so a caller that needs to unwrap several blobs under the same PIN
- * can pay the (deliberately expensive) scrypt cost once rather than per blob.
- * Everything wrapped under a given PIN uses the same salt, so the wrapping
- * key is identical for all of them.
- */
-export function deriveKeyFromPin(pin: string, salt: string, params: KdfParams = SCRYPT_PARAMS) {
-  return scryptImpl(utf8ToBytes(pin), base64ToBytes(salt), {
-    N: params.N,
-    r: params.r,
-    p: params.p,
-    dkLen: params.dkLen,
-  });
+export function generateDeviceKey(): Uint8Array {
+  return randomBytes(32);
 }
 
 /** Wrap/unwrap an arbitrary 32-byte secret under an already-derived key. */
@@ -165,33 +121,7 @@ export function unwrapWith(blob: string, wrappingKey: Uint8Array): Uint8Array {
   try {
     return base64ToBytes(decrypt(blob, wrappingKey));
   } catch {
-    throw new WrongPinError();
-  }
-}
-
-export function wrapDataKeyWithPin(
-  dataKey: Uint8Array,
-  pin: string,
-  salt: string,
-  params: KdfParams = SCRYPT_PARAMS
-): string {
-  return encrypt(bytesToBase64(dataKey), deriveKeyFromPin(pin, salt, params));
-}
-
-export function unwrapDataKeyWithPin(
-  wrapped: string,
-  pin: string,
-  salt: string,
-  params: KdfParams = SCRYPT_PARAMS
-): Uint8Array {
-  try {
-    return base64ToBytes(decrypt(wrapped, deriveKeyFromPin(pin, salt, params)));
-  } catch {
-    // A GCM tag mismatch IS the wrong-PIN signal. Nothing derived from the
-    // PIN is stored for comparison, so there is no PIN hash on the device to
-    // steal or to brute-force offline -- the only way to test a guess is to
-    // attempt the unwrap and pay the scrypt cost.
-    throw new WrongPinError();
+    throw new UnwrapError();
   }
 }
 

@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase/client';
 import { getPowerSync, connectPowerSync, claimUnownedNotes } from '@/lib/powersync/db';
 import { getCurrentSession, setCurrentSession } from '@/lib/auth/currentUser';
 import { setPendingAdoption } from '@/lib/crypto/adoption';
+import { setPendingKeySetup } from '@/lib/crypto/keySetup';
 import { AccountKeyRecord, fetchAccountKey, uploadAccountKey } from '@/lib/crypto/keyBackup';
 import { unwrapDataKeyWithRecoveryCode } from '@/lib/crypto/keys';
 import { reEncryptLocalNotes } from '@/lib/crypto/reEncrypt';
@@ -12,6 +13,7 @@ import {
   adoptAccountDataKey,
   getDataKeyFingerprint,
   getKeyBackupPayload,
+  hasRecoveryCode,
   markKeyBackedUp,
 } from '@/lib/crypto/vault';
 
@@ -51,39 +53,79 @@ let inFlight: Promise<void> | null = null;
 async function reconcileAccountKey(
   userId: string,
   setSessionState: (s: Session | null) => void
-): Promise<'ok' | 'needs-adoption'> {
+): Promise<'ok' | 'blocked'> {
   const account = await fetchAccountKey(userId);
 
-  if (!account) {
-    const payload = await getKeyBackupPayload();
-    if (!payload) return 'ok';
-    const { claimed } = await uploadAccountKey(userId, payload);
-    if (claimed) {
+  if (account) {
+    if (account.fingerprint === getDataKeyFingerprint()) {
       await markKeyBackedUp();
       return 'ok';
     }
-    // Lost a race with another device signing into the same new account.
-    // Fall through and adopt whatever won.
-    const winner = await fetchAccountKey(userId);
-    if (!winner) return 'ok';
-    return beginAdoption(winner, setSessionState);
+    // Adoption deliberately does NOT require this device to have a recovery
+    // code of its own -- it's about to inherit the account's, and its own
+    // becomes meaningless the moment it adopts.
+    return beginAdoption(account, setSessionState);
   }
 
-  if (account.fingerprint === getDataKeyFingerprint()) {
+  // This device is first, so its key becomes the account's. That is the point
+  // at which a recovery code stops being optional: the wrapped blob in
+  // user_keys is the ONLY way this key ever reaches a second device, and
+  // uploading notes before one exists would produce ciphertext on the server
+  // whose key lives on exactly one phone with no way off it.
+  if (!(await hasRecoveryCode())) {
+    return beginKeySetup(userId, setSessionState);
+  }
+
+  const payload = await getKeyBackupPayload();
+  if (!payload) return 'ok';
+  const { claimed } = await uploadAccountKey(userId, payload);
+  if (claimed) {
     await markKeyBackedUp();
     return 'ok';
   }
+  // Lost a race with another device signing into the same new account.
+  // Fall through and adopt whatever won.
+  const winner = await fetchAccountKey(userId);
+  if (!winner) return 'ok';
+  return beginAdoption(winner, setSessionState);
+}
 
-  return beginAdoption(account, setSessionState);
+/**
+ * Pause sign-in until the user has written down a recovery code.
+ *
+ * Runs once per device, on first sign-in. Sync stays disconnected throughout;
+ * complete() re-enters reconciliation rather than duplicating it, so the
+ * upload path has exactly one implementation.
+ */
+function beginKeySetup(
+  userId: string,
+  setSessionState: (s: Session | null) => void
+): 'blocked' {
+  setPendingKeySetup({
+    async complete() {
+      setPendingKeySetup(null);
+      const outcome = await reconcileAccountKey(userId, setSessionState);
+      if (outcome === 'ok') await connectPowerSync();
+    },
+    async cancel() {
+      setPendingKeySetup(null);
+      // Nothing was uploaded, so signing out leaves this device exactly as it
+      // was, with its own key and its own notes intact.
+      await supabase.auth.signOut({ scope: 'local' });
+      setCurrentSession(null);
+      setSessionState(null);
+    },
+  });
+  return 'blocked';
 }
 
 function beginAdoption(
   record: AccountKeyRecord,
   setSessionState: (s: Session | null) => void
-): 'needs-adoption' {
+): 'blocked' {
   setPendingAdoption({
     record,
-    async complete(recoveryCode: string, pin: string) {
+    async complete(recoveryCode: string) {
       // Throws WrongRecoveryCodeError on a bad code, before anything changes.
       const accountKey = unwrapDataKeyWithRecoveryCode(
         record.recoveryWrappedKey,
@@ -94,8 +136,7 @@ function beginAdoption(
       const { previousKey } = await adoptAccountDataKey(
         accountKey,
         record.recoveryWrappedKey,
-        record.recoverySalt,
-        pin
+        record.recoverySalt
       );
 
       // Both keys are in hand only here, so the local notes have to be
@@ -116,7 +157,7 @@ function beginAdoption(
       setSessionState(null);
     },
   });
-  return 'needs-adoption';
+  return 'blocked';
 }
 
 /**
@@ -177,9 +218,10 @@ async function becomeAuthenticatedLocally(
       // first would pull down content this device cannot read, and push up
       // content the account cannot read.
       const reconciliation = await reconcileAccountKey(newSession.user.id, setSessionState);
-      if (reconciliation === 'needs-adoption') {
-        // Sync stays disconnected until the user supplies their recovery
-        // code. The adoption screen calls connectPowerSync() when it's done.
+      if (reconciliation === 'blocked') {
+        // Sync stays disconnected until the user either writes down a new
+        // recovery code or supplies the account's existing one. Whichever
+        // screen is showing calls connectPowerSync() when it's done.
         return;
       }
 

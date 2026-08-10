@@ -25,7 +25,6 @@ export const uiStateTable = new Table(
     // re-entering it. Drives the periodic reminder (Stage 6), because a PIN
     // you never type is a PIN you forget, and forgetting it means falling
     // back to the recovery code.
-    last_pin_entry_at: column.text,
   },
   { localOnly: true }
 );

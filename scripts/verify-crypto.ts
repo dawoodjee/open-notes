@@ -16,20 +16,25 @@
 import { randomBytes } from '@noble/ciphers/utils.js';
 import { base64ToBytes, bytesToBase64 } from '../lib/crypto/base64';
 import { decrypt, encrypt, isEncrypted } from '../lib/crypto/envelope';
+import { hkdf } from '@noble/hashes/hkdf.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, utf8ToBytes } from '@noble/ciphers/utils.js';
 import {
-  SCRYPT_PARAMS,
-  WrongPinError,
   WrongRecoveryCodeError,
   generateDataKey,
+  generateDeviceKey,
   generateRecoveryCode,
   generateSalt,
   isWellFormedRecoveryCode,
   normalizeRecoveryCode,
-  unwrapDataKeyWithPin,
   unwrapDataKeyWithRecoveryCode,
-  wrapDataKeyWithPin,
+  unwrapWith,
   wrapDataKeyWithRecoveryCode,
+  wrapWith,
 } from '../lib/crypto/keys';
+
+const sameBytes = (a: Uint8Array, b: Uint8Array) =>
+  a.length === b.length && a.every((byte, i) => b[i] === byte);
 
 let failed = 0;
 
@@ -117,32 +122,35 @@ console.log('\n--- envelope (AES-256-GCM) ---');
   );
 }
 
-// --- PIN wrapping -----------------------------------------------------------
-console.log('\n--- PIN wrap (scrypt) ---');
+// --- device-key wrapping ----------------------------------------------------
+console.log('\n--- device-key wrap ---');
 {
   const dataKey = generateDataKey();
-  const salt = generateSalt();
+  const deviceKey = generateDeviceKey();
 
+  const wrapped = wrapWith(dataKey, deviceKey);
+  check('unwraps to the identical data key', sameBytes(unwrapWith(wrapped, deviceKey), dataKey));
+
+  throws('a different device key is rejected', () =>
+    unwrapWith(wrapped, generateDeviceKey()), 'UnwrapError'
+  );
+  check(
+    'the raw data key never appears in the wrapped blob',
+    !wrapped.includes(bytesToBase64(dataKey))
+  );
+
+  // No KDF here on purpose. The device key is 32 random bytes rather than
+  // anything a user types, so there is no low-entropy input to stretch and
+  // scrypt would cost seconds to buy nothing. (Reintroduce a typed secret and
+  // that reasoning inverts -- see the header comment in lib/crypto/keys.ts.)
   const started = Date.now();
-  const wrapped = wrapDataKeyWithPin(dataKey, '123456', salt);
-  const wrapMs = Date.now() - started;
-
-  const unwrapped = unwrapDataKeyWithPin(wrapped, '123456', salt);
+  for (let i = 0; i < 100; i++) unwrapWith(wrapped, deviceKey);
+  const unwrapMs = Date.now() - started;
   check(
-    'unwraps to the identical data key',
-    unwrapped.length === dataKey.length && dataKey.every((b, i) => unwrapped[i] === b)
+    `100 unwraps cost ${unwrapMs}ms`,
+    unwrapMs < 500,
+    'unlock is not allowed to be slow any more -- nothing is being stretched'
   );
-  check(
-    `scrypt N=2^${Math.log2(SCRYPT_PARAMS.N)} costs ${wrapMs}ms under Node`,
-    wrapMs > 100,
-    'deliberately slow; must be re-measured on Hermes before shipping'
-  );
-
-  throws('wrong PIN is rejected', () => unwrapDataKeyWithPin(wrapped, '654321', salt), 'WrongPinError');
-  throws('right PIN, wrong salt is rejected', () =>
-    unwrapDataKeyWithPin(wrapped, '123456', generateSalt())
-  );
-  check('the raw data key never appears in the wrapped blob', !wrapped.includes(bytesToBase64(dataKey)));
 }
 
 // --- recovery code ----------------------------------------------------------
@@ -180,9 +188,10 @@ console.log('\n--- recovery code (HKDF) ---');
     'WrongRecoveryCodeError'
   );
 
-  // The whole point of the design decision: the server blob is not
-  // PIN-derived, so a PIN guess can't touch it.
-  throws('a PIN cannot unwrap the recovery blob', () =>
+  // The server blob is derived from the recovery code and nothing else. No
+  // local unlock factor has ever been able to open it, which is why moving
+  // unlock to the device credential changed nothing about this guarantee.
+  throws('a short guess cannot unwrap the recovery blob', () =>
     unwrapDataKeyWithRecoveryCode(wrapped, '123456', salt)
   );
 }
@@ -191,65 +200,109 @@ console.log('\n--- recovery code (HKDF) ---');
 console.log('\n--- cross-check ---');
 {
   const dataKey = generateDataKey();
-  const pinSalt = generateSalt();
+  const deviceKey = generateDeviceKey();
   const recoverySalt = generateSalt();
   const code = generateRecoveryCode();
 
-  const viaPin = unwrapDataKeyWithPin(wrapDataKeyWithPin(dataKey, '000000', pinSalt), '000000', pinSalt);
+  const viaDevice = unwrapWith(wrapWith(dataKey, deviceKey), deviceKey);
   const viaCode = unwrapDataKeyWithRecoveryCode(
     wrapDataKeyWithRecoveryCode(dataKey, code, recoverySalt),
     code,
     recoverySalt
   );
 
-  check(
-    'PIN path and recovery path yield the same data key',
-    viaPin.every((b, i) => viaCode[i] === b)
-  );
+  check('device path and recovery path yield the same data key', sameBytes(viaDevice, viaCode));
 
   // A note encrypted on device A must open on device B, which only ever saw
-  // the recovery-wrapped copy. This is Phase 3's whole premise, checked early.
+  // the recovery-wrapped copy. That is the whole premise of cross-device sync.
   const note = '<p>written on device A</p>';
-  check('a note encrypted under one path decrypts under the other', decrypt(encrypt(note, viaPin), viaCode) === note);
+  check(
+    'a note encrypted under one path decrypts under the other',
+    decrypt(encrypt(note, viaDevice), viaCode) === note
+  );
 }
 
-// --- changing the PIN is a re-wrap, not a re-encryption ---------------------
-console.log('\n--- change PIN ---');
+// --- adopting an account key --------------------------------------------
+//
+// The single most dangerous operation in the vault, and the reason it gets its
+// own section. adoptAccountDataKey() REPLACES the data key, so every wrapping
+// of it has to be rewritten in the same pass. Miss the device wrapping and the
+// next launch unlocks silently into the old key -- no error, no prompt, just
+// notes that won't decrypt. Meanwhile the database seed must NOT change, or
+// the open SQLCipher file stops opening.
+//
+// Transcribed rather than imported: lib/crypto/vault.ts pulls in
+// expo-secure-store and can't run under Node. What's modelled here is exactly
+// the field-by-field rewrite that function performs.
+console.log('\n--- adopt account key ---');
 {
-  const dataKey = generateDataKey();
-  const oldSalt = generateSalt();
-  const note = '<p>a note written before the PIN changed</p>';
-  const storedCiphertext = encrypt(note, dataKey);
+  const SQLCIPHER_INFO = utf8ToBytes('notes-sqlcipher-v1');
+  const databaseKeyFrom = (seed: Uint8Array) =>
+    bytesToHex(hkdf(sha256, seed, undefined, SQLCIPHER_INFO, 32));
 
-  // Re-wrap: unwrap under the old PIN, wrap under the new one. Exactly what
-  // lib/crypto/vault.ts changePin() does.
-  const unwrapped = unwrapDataKeyWithPin(
-    wrapDataKeyWithPin(dataKey, '111111', oldSalt),
-    '111111',
-    oldSalt
-  );
-  const newSalt = generateSalt();
-  const rewrapped = wrapDataKeyWithPin(unwrapped, '999999', newSalt);
-  const afterChange = unwrapDataKeyWithPin(rewrapped, '999999', newSalt);
+  const deviceKey = generateDeviceKey();
+  const ownKey = generateDataKey();
+  const dbSeed = generateDataKey();
+
+  // Before: this device holds its own key, minted at first launch.
+  let wrappedByDevice = wrapWith(ownKey, deviceKey);
+  const wrappedDbSeedByDevice = wrapWith(dbSeed, deviceKey);
+  const databaseKeyBefore = databaseKeyFrom(unwrapWith(wrappedDbSeedByDevice, deviceKey));
+
+  // A note that already exists on the account, written elsewhere under the
+  // account's key -- the thing adoption exists to make readable.
+  const accountKey = generateDataKey();
+  const accountNote = '<p>written on the other device</p>';
+  const accountCiphertext = encrypt(accountNote, accountKey);
 
   check(
-    'the data key is unchanged by a PIN change',
-    dataKey.every((b, i) => afterChange[i] === b)
+    'before adopting, the account note is unreadable here',
+    (() => {
+      try {
+        decrypt(accountCiphertext, unwrapWith(wrappedByDevice, deviceKey));
+        return false;
+      } catch {
+        return true;
+      }
+    })()
   );
-  // The consequence that matters: every note's stored bytes stay valid and
-  // untouched, so nothing needs re-encrypting and nothing gets re-uploaded.
+
+  // Adopt: re-wrap under the SAME device key (it identifies the device, not
+  // the account), leaving the seed alone.
+  wrappedByDevice = wrapWith(accountKey, deviceKey);
+
   check(
-    'notes encrypted before the change still decrypt after it',
-    decrypt(storedCiphertext, afterChange) === note
+    'the device wrapping now yields the ACCOUNT key, not the old one',
+    sameBytes(unwrapWith(wrappedByDevice, deviceKey), accountKey)
   );
-  check('the old PIN no longer works', (() => {
-    try {
-      unwrapDataKeyWithPin(rewrapped, '111111', newSalt);
-      return false;
-    } catch {
-      return true;
-    }
-  })());
+  check(
+    'the old key is genuinely gone from the device wrapping',
+    !sameBytes(unwrapWith(wrappedByDevice, deviceKey), ownKey)
+  );
+  check(
+    'the account note now decrypts on this device',
+    decrypt(accountCiphertext, unwrapWith(wrappedByDevice, deviceKey)) === accountNote
+  );
+  check(
+    'the database key is byte-identical, so the open file still opens',
+    databaseKeyFrom(unwrapWith(wrappedDbSeedByDevice, deviceKey)) === databaseKeyBefore
+  );
+
+  // The negative case, which is what proves the checks above have teeth: had
+  // the device wrapping been left pointing at the old key, this is the silent
+  // failure that would have shipped.
+  const staleWrapping = wrapWith(ownKey, deviceKey);
+  check(
+    'a stale device wrapping would fail to read the account note',
+    (() => {
+      try {
+        decrypt(accountCiphertext, unwrapWith(staleWrapping, deviceKey));
+        return false;
+      } catch {
+        return true;
+      }
+    })()
+  );
 }
 
 console.log(`\n${failed === 0 ? 'PASS' : 'FAIL'} -- ${failed} failing check(s)`);

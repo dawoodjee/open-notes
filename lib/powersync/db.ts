@@ -324,19 +324,17 @@ export async function emptyTrashInDB(): Promise<void> {
 export interface UiState {
   lastOpenedNoteId: string | null;
   editorScrollOffset: number;
-  lastPinEntryAt: string | null;
 }
 
 export async function getUiState(): Promise<UiState> {
   const row = await getPowerSync().getOptional<any>(
-    'SELECT last_opened_note_id, editor_scroll_offset, last_pin_entry_at FROM ui_state WHERE id = ?',
+    'SELECT last_opened_note_id, editor_scroll_offset FROM ui_state WHERE id = ?',
     ['singleton']
   );
 
   return {
     lastOpenedNoteId: row?.last_opened_note_id ?? null,
     editorScrollOffset: row?.editor_scroll_offset ?? 0,
-    lastPinEntryAt: row?.last_pin_entry_at ?? null,
   };
 }
 
@@ -346,7 +344,7 @@ export async function getUiState(): Promise<UiState> {
 export async function saveUiState(partial: Partial<UiState>): Promise<void> {
   await getPowerSync().writeTransaction(async (tx) => {
     const existing = await tx.getOptional<any>(
-      'SELECT last_opened_note_id, editor_scroll_offset, last_pin_entry_at FROM ui_state WHERE id = ?',
+      'SELECT last_opened_note_id, editor_scroll_offset FROM ui_state WHERE id = ?',
       ['singleton']
     );
 
@@ -354,19 +352,17 @@ export async function saveUiState(partial: Partial<UiState>): Promise<void> {
       partial.lastOpenedNoteId ?? existing?.last_opened_note_id ?? null;
     const editorScrollOffset =
       partial.editorScrollOffset ?? existing?.editor_scroll_offset ?? 0;
-    const lastPinEntryAt =
-      partial.lastPinEntryAt ?? existing?.last_pin_entry_at ?? null;
 
     if (existing) {
       await tx.execute(
-        `UPDATE ui_state SET last_opened_note_id = ?, editor_scroll_offset = ?, last_pin_entry_at = ? WHERE id = ?`,
-        [lastOpenedNoteId, editorScrollOffset, lastPinEntryAt, 'singleton']
+        `UPDATE ui_state SET last_opened_note_id = ?, editor_scroll_offset = ? WHERE id = ?`,
+        [lastOpenedNoteId, editorScrollOffset, 'singleton']
       );
     } else {
       await tx.execute(
-        `INSERT INTO ui_state (id, last_opened_note_id, editor_scroll_offset, last_pin_entry_at)
-         VALUES (?, ?, ?, ?)`,
-        ['singleton', lastOpenedNoteId, editorScrollOffset, lastPinEntryAt]
+        `INSERT INTO ui_state (id, last_opened_note_id, editor_scroll_offset)
+         VALUES (?, ?, ?)`,
+        ['singleton', lastOpenedNoteId, editorScrollOffset]
       );
     }
   });

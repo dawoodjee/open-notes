@@ -41,7 +41,13 @@
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Unlock your notes with Face ID."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
