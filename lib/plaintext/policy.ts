@@ -1,5 +1,5 @@
 /**
- * The decision rules behind the plaintext gates, with no I/O and no imports.
+ * The decision rules behind the plaintext gate, with no I/O and no imports.
  *
  * Split out for one reason: scripts/verify-plaintext-gates.ts can then import
  * and run THIS FILE under Node, rather than a transcription of it. Everything
@@ -8,8 +8,6 @@
  * rules are the part worth testing, and a copy of the rules in a test file is
  * a test of the copy.
  */
-
-export type Gate = 'ai' | 'api';
 
 /** 'never' is stored verbatim in the column; the rest become an instant. */
 export type GateWindow = 30 | 90 | 365 | 'never';
@@ -61,7 +59,6 @@ export type DenialReason =
 export interface EndpointFacts {
   id: string;
   url: string;
-  use: Gate;
   confirmedAt: string | null;
 }
 
@@ -78,21 +75,17 @@ export type AccessDecision =
  * the outside while quietly making "the gate is off" mean nothing.
  */
 export function decideAccess(input: {
-  gate: Gate;
   gateState: GateState;
   noteIds: string[];
   endpoint: EndpointFacts | null;
 }): AccessDecision {
-  const { gate, gateState, noteIds, endpoint } = input;
+  const { gateState, noteIds, endpoint } = input;
 
   if (!gateState.enabled) {
     return { allow: false, denied: gateState.expired ? 'gate-expired' : 'gate-off' };
   }
   if (noteIds.length === 0) return { allow: false, denied: 'no-notes' };
   if (!endpoint) return { allow: false, denied: 'unknown-endpoint' };
-  // A destination registered under the other gate is not reachable by this
-  // one. Otherwise turning on AI access would also open every API endpoint.
-  if (endpoint.use !== gate) return { allow: false, denied: 'unknown-endpoint' };
   if (!endpoint.url) return { allow: false, denied: 'endpoint-incomplete' };
 
   return { allow: true, needsConsent: !endpoint.confirmedAt };

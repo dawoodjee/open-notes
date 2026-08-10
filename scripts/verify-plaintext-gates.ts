@@ -1,5 +1,5 @@
 /**
- * Phase 2 verification (Stage 6.5): the plaintext gates.
+ * Phase 2 verification (Stage 6.5): the plaintext gate.
  *
  * SCOPE, stated as plainly as the other verify scripts. The rules under test
  * are imported and run for real -- lib/plaintext/policy.ts is deliberately
@@ -37,7 +37,6 @@ const NOW = Date.UTC(2026, 7, 10, 12, 0, 0);
 const endpoint = (over: Partial<EndpointFacts> = {}): EndpointFacts => ({
   id: 'e1',
   url: 'https://api.example.com/v1',
-  use: 'ai',
   confirmedAt: '2026-08-01T00:00:00.000Z',
   ...over,
 });
@@ -82,30 +81,29 @@ console.log('\n--- access decisions ---');
 
   check(
     'gate off denies with gate-off',
-    denied(decideAccess({ gate: 'ai', gateState: off, noteIds: ['n1'], endpoint: endpoint() })) ===
+    denied(decideAccess({ gateState: off, noteIds: ['n1'], endpoint: endpoint() })) ===
       'gate-off'
   );
   check(
     'lapsed gate denies with gate-expired',
     denied(
-      decideAccess({ gate: 'ai', gateState: expired, noteIds: ['n1'], endpoint: endpoint() })
+      decideAccess({ gateState: expired, noteIds: ['n1'], endpoint: endpoint() })
     ) === 'gate-expired'
   );
   check(
     'an empty note list is refused -- there is no "all notes" form',
-    denied(decideAccess({ gate: 'ai', gateState: on, noteIds: [], endpoint: endpoint() })) ===
+    denied(decideAccess({ gateState: on, noteIds: [], endpoint: endpoint() })) ===
       'no-notes'
   );
   check(
     'an unregistered destination is refused',
-    denied(decideAccess({ gate: 'ai', gateState: on, noteIds: ['n1'], endpoint: null })) ===
+    denied(decideAccess({ gateState: on, noteIds: ['n1'], endpoint: null })) ===
       'unknown-endpoint'
   );
   check(
     'an endpoint with no URL is refused',
     denied(
       decideAccess({
-        gate: 'ai',
         gateState: on,
         noteIds: ['n1'],
         endpoint: endpoint({ url: '' }),
@@ -113,22 +111,7 @@ console.log('\n--- access decisions ---');
     ) === 'endpoint-incomplete'
   );
 
-  // The cross-gate case: turning on AI access must not also open every
-  // endpoint the user registered for the API gate.
-  check(
-    'the AI gate cannot reach an API endpoint',
-    denied(
-      decideAccess({
-        gate: 'ai',
-        gateState: on,
-        noteIds: ['n1'],
-        endpoint: endpoint({ use: 'api' }),
-      })
-    ) === 'unknown-endpoint'
-  );
-
   const allowed = decideAccess({
-    gate: 'ai',
     gateState: on,
     noteIds: ['n1', 'n2'],
     endpoint: endpoint(),
@@ -137,7 +120,6 @@ console.log('\n--- access decisions ---');
   check('...and needs no further prompt', allowed.allow && allowed.needsConsent === false);
 
   const first = decideAccess({
-    gate: 'ai',
     gateState: on,
     noteIds: ['n1'],
     endpoint: endpoint({ confirmedAt: null }),
@@ -154,9 +136,8 @@ console.log('\n--- access decisions ---');
     endpoint(),
     endpoint({ confirmedAt: null }),
     endpoint({ url: '' }),
-    endpoint({ use: 'api' }),
     null,
-  ].every((e) => !decideAccess({ gate: 'ai', gateState: off, noteIds: ['n1'], endpoint: e }).allow);
+  ].every((e) => !decideAccess({ gateState: off, noteIds: ['n1'], endpoint: e }).allow);
   check('with the gate off, no endpoint state can produce an allow', offAlwaysDenies);
 }
 

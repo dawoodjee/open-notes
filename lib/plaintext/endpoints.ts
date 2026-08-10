@@ -28,13 +28,10 @@ import { getPowerSync } from '@/lib/powersync/db';
  * than rewriting a blob.
  */
 
-export type EndpointUse = 'ai' | 'api';
-
 export interface Endpoint {
   id: string;
   name: string;
   url: string;
-  use: EndpointUse;
   confirmedAt: string | null;
   createdAt: string;
   lastUsedAt: string | null;
@@ -51,7 +48,6 @@ function toEndpoint(row: any): Endpoint {
     id: row.id,
     name: row.name ?? '',
     url: row.url ?? '',
-    use: (row.use as EndpointUse) ?? 'api',
     confirmedAt: row.confirmed_at ?? null,
     createdAt: row.created_at,
     lastUsedAt: row.last_used_at ?? null,
@@ -60,28 +56,28 @@ function toEndpoint(row: any): Endpoint {
 
 export async function listEndpoints(): Promise<Endpoint[]> {
   const rows = await getPowerSync().getAll<any>(
-    'SELECT id, name, url, use, confirmed_at, created_at, last_used_at FROM api_endpoints ORDER BY created_at'
+    'SELECT id, name, url, confirmed_at, created_at, last_used_at FROM api_endpoints ORDER BY created_at'
   );
   return rows.map(toEndpoint);
 }
 
 export async function getEndpoint(id: string): Promise<Endpoint | null> {
   const row = await getPowerSync().getOptional<any>(
-    'SELECT id, name, url, use, confirmed_at, created_at, last_used_at FROM api_endpoints WHERE id = ?',
+    'SELECT id, name, url, confirmed_at, created_at, last_used_at FROM api_endpoints WHERE id = ?',
     [id]
   );
   return row ? toEndpoint(row) : null;
 }
 
-export async function createEndpoint(use: EndpointUse): Promise<Endpoint> {
+export async function createEndpoint(): Promise<Endpoint> {
   const id = Crypto.randomUUID();
   const now = new Date().toISOString();
   await getPowerSync().execute(
-    `INSERT INTO api_endpoints (id, name, url, use, confirmed_at, created_at, last_used_at)
-     VALUES (?, ?, ?, ?, NULL, ?, NULL)`,
-    [id, '', '', use, now]
+    `INSERT INTO api_endpoints (id, name, url, confirmed_at, created_at, last_used_at)
+     VALUES (?, ?, ?, NULL, ?, NULL)`,
+    [id, '', '', now]
   );
-  return { id, name: '', url: '', use, confirmedAt: null, createdAt: now, lastUsedAt: null };
+  return { id, name: '', url: '', confirmedAt: null, createdAt: now, lastUsedAt: null };
 }
 
 /**
@@ -92,7 +88,7 @@ export async function createEndpoint(use: EndpointUse): Promise<Endpoint> {
  */
 export async function updateEndpoint(
   id: string,
-  changes: { name?: string; url?: string; use?: EndpointUse }
+  changes: { name?: string; url?: string }
 ): Promise<void> {
   const existing = await getEndpoint(id);
   if (!existing) return;
@@ -101,8 +97,8 @@ export async function updateEndpoint(
   const confirmedAt = url !== existing.url ? null : existing.confirmedAt;
 
   await getPowerSync().execute(
-    'UPDATE api_endpoints SET name = ?, url = ?, use = ?, confirmed_at = ? WHERE id = ?',
-    [changes.name ?? existing.name, url, changes.use ?? existing.use, confirmedAt, id]
+    'UPDATE api_endpoints SET name = ?, url = ?, confirmed_at = ? WHERE id = ?',
+    [changes.name ?? existing.name, url, confirmedAt, id]
   );
 }
 

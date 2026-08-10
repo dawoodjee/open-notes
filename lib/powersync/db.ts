@@ -325,12 +325,10 @@ export interface UiState {
   lastOpenedNoteId: string | null;
   editorScrollOffset: number;
   /** NULL = off, 'never' = no expiry, otherwise ISO-8601. See schema.ts. */
-  aiGateExpiresAt: string | null;
   apiGateExpiresAt: string | null;
 }
 
-const UI_STATE_COLUMNS =
-  'last_opened_note_id, editor_scroll_offset, ai_gate_expires_at, api_gate_expires_at';
+const UI_STATE_COLUMNS = 'last_opened_note_id, editor_scroll_offset, api_gate_expires_at';
 
 export async function getUiState(): Promise<UiState> {
   const row = await getPowerSync().getOptional<any>(
@@ -341,7 +339,6 @@ export async function getUiState(): Promise<UiState> {
   return {
     lastOpenedNoteId: row?.last_opened_note_id ?? null,
     editorScrollOffset: row?.editor_scroll_offset ?? 0,
-    aiGateExpiresAt: row?.ai_gate_expires_at ?? null,
     apiGateExpiresAt: row?.api_gate_expires_at ?? null,
   };
 }
@@ -360,10 +357,8 @@ export async function saveUiState(partial: Partial<UiState>): Promise<void> {
       partial.lastOpenedNoteId ?? existing?.last_opened_note_id ?? null;
     const editorScrollOffset =
       partial.editorScrollOffset ?? existing?.editor_scroll_offset ?? 0;
-    // `?? existing` would make turning a gate OFF impossible: null is the
+    // `?? existing` would make turning the gate OFF impossible: null is the
     // "off" value, so it has to be distinguishable from "not supplied".
-    const aiGateExpiresAt =
-      'aiGateExpiresAt' in partial ? partial.aiGateExpiresAt : (existing?.ai_gate_expires_at ?? null);
     const apiGateExpiresAt =
       'apiGateExpiresAt' in partial
         ? partial.apiGateExpiresAt
@@ -372,15 +367,15 @@ export async function saveUiState(partial: Partial<UiState>): Promise<void> {
     if (existing) {
       await tx.execute(
         `UPDATE ui_state SET last_opened_note_id = ?, editor_scroll_offset = ?,
-                             ai_gate_expires_at = ?, api_gate_expires_at = ? WHERE id = ?`,
-        [lastOpenedNoteId, editorScrollOffset, aiGateExpiresAt, apiGateExpiresAt, 'singleton']
+                             api_gate_expires_at = ? WHERE id = ?`,
+        [lastOpenedNoteId, editorScrollOffset, apiGateExpiresAt, 'singleton']
       );
     } else {
       await tx.execute(
         `INSERT INTO ui_state (id, last_opened_note_id, editor_scroll_offset,
-                               ai_gate_expires_at, api_gate_expires_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        ['singleton', lastOpenedNoteId, editorScrollOffset, aiGateExpiresAt, apiGateExpiresAt]
+                               api_gate_expires_at)
+         VALUES (?, ?, ?, ?)`,
+        ['singleton', lastOpenedNoteId, editorScrollOffset, apiGateExpiresAt]
       );
     }
   });

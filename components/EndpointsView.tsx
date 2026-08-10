@@ -5,7 +5,6 @@ import { Icon } from '@/components/ui/icon';
 import { SettingsGroup, SettingsSubHeader } from '@/components/ui/settings-group';
 import {
   Endpoint,
-  EndpointUse,
   createEndpoint,
   deleteEndpoint,
   getEndpointToken,
@@ -17,10 +16,6 @@ import {
 
 /**
  * The allow-list of destinations, as a table.
- *
- * One screen for both gates rather than two: an endpoint is the same kind of
- * object either way, and splitting the list would mean the same URL typed
- * twice to serve both. The Use column is what assigns it to a gate.
  *
  * Tokens are write-only here. A saved token renders as its last four
  * characters and is never read back into the field -- there is no reason for
@@ -44,8 +39,8 @@ export function EndpointsView({ onBack }: { onBack: () => void }) {
     void refresh();
   }, [refresh]);
 
-  const handleAdd = async (use: EndpointUse) => {
-    await createEndpoint(use);
+  const handleAdd = async () => {
+    await createEndpoint();
     await refresh();
   };
 
@@ -93,10 +88,7 @@ export function EndpointsView({ onBack }: { onBack: () => void }) {
           )}
         </SettingsGroup>
 
-        <View className="flex-row gap-3">
-          <AddButton label="+ Add AI endpoint" onPress={() => void handleAdd('ai')} />
-          <AddButton label="+ Add API endpoint" onPress={() => void handleAdd('api')} />
-        </View>
+        <AddButton label="+ Add endpoint" onPress={() => void handleAdd()} />
 
         <View className="h-8" />
       </ScrollView>
@@ -108,7 +100,7 @@ function AddButton({ label, onPress }: { label: string; onPress: () => void }) {
   return (
     <Pressable
       onPress={onPress}
-      className="flex-1 py-3 rounded-2xl bg-gray-100 items-center active:bg-gray-200"
+      className="py-3 rounded-2xl bg-gray-100 items-center active:bg-gray-200"
     >
       <RNText className="text-sm font-medium text-gray-700">{label}</RNText>
     </Pressable>
@@ -165,12 +157,7 @@ function EndpointRow({
 
   return (
     <View className="px-4 py-3">
-      <View className="flex-row items-center justify-between mb-2">
-        <View className="px-2 py-0.5 rounded-md bg-gray-200">
-          <RNText className="text-[10px] font-semibold text-gray-600 uppercase">
-            {endpoint.use}
-          </RNText>
-        </View>
+      <View className="flex-row items-center justify-end mb-2">
         <View className="flex-row items-center gap-3">
           {endpoint.confirmedAt ? (
             <RNText className="text-[10px] text-gray-400 uppercase">Approved</RNText>

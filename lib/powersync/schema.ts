@@ -19,8 +19,8 @@ export const uiStateTable = new Table(
   {
     last_opened_note_id: column.text,
     editor_scroll_offset: column.integer,
-    // The two plaintext gates (Stage 6.5). Three states in one column, which
-    // is worth stating explicitly because the encoding is load-bearing:
+    // The plaintext gate (Stage 6.5). Three states in one column, which is
+    // worth stating explicitly because the encoding is load-bearing:
     //
     //   NULL      the gate is OFF. This is the default and the only state in
     //             which lib/plaintext/broker.ts will refuse before decrypting
@@ -30,7 +30,6 @@ export const uiStateTable = new Table(
     //
     // An expiry rather than a plain boolean because a standing permission to
     // send plaintext off the device should have to be renewed deliberately.
-    ai_gate_expires_at: column.text,
     api_gate_expires_at: column.text,
   },
   { localOnly: true }
@@ -54,7 +53,6 @@ export const apiEndpointsTable = new Table(
   {
     name: column.text, // user-facing label; may be empty, shown as "Untitled"
     url: column.text,
-    use: column.text, // 'ai' | 'api' -- which gate governs this destination
     // When the user first approved sending plaintext here. NULL means the
     // consent prompt still has to run, even if the gate is on: the toggle is
     // permission to use the feature, not blanket permission for every
@@ -81,7 +79,6 @@ export const apiEndpointsTable = new Table(
 export const plaintextDisclosuresTable = new Table(
   {
     occurred_at: column.text,
-    gate: column.text, // 'ai' | 'api'
     note_ids: column.text, // JSON array of ids
     endpoint_id: column.text,
     purpose: column.text,

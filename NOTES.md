@@ -48,22 +48,34 @@ plaintext out — which is a real, visible change in what the product promises.
 
 This was built in Stage 6.5. See `lib/plaintext/`.
 
+**There is exactly one gate, and it is the API one.** An "Allow AI access"
+toggle was built alongside it and then deliberately removed: it would have been
+a second name for the same mechanism — decrypt named notes, send them to a
+registered endpoint — differing only in the label on the switch. Two gates
+meant two of everything (columns, code paths, audit shapes) and a cross-gate
+rule to stop one from reaching the other's destinations, all to express a
+distinction the machinery never actually made. If a hosted model is wired up
+later, it is an endpoint like any other and goes through the same gate.
+
+On-device inference needs no gate at all — see the section above. That is still
+the intended home for AI features, and nothing about this changes it.
+
 ### Amended: the per-action consent rule
 
 This section originally said **"per-action consent, not a settings toggle"**,
 on the grounds that a switch buried in settings which silently uploads
 plaintext forever is precisely what this stage exists to prevent. That is still
-the right description of the failure mode, and the two toggles now in
-Settings → Security do not simply overrule it. What shipped is a toggle *plus*
+the right description of the failure mode, and the toggle now in
+Settings → Security does not simply overrule it. What shipped is a toggle *plus*
 the things that stop it becoming that switch:
 
-- **An expiry.** 30 / 90 / 365 days, or Forever if the user insists. Turning
-  one on defaults to 90 days, so the safer option is the one you get by not
+- **An expiry.** 30 / 90 / 365 days, or Forever if the user insists. Turning it
+  on defaults to 90 days, so the safer option is the one you get by not
   thinking about it. A permission that lapses cannot outlive the reason it was
   granted.
 - **Per-request scope.** `requestPlaintext()` takes explicit note ids. There is
-  deliberately no "all notes" form, so a gate being on never means "everything
-  is readable".
+  deliberately no "all notes" form, so the gate being on never means
+  "everything is readable".
 - **Per-destination consent.** The first time plaintext would go to a given
   endpoint, the user is asked, and the prompt names the host. Editing an
   endpoint's URL clears that approval, so "approve something harmless, then

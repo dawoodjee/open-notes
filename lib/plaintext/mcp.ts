@@ -1,6 +1,5 @@
 import { getPowerSync } from '@/lib/powersync/db';
 import { requestPlaintext, BrokerResult, PlaintextNote } from './broker';
-import { Gate } from './gates';
 
 /**
  * Where a tool-calling integration plugs into the gates.
@@ -27,8 +26,6 @@ export interface ToolManifest {
   description: string;
   /** Must be declared. Omitting it is not the same as asking for it. */
   requiresPlaintext: boolean;
-  /** Which standing permission governs this tool. */
-  gate: Gate;
 }
 
 /** The unencrypted columns. Safe for any tool, plaintext-approved or not. */
@@ -75,7 +72,6 @@ export async function resolveToolAccess(
   }
 
   const result: BrokerResult = await requestPlaintext({
-    gate: manifest.gate,
     noteIds: request.noteIds,
     purpose: manifest.description,
     endpointId: request.endpointId,

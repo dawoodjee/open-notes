@@ -11,11 +11,10 @@ import { LockCapability, getLockCapability } from '@/lib/auth/deviceAuth';
 import type { LockSettings } from '@/lib/crypto/vault';
 import {
   GATE_WINDOW_OPTIONS,
-  Gate,
   GateState,
   GateWindow,
   closeGate,
-  getGateStates,
+  getGateState,
   openGate,
 } from '@/lib/plaintext/gates';
 import { Disclosure, listDisclosures } from '@/lib/plaintext/broker';
@@ -55,11 +54,11 @@ export function SecurityView({
   onManageEndpoints: () => void;
 }) {
   const [capability, setCapability] = useState<LockCapability | null>(null);
-  const [gates, setGates] = useState<Record<Gate, GateState> | null>(null);
+  const [gate, setGate] = useState<GateState | null>(null);
   const [disclosures, setDisclosures] = useState<Disclosure[]>([]);
 
   const refreshGates = useCallback(async () => {
-    setGates(await getGateStates());
+    setGate(await getGateState());
     setDisclosures(await listDisclosures(20));
   }, []);
 
@@ -74,9 +73,9 @@ export function SecurityView({
     };
   }, [refreshGates]);
 
-  const setGate = async (gate: Gate, on: boolean, window: GateWindow = 90) => {
-    if (on) await openGate(gate, window);
-    else await closeGate(gate);
+  const updateGate = async (on: boolean, window: GateWindow = 90) => {
+    if (on) await openGate(window);
+    else await closeGate();
     await refreshGates();
   };
 
@@ -129,19 +128,12 @@ export function SecurityView({
 
         <SettingsGroup
           caption="Data access"
-          footnote="Off, nothing can read your notes but this app. On, notes you use with that feature are decrypted here and sent as readable text to an endpoint you choose. Your key never leaves this device, and the server still can’t read your notes on its own."
+          footnote="Off, nothing can read your notes but this app. On, notes an outside request asks for are decrypted here and sent as readable text to an endpoint you choose. Your key never leaves this device, and the server still can’t read your notes on its own."
         >
           <GateRow
-            label="Allow AI access"
-            gate="ai"
-            state={gates?.ai}
-            onToggle={setGate}
-          />
-          <GateRow
             label="Allow API access to deciphered data"
-            gate="api"
-            state={gates?.api}
-            onToggle={setGate}
+            state={gate ?? undefined}
+            onToggle={updateGate}
           />
           <SettingsRow label="Manage endpoints" onPress={onManageEndpoints} />
         </SettingsGroup>
@@ -155,7 +147,7 @@ export function SecurityView({
               <SettingsRow
                 key={d.id}
                 label={d.purpose || 'Request'}
-                sublabel={`${d.gate.toUpperCase()} · ${d.noteIds.length} note${
+                sublabel={`${d.noteIds.length} note${
                   d.noteIds.length === 1 ? '' : 's'
                 } · ${new Date(d.occurredAt).toLocaleString()}`}
               />
@@ -185,14 +177,12 @@ export function SecurityView({
  */
 function GateRow({
   label,
-  gate,
   state,
   onToggle,
 }: {
   label: string;
-  gate: Gate;
   state: GateState | undefined;
-  onToggle: (gate: Gate, on: boolean, window?: GateWindow) => void | Promise<void>;
+  onToggle: (on: boolean, window?: GateWindow) => void | Promise<void>;
 }) {
   const enabled = state?.enabled ?? false;
 
@@ -210,7 +200,7 @@ function GateRow({
                 : undefined
         }
         right={
-          <SettingsToggle value={enabled} onChange={(next) => void onToggle(gate, next)} />
+          <SettingsToggle value={enabled} onChange={(next) => void onToggle(next)} />
         }
       />
       {enabled ? (
@@ -219,7 +209,7 @@ function GateRow({
           <SettingsSegmented
             options={GATE_WINDOW_OPTIONS}
             value={windowFor(state)}
-            onChange={(w) => void onToggle(gate, true, w)}
+            onChange={(w) => void onToggle(true, w)}
           />
         </View>
       ) : null}

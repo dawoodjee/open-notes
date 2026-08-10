@@ -2,7 +2,7 @@ import * as Crypto from 'expo-crypto';
 import { getPowerSync } from '@/lib/powersync/db';
 import { tryDecryptField } from '@/lib/crypto/noteCrypto';
 import { getGateState } from './gates';
-import { DenialReason, Gate, decideAccess } from './policy';
+import { DenialReason, decideAccess } from './policy';
 import {
   Endpoint,
   getEndpoint,
@@ -54,7 +54,6 @@ export interface PlaintextNote {
 }
 
 export interface PlaintextGrant {
-  gate: Gate;
   endpoint: Endpoint;
   token: string | null;
   /**
@@ -66,7 +65,6 @@ export interface PlaintextGrant {
 }
 
 export interface PlaintextRequest {
-  gate: Gate;
   /** Explicit. There is deliberately no "all notes" form. */
   noteIds: string[];
   /** Shown to the user in the consent prompt and recorded in the audit log. */
@@ -83,14 +81,9 @@ export async function requestPlaintext(req: PlaintextRequest): Promise<BrokerRes
   // here, before anything is decrypted. That ordering is what makes "the gate
   // is off" a real property rather than a discarded result -- see
   // ./policy.ts, where the rules live so they can be tested directly.
-  const gateState = await getGateState(req.gate);
+  const gateState = await getGateState();
   const endpoint = await getEndpoint(req.endpointId);
-  const decision = decideAccess({
-    gate: req.gate,
-    gateState,
-    noteIds: req.noteIds,
-    endpoint,
-  });
+  const decision = decideAccess({ gateState, noteIds: req.noteIds, endpoint });
   if (!decision.allow) return { ok: false, denied: decision.denied };
   // decideAccess only allows when the endpoint resolved, but narrowing that
   // through the return type would make the rules harder to read than this
@@ -123,7 +116,6 @@ export async function requestPlaintext(req: PlaintextRequest): Promise<BrokerRes
 
   const byteCount = notes.reduce((sum, n) => sum + n.title.length + n.body.length, 0);
   await recordDisclosure({
-    gate: req.gate,
     noteIds: notes.map((n) => n.id),
     endpointId: endpoint.id,
     purpose: req.purpose,
@@ -133,12 +125,11 @@ export async function requestPlaintext(req: PlaintextRequest): Promise<BrokerRes
 
   return {
     ok: true,
-    grant: makeGrant(req.gate, endpoint, await getEndpointToken(endpoint.id), notes),
+    grant: makeGrant(endpoint, await getEndpointToken(endpoint.id), notes),
   };
 }
 
 function makeGrant(
-  gate: Gate,
   endpoint: Endpoint,
   token: string | null,
   notes: PlaintextNote[]
@@ -152,7 +143,6 @@ function makeGrant(
   }, GRANT_TTL_MS);
 
   return {
-    gate,
     endpoint,
     token,
     consume() {
@@ -172,19 +162,17 @@ function makeGrant(
 const GRANT_TTL_MS = 60_000;
 
 async function recordDisclosure(entry: {
-  gate: Gate;
   noteIds: string[];
   endpointId: string;
   purpose: string;
   byteCount: number;
 }): Promise<void> {
   await getPowerSync().execute(
-    `INSERT INTO plaintext_disclosures (id, occurred_at, gate, note_ids, endpoint_id, purpose, byte_count)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO plaintext_disclosures (id, occurred_at, note_ids, endpoint_id, purpose, byte_count)
+     VALUES (?, ?, ?, ?, ?, ?)`,
     [
       Crypto.randomUUID(),
       new Date().toISOString(),
-      entry.gate,
       JSON.stringify(entry.noteIds),
       entry.endpointId,
       entry.purpose,
@@ -196,7 +184,6 @@ async function recordDisclosure(entry: {
 export interface Disclosure {
   id: string;
   occurredAt: string;
-  gate: Gate;
   noteIds: string[];
   endpointId: string;
   purpose: string;
@@ -205,14 +192,13 @@ export interface Disclosure {
 
 export async function listDisclosures(limit = 50): Promise<Disclosure[]> {
   const rows = await getPowerSync().getAll<any>(
-    `SELECT id, occurred_at, gate, note_ids, endpoint_id, purpose, byte_count
+    `SELECT id, occurred_at, note_ids, endpoint_id, purpose, byte_count
      FROM plaintext_disclosures ORDER BY occurred_at DESC LIMIT ?`,
     [limit]
   );
   return rows.map((row) => ({
     id: row.id,
     occurredAt: row.occurred_at,
-    gate: row.gate as Gate,
     noteIds: JSON.parse(row.note_ids || '[]'),
     endpointId: row.endpoint_id,
     purpose: row.purpose ?? '',
