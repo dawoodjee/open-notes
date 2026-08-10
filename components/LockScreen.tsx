@@ -3,6 +3,7 @@ import { Pressable, Text, View } from 'react-native';
 import { Lock } from 'lucide-react-native';
 import { Icon } from '@/components/ui/icon';
 import { useVault } from '@/contexts/VaultContext';
+import { getUnlockLabels } from '@/lib/auth/deviceAuth';
 
 /**
  * What replaced the PIN pad.
@@ -16,7 +17,18 @@ import { useVault } from '@/contexts/VaultContext';
 export function LockScreen() {
   const { unlock } = useVault();
   const [busy, setBusy] = useState(true);
+  const [phrase, setPhrase] = useState<string | null>(null);
   const attempted = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getUnlockLabels().then((l) => {
+      if (!cancelled) setPhrase(l.phrase);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const attempt = React.useCallback(async () => {
     setBusy(true);
@@ -43,8 +55,11 @@ export function LockScreen() {
       </View>
 
       <Text className="text-xl font-semibold text-gray-900 mb-2">Notes are locked</Text>
-      <Text className="text-sm text-gray-500 text-center mb-8">
-        Unlock with Face ID, Touch ID, or your device passcode.
+      {/* Empty until the device has been asked what it offers. Rendering a
+          guess first and correcting it a frame later is worse than a beat of
+          nothing, because the guess is wrong on one platform or the other. */}
+      <Text className="text-sm text-gray-500 text-center mb-8 min-h-[20px]">
+        {phrase ? `Unlock with ${phrase}.` : ''}
       </Text>
 
       <Pressable

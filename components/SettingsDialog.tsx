@@ -4,16 +4,24 @@ import {
   Modal,
   ModalBackdrop,
   ModalContent,
-  ModalHeader,
   ModalCloseButton,
 } from '@/components/ui/modal';
 import { Pressable } from '@/components/ui/pressable';
 import { HStack } from '@/components/ui/hstack';
 import { Icon } from '@/components/ui/icon';
-import { X, AlertTriangle } from 'lucide-react-native';
+import {
+  X,
+  AlertTriangle,
+  Settings as SettingsIcon,
+  ShieldCheck,
+  Wrench,
+  Palette,
+  Type,
+} from 'lucide-react-native';
 import { getPowerSync } from '@/lib/powersync/db';
 import {
   SettingsGroup,
+  SettingsHeader,
   SettingsRow,
   SettingsSubHeader,
 } from '@/components/ui/settings-group';
@@ -56,7 +64,7 @@ function AdvancedView({ onBack }: { onBack: () => void }) {
 
   return (
     <>
-      <SettingsSubHeader title="Advanced" onBack={onBack} />
+      <SettingsSubHeader title="Advanced" icon={Wrench} onBack={onBack} />
 
       <ScrollView className="flex-1 px-5 pt-4 bg-white">
         <SettingsGroup caption="Sync issues">
@@ -112,27 +120,34 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
       <ModalContent className="w-full max-w-full h-4/5 mt-auto mb-0 mx-0 rounded-t-2xl rounded-b-none border-0 pb-8 bg-white">
         {view === 'root' ? (
           <>
-            <ModalHeader>
-              <RNText className="text-base font-semibold text-gray-900">Settings</RNText>
-              <ModalCloseButton>
-                <Icon as={X} className="text-gray-400 w-5 h-5" />
-              </ModalCloseButton>
-            </ModalHeader>
+            <SettingsHeader
+              title="Settings"
+              icon={SettingsIcon}
+              right={
+                <ModalCloseButton>
+                  <Icon as={X} className="text-gray-400 w-5 h-5" />
+                </ModalCloseButton>
+              }
+            />
 
             {/* A plain ScrollView rather than ModalBody: ModalBody is itself a
                 ScrollView whose className maps to its own style, so its
                 padding and gaps never reach the content container. */}
             <ScrollView className="flex-1 px-5 pt-4 bg-white">
               <SettingsGroup>
-                <SettingsRow label="Security" onPress={() => setView('security')} />
-                <SettingsRow label="Advanced" onPress={() => setView('advanced')} />
+                <SettingsRow
+                  icon={ShieldCheck}
+                  label="Security"
+                  onPress={() => setView('security')}
+                />
+                <SettingsRow icon={Wrench} label="Advanced" onPress={() => setView('advanced')} />
               </SettingsGroup>
 
               {/* Inert placeholders establishing the grouped-list pattern;
                   not implemented yet. */}
               <SettingsGroup caption="Appearance">
-                <SettingsRow label="Theme" disabled />
-                <SettingsRow label="Fonts" disabled />
+                <SettingsRow icon={Palette} label="Theme" disabled />
+                <SettingsRow icon={Type} label="Fonts" disabled />
               </SettingsGroup>
 
               <View className="h-8" />

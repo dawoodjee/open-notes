@@ -136,8 +136,11 @@ export default function NoteEditorPane({
                 )}
               >
                 {/* Visible to Apps -- only meaningful while the API gate is
-                    open, so it is inert (and says why) when it is not. Kept
-                    above Delete because it is the reversible one. */}
+                    open, so it is inert when it is not. The label stays short
+                    in both states: the greyed, unresponsive row already says
+                    "not available", and a row that grows an explanatory clause
+                    only when disabled reflows the menu and reads as an error.
+                    Kept above Delete because it is the reversible one. */}
                 <MenuItem
                   key="api-visibility"
                   textValue="Visible to Apps"
@@ -156,9 +159,7 @@ export default function NoteEditorPane({
                       apiGateOpen ? 'text-gray-800' : 'text-gray-400'
                     }`}
                   >
-                    {apiGateOpen
-                      ? 'Visible to Apps'
-                      : 'Visible to Apps — turn on API access in Settings'}
+                    Visible to Apps
                   </MenuItemLabel>
                 </MenuItem>
 

@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 
 /**
@@ -56,6 +57,72 @@ export async function getLockCapability(): Promise<LockCapability> {
     // matters is offering a lock we can't actually satisfy.
     return 'none';
   }
+}
+
+/**
+ * What this device's unlock is actually CALLED, in the words its own OS uses.
+ *
+ * "Face ID" and "Touch ID" are Apple trademarks for Apple hardware. Printing
+ * them on Android is simply wrong -- there is no Face ID on a Pixel, and a
+ * user reading it has no idea what the app is asking for. The reverse is just
+ * as bad: Android calls the non-biometric factor a "screen lock", iOS calls it
+ * a "passcode", and using one word on both platforms makes the sentence read
+ * as a mistake on one of them.
+ *
+ * So the labels come from the device rather than from a constant, and every
+ * user-facing string that names the unlock method is built from this.
+ */
+export interface UnlockLabels {
+  capability: LockCapability;
+  /** "Face ID", "Touch ID", "fingerprint", "face unlock" -- null when none. */
+  biometric: string | null;
+  /** "passcode" on iOS, "screen lock" on Android. */
+  credential: string;
+  /**
+   * Ready to drop into a sentence after "Unlock with ...".
+   * e.g. "Face ID or your passcode", "your fingerprint or screen lock".
+   */
+  phrase: string;
+}
+
+export async function getUnlockLabels(): Promise<UnlockLabels> {
+  const capability = await getLockCapability();
+  const credential = Platform.OS === 'ios' ? 'passcode' : 'screen lock';
+
+  let types: LocalAuthentication.AuthenticationType[] = [];
+  try {
+    types = await LocalAuthentication.supportedAuthenticationTypesAsync();
+  } catch {
+    // Fall through to the non-biometric wording rather than guessing.
+  }
+
+  const has = (t: LocalAuthentication.AuthenticationType) => types.includes(t);
+  const biometric =
+    capability !== 'biometric'
+      ? null
+      : Platform.OS === 'ios'
+        ? has(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)
+          ? 'Face ID'
+          : 'Touch ID'
+        : has(LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION)
+          ? 'face unlock'
+          : has(LocalAuthentication.AuthenticationType.IRIS)
+            ? 'iris unlock'
+            : 'fingerprint';
+
+  // Apple's names are proper nouns and take no article; Android's are common
+  // nouns and read wrong without one. That asymmetry is why this is a phrase
+  // rather than a list the caller joins itself.
+  const phrase =
+    capability === 'none'
+      ? ''
+      : !biometric
+        ? `your ${credential}`
+        : Platform.OS === 'ios'
+          ? `${biometric} or your ${credential}`
+          : `your ${biometric} or ${credential}`;
+
+  return { capability, biometric, credential, phrase };
 }
 
 export type AuthOutcome = 'ok' | 'cancelled' | 'unavailable';

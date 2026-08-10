@@ -7,7 +7,8 @@ import {
   SettingsSubHeader,
   SettingsToggle,
 } from '@/components/ui/settings-group';
-import { LockCapability, getLockCapability } from '@/lib/auth/deviceAuth';
+import { Lock, Plug, ScrollText, ShieldCheck } from 'lucide-react-native';
+import { UnlockLabels, getUnlockLabels } from '@/lib/auth/deviceAuth';
 import type { LockSettings } from '@/lib/crypto/vault';
 import {
   GATE_WINDOW_OPTIONS,
@@ -53,7 +54,7 @@ export function SecurityView({
   updateLockSettings: (next: LockSettings) => Promise<void>;
   onManageEndpoints: () => void;
 }) {
-  const [capability, setCapability] = useState<LockCapability | null>(null);
+  const [unlock, setUnlock] = useState<UnlockLabels | null>(null);
   const [gate, setGate] = useState<GateState | null>(null);
   const [disclosures, setDisclosures] = useState<Disclosure[]>([]);
 
@@ -64,8 +65,8 @@ export function SecurityView({
 
   useEffect(() => {
     let cancelled = false;
-    void getLockCapability().then((c) => {
-      if (!cancelled) setCapability(c);
+    void getUnlockLabels().then((l) => {
+      if (!cancelled) setUnlock(l);
     });
     void refreshGates();
     return () => {
@@ -81,27 +82,31 @@ export function SecurityView({
 
   // Null means we haven't asked the OS yet. Treating that as 'none' would make
   // the switch flicker from disabled to enabled on every open.
-  const canLock = capability !== null && capability !== 'none';
-  const biometric = capability === 'biometric';
+  const canLock = unlock !== null && unlock.capability !== 'none';
 
   return (
     <>
-      <SettingsSubHeader title="Security" onBack={onBack} />
+      <SettingsSubHeader title="Security" icon={ShieldCheck} onBack={onBack} />
 
       <ScrollView className="flex-1 px-5 pt-4 bg-white">
         <SettingsGroup
           caption="Lock"
           footnote={
-            capability === 'none'
-              ? 'No device lock is set. Anyone with this phone can open your notes. Your notes are still unreadable to the server and to anyone reading the app’s files directly.'
-              : biometric
-                ? 'Unlocks with Face ID, Touch ID, or your device passcode.'
-                : 'Unlocks with your device passcode.'
+            unlock === null
+              ? undefined
+              : unlock.capability === 'none'
+                ? `No ${unlock.credential} is set on this device. Anyone with this phone can open your notes. Your notes are still unreadable to the server and to anyone reading the app’s files directly.`
+                : `Unlocks with ${unlock.phrase}.`
           }
         >
           <SettingsRow
+            icon={Lock}
             label="Require unlock"
-            sublabel={canLock ? undefined : 'Set a passcode on this device to use this.'}
+            sublabel={
+              canLock || unlock === null
+                ? undefined
+                : `Set a ${unlock.credential} on this device to use this.`
+            }
             disabled={!canLock}
             right={
               <SettingsToggle
@@ -135,7 +140,7 @@ export function SecurityView({
             state={gate ?? undefined}
             onToggle={updateGate}
           />
-          <SettingsRow label="Manage endpoints" onPress={onManageEndpoints} />
+          <SettingsRow icon={Plug} label="Manage endpoints" onPress={onManageEndpoints} />
         </SettingsGroup>
 
         {disclosures.length > 0 ? (
@@ -146,6 +151,7 @@ export function SecurityView({
             {disclosures.slice(0, 5).map((d) => (
               <SettingsRow
                 key={d.id}
+                icon={ScrollText}
                 label={d.purpose || 'Request'}
                 sublabel={`${d.noteIds.length} note${
                   d.noteIds.length === 1 ? '' : 's'
@@ -159,7 +165,7 @@ export function SecurityView({
           caption="Encryption"
           footnote="Your notes are encrypted on this device and stay encrypted on the server. Nobody else — including us — can read them."
         >
-          <SettingsRow label="End-to-end encryption" value="On" />
+          <SettingsRow icon={ShieldCheck} label="End-to-end encryption" value="On" />
         </SettingsGroup>
 
         <View className="h-8" />

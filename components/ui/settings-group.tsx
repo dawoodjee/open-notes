@@ -57,6 +57,7 @@ export function SettingsGroup({
 }
 
 export function SettingsRow({
+  icon,
   label,
   sublabel,
   value,
@@ -65,6 +66,8 @@ export function SettingsRow({
   disabled,
   destructive,
 }: {
+  /** Leading glyph, matching the one on this row's pushed view header. */
+  icon?: React.ComponentType<any>;
   label: string;
   sublabel?: string;
   /** Right-aligned secondary text, e.g. the current selection. */
@@ -77,6 +80,14 @@ export function SettingsRow({
 }) {
   const body = (
     <View className="flex-row items-center justify-between px-4 py-3">
+      {icon ? (
+        <Icon
+          as={icon}
+          className={`w-5 h-5 mr-3 ${
+            disabled ? 'text-gray-300' : destructive ? 'text-red-400' : 'text-gray-500'
+          }`}
+        />
+      ) : null}
       <View className="flex-1 pr-3">
         <RNText
           className={`text-base ${
@@ -199,13 +210,46 @@ export function SettingsSegmented<T extends string | number>({
  * black. Every sub-view container below sets bg-white explicitly for the same
  * reason -- don't remove it because it looks redundant.
  */
-export function SettingsSubHeader({ title, onBack }: { title: string; onBack: () => void }) {
+export function SettingsSubHeader({
+  title,
+  icon,
+  onBack,
+}: {
+  title: string;
+  /** Should be the same glyph as the row that pushed this view -- the icon is
+   *  what makes the transition read as "this row opened", rather than as an
+   *  unrelated screen that happens to share a word. */
+  icon?: React.ComponentType<any>;
+  onBack: () => void;
+}) {
   return (
     <View className="flex-row items-center px-5 py-4 border-b border-gray-100 bg-white">
       <Pressable onPress={onBack} className="p-1 -ml-1 mr-2 active:opacity-60">
         <Icon as={ChevronRight} className="text-gray-600 w-5 h-5 rotate-180" />
       </Pressable>
+      {icon ? <Icon as={icon} className="w-5 h-5 mr-2 text-gray-600" /> : null}
       <RNText className="text-base font-semibold text-gray-900">{title}</RNText>
+    </View>
+  );
+}
+
+/** Header for a top-level settings sheet: icon, title, and a close control. */
+export function SettingsHeader({
+  title,
+  icon,
+  right,
+}: {
+  title: string;
+  icon?: React.ComponentType<any>;
+  right?: React.ReactNode;
+}) {
+  return (
+    <View className="flex-row items-center justify-between px-5 py-4 bg-white">
+      <View className="flex-row items-center">
+        {icon ? <Icon as={icon} className="w-5 h-5 mr-2 text-gray-600" /> : null}
+        <RNText className="text-base font-semibold text-gray-900">{title}</RNText>
+      </View>
+      {right}
     </View>
   );
 }
