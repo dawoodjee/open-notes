@@ -88,7 +88,7 @@ export function SecurityView({
     <>
       <SettingsSubHeader title="Security" icon={ShieldCheck} onBack={onBack} />
 
-      <ScrollView className="flex-1 px-5 pt-4 bg-white">
+      <ScrollView className="flex-1 px-5 pt-4 bg-background">
         <SettingsGroup
           caption="Lock"
           footnote={
@@ -211,7 +211,7 @@ function GateRow({
       />
       {enabled ? (
         <View className="px-4 py-3">
-          <RNText className="text-xs text-gray-400 mb-2">Allow for</RNText>
+          <RNText className="text-xs text-muted-foreground mb-2">Allow for</RNText>
           <SettingsSegmented
             options={GATE_WINDOW_OPTIONS}
             value={windowFor(state)}

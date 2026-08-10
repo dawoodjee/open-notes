@@ -109,7 +109,7 @@ export default function AccountField({
       ? 'text-green-600'
       : statusTone === 'error'
         ? 'text-pink-600'
-        : 'text-gray-400';
+        : 'text-muted-foreground';
 
   return (
     <VStack className="gap-1.5">
@@ -128,7 +128,7 @@ export default function AccountField({
               onPress={canCommit ? onCommit : undefined}
               disabled={!canCommit}
               className={`w-9 h-9 rounded-xl items-center justify-center ${
-                canCommit ? 'bg-lime-500 active:bg-lime-600' : 'bg-gray-300'
+                canCommit ? 'bg-lime-500 active:bg-lime-600' : 'bg-muted'
               }`}
             >
               <Icon as={canCommit ? Check : X} className="text-white w-4 h-4" />

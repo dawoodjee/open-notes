@@ -29,6 +29,7 @@ import {
   IndentIncrease,
   IndentDecrease,
 } from 'lucide-react-native';
+import { useTheme } from '@/contexts/ThemeContext';
 
 export interface RichEditorProps {
   initialContent?: string;
@@ -93,8 +94,59 @@ function sanitizeHtmlOutput(html: string): string {
     .replace(/<br\s*\/?>$/gi, '');
 }
 
-// Authentic Apple Notes typography forced across all WebView nodes
+/**
+ * The editor's palette, per scheme.
+ *
+ * The WebView is its own document. No Tailwind class, no NativeWind variant
+ * and no Appearance.setColorScheme call reaches inside it, so the theme has to
+ * be handed across the bridge explicitly -- which is what makes this the one
+ * part of dark mode that needs its own mechanism.
+ */
+const EDITOR_COLORS = {
+  light: {
+    bg: '#ffffff',
+    fg: '#1c1c1e',
+    body: '#374151',
+    heading: '#111827',
+    subheading: '#1f2937',
+    muted: '#636366',
+    codeBg: '#f2f2f7',
+    selectionBg: '#ECFCCB',
+    selectionFg: '#365314',
+    caret: '#1c1c1e',
+  },
+  dark: {
+    bg: '#0a0a0a',
+    fg: '#fafafa',
+    body: '#d4d4d4',
+    heading: '#fafafa',
+    subheading: '#e5e5e5',
+    muted: '#a1a1a1',
+    codeBg: '#262626',
+    selectionBg: '#3f6212',
+    selectionFg: '#ecfccb',
+    caret: '#fafafa',
+  },
+} as const;
+
+/** The variable assignments for one scheme, as a CSS declaration block. */
+function editorColorVars(scheme: 'light' | 'dark'): string {
+  const c = EDITOR_COLORS[scheme];
+  return Object.entries(c)
+    .map(([name, value]) => `--editor-${name}: ${value};`)
+    .join('\n    ');
+}
+
+// Authentic Apple Notes typography forced across all WebView nodes.
+//
+// Written entirely against custom properties so the theme can be changed
+// later by resetting the variables (see applyEditorTheme) rather than
+// rebuilding the stylesheet -- which would mean recreating the bridge, and
+// with it losing the caret and re-running the scroll restore every time.
 const editorThemeCSS = `
+  :root {
+    ${editorColorVars('light')}
+  }
   * {
     box-sizing: border-box;
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
@@ -104,8 +156,8 @@ const editorThemeCSS = `
   body, html {
     margin: 0;
     padding: 0;
-    color: #1c1c1e;
-    background-color: #ffffff;
+    color: var(--editor-fg);
+    background-color: var(--editor-bg);
     font-size: 16px;
     line-height: 1.5;
   }
@@ -113,23 +165,24 @@ const editorThemeCSS = `
     outline: none;
     min-height: 100vh;
     padding: 24px;
+    caret-color: var(--editor-caret);
   }
   .ProseMirror p {
     margin-top: 0;
     margin-bottom: 0.75rem;
-    color: #374151;
+    color: var(--editor-body);
   }
   h1 {
     font-size: 1.875rem;
     font-weight: 700;
-    color: #111827;
+    color: var(--editor-heading);
     margin-top: 0;
     margin-bottom: 0.25rem;
   }
   h2 {
     font-size: 1.25rem;
     font-weight: 600;
-    color: #1f2937;
+    color: var(--editor-subheading);
     margin-top: 0.75rem;
     margin-bottom: 0.25rem;
   }
@@ -137,12 +190,12 @@ const editorThemeCSS = `
     border-left: 3px solid #84CC16;
     padding-left: 1rem;
     margin: 0 0 0.75rem 0;
-    color: #636366;
+    color: var(--editor-muted);
     font-style: italic;
   }
   code {
-    background-color: #f2f2f7;
-    color: #1c1c1e;
+    background-color: var(--editor-codeBg);
+    color: var(--editor-fg);
     padding: 0.2rem 0.4rem;
     border-radius: 0.25rem;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
@@ -153,10 +206,25 @@ const editorThemeCSS = `
     margin-bottom: 0.75rem;
   }
   ::selection {
-    background-color: #ECFCCB;
-    color: #365314;
+    background-color: var(--editor-selectionBg);
+    color: var(--editor-selectionFg);
   }
 `;
+
+/** JS that repaints the document for a scheme, for injection over the bridge. */
+function applyEditorThemeJS(scheme: 'light' | 'dark'): string {
+  const c = EDITOR_COLORS[scheme];
+  const assignments = Object.entries(c)
+    .map(([name, value]) => `r.style.setProperty('--editor-${name}', '${value}');`)
+    .join('\n      ');
+  return `
+    (function() {
+      var r = document.documentElement;
+      ${assignments}
+    })();
+    true;
+  `;
+}
 
 export default function RichEditor({
   initialContent = '',
@@ -313,6 +381,18 @@ export default function RichEditor({
 
   const editorState = useBridgeState(editor);
 
+  // Repaint the WebView when the theme changes, and again on every load --
+  // the stylesheet ships with the light values baked in, so a WebView that
+  // mounts while dark is active would otherwise start white and stay white.
+  const { scheme } = useTheme();
+  const applyEditorTheme = useCallback(() => {
+    editor.injectJS(applyEditorThemeJS(scheme));
+  }, [editor, scheme]);
+
+  useEffect(() => {
+    applyEditorTheme();
+  }, [applyEditorTheme]);
+
   const onScrollOffsetChangeRef = useRef(onScrollOffsetChange);
   useEffect(() => {
     onScrollOffsetChangeRef.current = onScrollOffsetChange;
@@ -397,13 +477,14 @@ export default function RichEditor({
   const isHeading2Active = editorState.headingLevel === 2;
 
   return (
-    <Box className="flex-1 bg-white flex flex-col">
+    <Box className="flex-1 bg-background flex flex-col">
       {/* Editor Canvas */}
       <Box className="flex-1">
         <RichText
           editor={editor}
           style={{ flex: 1 }}
           onLoadEnd={() => {
+            applyEditorTheme();
             installScrollListener();
             restoreScroll();
           }}
@@ -415,19 +496,19 @@ export default function RichEditor({
       </Box>
 
       {/* Toolbar built with Gluestack UI components */}
-      <Box className="border-t border-gray-100 bg-white px-3 py-1.5">
+      <Box className="border-t border-border bg-background px-3 py-1.5">
         <HStack className="items-center space-x-1 flex-wrap">
           {/* Bold */}
           <Pressable
             onPress={() => editor.toggleBold()}
             className={`p-2 rounded-lg transition-colors ${
-              editorState.isBoldActive ? 'bg-lime-100' : 'bg-transparent'
+              editorState.isBoldActive ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={Bold}
               className={`w-4 h-4 ${
-                editorState.isBoldActive ? 'text-lime-700' : 'text-gray-600'
+                editorState.isBoldActive ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>
@@ -436,13 +517,13 @@ export default function RichEditor({
           <Pressable
             onPress={() => editor.toggleItalic()}
             className={`p-2 rounded-lg transition-colors ${
-              editorState.isItalicActive ? 'bg-lime-100' : 'bg-transparent'
+              editorState.isItalicActive ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={Italic}
               className={`w-4 h-4 ${
-                editorState.isItalicActive ? 'text-lime-700' : 'text-gray-600'
+                editorState.isItalicActive ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>
@@ -451,30 +532,30 @@ export default function RichEditor({
           <Pressable
             onPress={() => editor.toggleStrike()}
             className={`p-2 rounded-lg transition-colors ${
-              editorState.isStrikeActive ? 'bg-lime-100' : 'bg-transparent'
+              editorState.isStrikeActive ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={Strikethrough}
               className={`w-4 h-4 ${
-                editorState.isStrikeActive ? 'text-lime-700' : 'text-gray-600'
+                editorState.isStrikeActive ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>
 
-          <Box className="w-px h-4 bg-gray-200 mx-1" />
+          <Box className="w-px h-4 bg-border mx-1" />
 
           {/* Heading 1 */}
           <Pressable
             onPress={() => editor.toggleHeading(1)}
             className={`p-2 rounded-lg transition-colors ${
-              isHeading1Active ? 'bg-lime-100' : 'bg-transparent'
+              isHeading1Active ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={Heading1}
               className={`w-4 h-4 ${
-                isHeading1Active ? 'text-lime-700' : 'text-gray-600'
+                isHeading1Active ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>
@@ -483,30 +564,30 @@ export default function RichEditor({
           <Pressable
             onPress={() => editor.toggleHeading(2)}
             className={`p-2 rounded-lg transition-colors ${
-              isHeading2Active ? 'bg-lime-100' : 'bg-transparent'
+              isHeading2Active ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={Heading2}
               className={`w-4 h-4 ${
-                isHeading2Active ? 'text-lime-700' : 'text-gray-600'
+                isHeading2Active ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>
 
-          <Box className="w-px h-4 bg-gray-200 mx-1" />
+          <Box className="w-px h-4 bg-border mx-1" />
 
           {/* Bullet List */}
           <Pressable
             onPress={() => editor.toggleBulletList()}
             className={`p-2 rounded-lg transition-colors ${
-              editorState.isBulletListActive ? 'bg-lime-100' : 'bg-transparent'
+              editorState.isBulletListActive ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={List}
               className={`w-4 h-4 ${
-                editorState.isBulletListActive ? 'text-lime-700' : 'text-gray-600'
+                editorState.isBulletListActive ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>
@@ -515,13 +596,13 @@ export default function RichEditor({
           <Pressable
             onPress={() => editor.toggleOrderedList()}
             className={`p-2 rounded-lg transition-colors ${
-              editorState.isOrderedListActive ? 'bg-lime-100' : 'bg-transparent'
+              editorState.isOrderedListActive ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={ListOrdered}
               className={`w-4 h-4 ${
-                editorState.isOrderedListActive ? 'text-lime-700' : 'text-gray-600'
+                editorState.isOrderedListActive ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>
@@ -541,7 +622,7 @@ export default function RichEditor({
             disabled={!editorState.canLift}
             className={`p-2 rounded-lg ${editorState.canLift ? '' : 'opacity-30'}`}
           >
-            <Icon as={IndentDecrease} className="w-4 h-4 text-gray-600" />
+            <Icon as={IndentDecrease} className="w-4 h-4 text-muted-foreground" />
           </Pressable>
 
           <Pressable
@@ -549,22 +630,22 @@ export default function RichEditor({
             disabled={!editorState.canSink}
             className={`p-2 rounded-lg ${editorState.canSink ? '' : 'opacity-30'}`}
           >
-            <Icon as={IndentIncrease} className="w-4 h-4 text-gray-600" />
+            <Icon as={IndentIncrease} className="w-4 h-4 text-muted-foreground" />
           </Pressable>
 
-          <Box className="w-px h-4 bg-gray-200 mx-1" />
+          <Box className="w-px h-4 bg-border mx-1" />
 
           {/* Blockquote */}
           <Pressable
             onPress={() => editor.toggleBlockquote()}
             className={`p-2 rounded-lg transition-colors ${
-              editorState.isBlockquoteActive ? 'bg-lime-100' : 'bg-transparent'
+              editorState.isBlockquoteActive ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={Quote}
               className={`w-4 h-4 ${
-                editorState.isBlockquoteActive ? 'text-lime-700' : 'text-gray-600'
+                editorState.isBlockquoteActive ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>
@@ -573,13 +654,13 @@ export default function RichEditor({
           <Pressable
             onPress={() => editor.toggleCode()}
             className={`p-2 rounded-lg transition-colors ${
-              editorState.isCodeActive ? 'bg-lime-100' : 'bg-transparent'
+              editorState.isCodeActive ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={Code}
               className={`w-4 h-4 ${
-                editorState.isCodeActive ? 'text-lime-700' : 'text-gray-600'
+                editorState.isCodeActive ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>

@@ -31,12 +31,12 @@ export function PlaintextConsentDialog() {
 
   return (
     <View className="absolute inset-0 items-center justify-center px-8 bg-black/40">
-      <View className="w-full rounded-2xl bg-white p-6">
-        <RNText className="text-lg font-semibold text-gray-900 mb-2">
+      <View className="w-full rounded-2xl bg-background p-6">
+        <RNText className="text-lg font-semibold text-foreground mb-2">
           Send {noteCount === 1 ? 'this note' : `${noteCount} notes`} to {host}?
         </RNText>
-        <RNText className="text-sm text-gray-500 mb-1">{purpose}</RNText>
-        <RNText className="text-sm text-gray-500 mb-5">
+        <RNText className="text-sm text-muted-foreground mb-1">{purpose}</RNText>
+        <RNText className="text-sm text-muted-foreground mb-5">
           The text will be decrypted on this device and sent as readable text. Your key stays here.
           You&apos;ll only be asked once for {endpoint.name || 'this endpoint'}.
         </RNText>
@@ -49,9 +49,9 @@ export function PlaintextConsentDialog() {
         </Pressable>
         <Pressable
           onPress={deny}
-          className="rounded-2xl h-12 items-center justify-center active:bg-gray-100"
+          className="rounded-2xl h-12 items-center justify-center active:bg-muted"
         >
-          <RNText className="text-gray-500 font-medium">Don&apos;t send</RNText>
+          <RNText className="text-muted-foreground font-medium">Don&apos;t send</RNText>
         </Pressable>
       </View>
     </View>

@@ -167,32 +167,32 @@ export default function RichEditor({
   const canLift = editor.can().liftListItem('listItem');
 
   return (
-    <Box className="flex-1 bg-white flex flex-col">
+    <Box className="flex-1 bg-background flex flex-col">
       {/* Editor Canvas with tightened vertical margins */}
       <Box className="flex-1 overflow-y-auto p-6">
         <EditorContent
           editor={editor}
-          className="prose max-w-none min-h-full font-sans text-gray-900
+          className="prose max-w-none min-h-full font-sans text-foreground
             [&_.ProseMirror]:outline-none [&_.ProseMirror]:ring-0
-            [&_.ProseMirror_h1]:text-3xl [&_.ProseMirror_h1]:font-bold [&_.ProseMirror_h1]:text-gray-900 [&_.ProseMirror_h1]:mt-0 [&_.ProseMirror_h1]:mb-1
-            [&_.ProseMirror_h2]:text-xl [&_.ProseMirror_h2]:font-semibold [&_.ProseMirror_h2]:text-gray-800 [&_.ProseMirror_h2]:mt-3 [&_.ProseMirror_h2]:mb-1
-            [&_.ProseMirror_p]:text-base [&_.ProseMirror_p]:text-gray-700 [&_.ProseMirror_p]:leading-relaxed [&_.ProseMirror_p]:my-1"
+            [&_.ProseMirror_h1]:text-3xl [&_.ProseMirror_h1]:font-bold [&_.ProseMirror_h1]:text-foreground [&_.ProseMirror_h1]:mt-0 [&_.ProseMirror_h1]:mb-1
+            [&_.ProseMirror_h2]:text-xl [&_.ProseMirror_h2]:font-semibold [&_.ProseMirror_h2]:text-foreground [&_.ProseMirror_h2]:mt-3 [&_.ProseMirror_h2]:mb-1
+            [&_.ProseMirror_p]:text-base [&_.ProseMirror_p]:text-muted-foreground [&_.ProseMirror_p]:leading-relaxed [&_.ProseMirror_p]:my-1"
         />
       </Box>
 
       {/* Toolbar */}
-      <Box className="border-t border-gray-100 bg-white px-3 py-1.5">
+      <Box className="border-t border-border bg-background px-3 py-1.5">
         <HStack className="items-center space-x-1 flex-wrap">
           <Pressable
             onPress={() => editor.chain().focus().toggleBold().run()}
             className={`p-2 rounded-lg transition-colors ${
-              editor.isActive('bold') ? 'bg-lime-100' : 'bg-transparent'
+              editor.isActive('bold') ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={Bold}
               className={`w-4 h-4 ${
-                editor.isActive('bold') ? 'text-lime-700' : 'text-gray-600'
+                editor.isActive('bold') ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>
@@ -200,13 +200,13 @@ export default function RichEditor({
           <Pressable
             onPress={() => editor.chain().focus().toggleItalic().run()}
             className={`p-2 rounded-lg transition-colors ${
-              editor.isActive('italic') ? 'bg-lime-100' : 'bg-transparent'
+              editor.isActive('italic') ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={Italic}
               className={`w-4 h-4 ${
-                editor.isActive('italic') ? 'text-lime-700' : 'text-gray-600'
+                editor.isActive('italic') ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>
@@ -214,29 +214,29 @@ export default function RichEditor({
           <Pressable
             onPress={() => editor.chain().focus().toggleStrike().run()}
             className={`p-2 rounded-lg transition-colors ${
-              editor.isActive('strike') ? 'bg-lime-100' : 'bg-transparent'
+              editor.isActive('strike') ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={Strikethrough}
               className={`w-4 h-4 ${
-                editor.isActive('strike') ? 'text-lime-700' : 'text-gray-600'
+                editor.isActive('strike') ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>
 
-          <Box className="w-px h-4 bg-gray-200 mx-1" />
+          <Box className="w-px h-4 bg-border mx-1" />
 
           <Pressable
             onPress={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
             className={`p-2 rounded-lg transition-colors ${
-              editor.isActive('heading', { level: 1 }) ? 'bg-lime-100' : 'bg-transparent'
+              editor.isActive('heading', { level: 1 }) ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={Heading1}
               className={`w-4 h-4 ${
-                editor.isActive('heading', { level: 1 }) ? 'text-lime-700' : 'text-gray-600'
+                editor.isActive('heading', { level: 1 }) ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>
@@ -244,29 +244,29 @@ export default function RichEditor({
           <Pressable
             onPress={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
             className={`p-2 rounded-lg transition-colors ${
-              editor.isActive('heading', { level: 2 }) ? 'bg-lime-100' : 'bg-transparent'
+              editor.isActive('heading', { level: 2 }) ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={Heading2}
               className={`w-4 h-4 ${
-                editor.isActive('heading', { level: 2 }) ? 'text-lime-700' : 'text-gray-600'
+                editor.isActive('heading', { level: 2 }) ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>
 
-          <Box className="w-px h-4 bg-gray-200 mx-1" />
+          <Box className="w-px h-4 bg-border mx-1" />
 
           <Pressable
             onPress={() => editor.chain().focus().toggleBulletList().run()}
             className={`p-2 rounded-lg transition-colors ${
-              editor.isActive('bulletList') ? 'bg-lime-100' : 'bg-transparent'
+              editor.isActive('bulletList') ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={List}
               className={`w-4 h-4 ${
-                editor.isActive('bulletList') ? 'text-lime-700' : 'text-gray-600'
+                editor.isActive('bulletList') ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>
@@ -274,13 +274,13 @@ export default function RichEditor({
           <Pressable
             onPress={() => editor.chain().focus().toggleOrderedList().run()}
             className={`p-2 rounded-lg transition-colors ${
-              editor.isActive('orderedList') ? 'bg-lime-100' : 'bg-transparent'
+              editor.isActive('orderedList') ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={ListOrdered}
               className={`w-4 h-4 ${
-                editor.isActive('orderedList') ? 'text-lime-700' : 'text-gray-600'
+                editor.isActive('orderedList') ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>
@@ -292,7 +292,7 @@ export default function RichEditor({
             disabled={!canLift}
             className={`p-2 rounded-lg ${canLift ? '' : 'opacity-30'}`}
           >
-            <Icon as={IndentDecrease} className="w-4 h-4 text-gray-600" />
+            <Icon as={IndentDecrease} className="w-4 h-4 text-muted-foreground" />
           </Pressable>
 
           <Pressable
@@ -300,21 +300,21 @@ export default function RichEditor({
             disabled={!canSink}
             className={`p-2 rounded-lg ${canSink ? '' : 'opacity-30'}`}
           >
-            <Icon as={IndentIncrease} className="w-4 h-4 text-gray-600" />
+            <Icon as={IndentIncrease} className="w-4 h-4 text-muted-foreground" />
           </Pressable>
 
-          <Box className="w-px h-4 bg-gray-200 mx-1" />
+          <Box className="w-px h-4 bg-border mx-1" />
 
           <Pressable
             onPress={() => editor.chain().focus().toggleBlockquote().run()}
             className={`p-2 rounded-lg transition-colors ${
-              editor.isActive('blockquote') ? 'bg-lime-100' : 'bg-transparent'
+              editor.isActive('blockquote') ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={Quote}
               className={`w-4 h-4 ${
-                editor.isActive('blockquote') ? 'text-lime-700' : 'text-gray-600'
+                editor.isActive('blockquote') ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>
@@ -322,13 +322,13 @@ export default function RichEditor({
           <Pressable
             onPress={() => editor.chain().focus().toggleCode().run()}
             className={`p-2 rounded-lg transition-colors ${
-              editor.isActive('code') ? 'bg-lime-100' : 'bg-transparent'
+              editor.isActive('code') ? 'bg-lime-100 dark:bg-lime-900/40' : 'bg-transparent'
             }`}
           >
             <Icon
               as={Code}
               className={`w-4 h-4 ${
-                editor.isActive('code') ? 'text-lime-700' : 'text-gray-600'
+                editor.isActive('code') ? 'text-lime-700 dark:text-lime-400' : 'text-muted-foreground'
               }`}
             />
           </Pressable>

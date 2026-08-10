@@ -56,20 +56,20 @@ export function SecureAccountScreen() {
   if (error) {
     return (
       <View className="flex-1 justify-center px-8">
-        <Text className="text-xl font-semibold text-gray-900 mb-3">Something went wrong</Text>
-        <Text className="text-sm text-gray-500 mb-6">{error}</Text>
+        <Text className="text-xl font-semibold text-foreground mb-3">Something went wrong</Text>
+        <Text className="text-sm text-muted-foreground mb-6">{error}</Text>
         <Pressable
           onPress={() => void pending.cancel()}
           className="h-12 items-center justify-center active:opacity-60"
         >
-          <Text className="text-gray-500">Sign out</Text>
+          <Text className="text-muted-foreground">Sign out</Text>
         </Pressable>
       </View>
     );
   }
 
   if (!code) {
-    return <View className="flex-1 bg-white" />;
+    return <View className="flex-1 bg-background" />;
   }
 
   return (

@@ -53,8 +53,8 @@ export function AdoptKeyScreen() {
 
   return (
     <View className="flex-1 justify-center px-8">
-      <Text className="text-xl font-semibold text-gray-900 mb-3">Unlock your notes here</Text>
-      <Text className="text-sm text-gray-500 mb-6">
+      <Text className="text-xl font-semibold text-foreground mb-3">Unlock your notes here</Text>
+      <Text className="text-sm text-muted-foreground mb-6">
         This account&apos;s notes were encrypted on another device. Enter your recovery code to
         unlock them here. We can&apos;t do this for you — the code is the only thing that can.
       </Text>
@@ -62,17 +62,17 @@ export function AdoptKeyScreen() {
       <RecoveryCodeInput value={code} onChange={setCode} />
 
       <View className="h-8 justify-center">
-        <Text className={`text-sm ${error ? 'text-red-500' : 'text-gray-500'}`}>{error ?? ''}</Text>
+        <Text className={`text-sm ${error ? 'text-destructive' : 'text-muted-foreground'}`}>{error ?? ''}</Text>
       </View>
 
       <Pressable
         onPress={() => void submit()}
         disabled={!ready}
         className={`rounded-2xl h-12 items-center justify-center mb-3 ${
-          ready ? 'bg-black active:opacity-70' : 'bg-gray-200'
+          ready ? 'bg-black active:opacity-70' : 'bg-muted'
         }`}
       >
-        <Text className={`font-semibold ${ready ? 'text-white' : 'text-gray-400'}`}>
+        <Text className={`font-semibold ${ready ? 'text-white' : 'text-muted-foreground'}`}>
           {busy ? 'Unlocking…' : 'Unlock'}
         </Text>
       </Pressable>
@@ -81,10 +81,10 @@ export function AdoptKeyScreen() {
         onPress={() => void pending.cancel()}
         className="h-12 items-center justify-center active:opacity-60"
       >
-        <Text className="text-gray-500">Sign out instead</Text>
+        <Text className="text-muted-foreground">Sign out instead</Text>
       </Pressable>
 
-      <Text className="text-xs text-gray-400 mt-4">
+      <Text className="text-xs text-muted-foreground mt-4">
         Don&apos;t have it? Any device still signed in to this account can read these notes. Without
         the code and without such a device, they can&apos;t be recovered by anyone.
       </Text>

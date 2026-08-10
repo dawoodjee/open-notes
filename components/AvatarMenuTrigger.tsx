@@ -44,13 +44,13 @@ export default function AvatarMenuTrigger({ className }: AvatarMenuTriggerProps)
           <Pressable
             {...triggerProps}
             className={`w-8 h-8 rounded-full items-center justify-center border ${
-              isLoggedIn ? 'bg-lime-100 border-lime-300' : 'bg-transparent border-gray-300'
+              isLoggedIn ? 'bg-lime-100 border-lime-300' : 'bg-transparent border-border'
             } ${className ?? ''}`}
           >
             {isLoggedIn ? (
               <RNText className="text-xs font-bold text-lime-800">{initials}</RNText>
             ) : (
-              <Icon as={CircleUserRound} className="text-gray-400 w-5 h-5" />
+              <Icon as={CircleUserRound} className="text-muted-foreground w-5 h-5" />
             )}
           </Pressable>
         )}
@@ -61,8 +61,8 @@ export default function AvatarMenuTrigger({ className }: AvatarMenuTriggerProps)
           onPress={() => setIsSettingsOpen(true)}
           className="p-2.5 flex-row items-center gap-2"
         >
-          <Icon as={Settings} className="text-gray-600 w-4 h-4" />
-          <MenuItemLabel className="text-sm font-medium text-gray-800">Settings</MenuItemLabel>
+          <Icon as={Settings} className="text-muted-foreground w-4 h-4" />
+          <MenuItemLabel className="text-sm font-medium text-foreground">Settings</MenuItemLabel>
         </MenuItem>
 
         <MenuSeparator />
@@ -81,10 +81,10 @@ export default function AvatarMenuTrigger({ className }: AvatarMenuTriggerProps)
         >
           <Icon
             as={CircleUserRound}
-            className={`w-4 h-4 ${isLoggedIn ? 'text-gray-600' : 'text-pink-600'}`}
+            className={`w-4 h-4 ${isLoggedIn ? 'text-muted-foreground' : 'text-pink-600'}`}
           />
           <MenuItemLabel
-            className={`text-sm font-medium ${isLoggedIn ? 'text-gray-800' : 'text-pink-600'}`}
+            className={`text-sm font-medium ${isLoggedIn ? 'text-foreground' : 'text-pink-600'}`}
           >
             {isLoggedIn ? 'Manage Account' : 'Enable Sync'}
           </MenuItemLabel>

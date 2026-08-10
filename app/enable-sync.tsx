@@ -13,6 +13,7 @@ import { X } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase/client';
 import { signInWithGoogle } from '@/lib/auth/oauth';
 import { useAuth } from '@/contexts/AuthContext';
+import { BACKGROUND, useTheme } from '@/contexts/ThemeContext';
 
 type Step = 'email' | 'code';
 
@@ -31,6 +32,7 @@ type Step = 'email' | 'code';
 export default function EnableSyncScreen() {
   const router = useRouter();
   const { session } = useAuth();
+  const { scheme } = useTheme();
 
   const [step, setStep] = useState<Step>('email');
   const [email, setEmail] = useState('');
@@ -110,18 +112,18 @@ export default function EnableSyncScreen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#ffffff' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND[scheme] }}>
       <HStack className="justify-between items-center px-4 py-3">
-        <RNText className="text-lg font-semibold text-gray-900">Enable Sync</RNText>
-        <Pressable onPress={dismiss} className="p-1.5 rounded-full active:bg-gray-100">
-          <Icon as={X} className="text-gray-500 w-5 h-5" />
+        <RNText className="text-lg font-semibold text-foreground">Enable Sync</RNText>
+        <Pressable onPress={dismiss} className="p-1.5 rounded-full active:bg-muted">
+          <Icon as={X} className="text-muted-foreground w-5 h-5" />
         </Pressable>
       </HStack>
 
       <VStack className="flex-1 px-6 pt-4 gap-4">
         {step === 'email' && (
           <>
-            <RNText className="text-sm text-gray-500">
+            <RNText className="text-sm text-muted-foreground">
               Enter your email and we’ll send you a one-time code — no password needed.
             </RNText>
             <Input className="rounded-lg h-11 px-3">
@@ -147,24 +149,24 @@ export default function EnableSyncScreen() {
             </Pressable>
 
             <HStack className="items-center gap-3 my-2">
-              <VStack className="flex-1 h-px bg-gray-200" />
-              <RNText className="text-xs text-gray-400">or</RNText>
-              <VStack className="flex-1 h-px bg-gray-200" />
+              <VStack className="flex-1 h-px bg-muted" />
+              <RNText className="text-xs text-muted-foreground">or</RNText>
+              <VStack className="flex-1 h-px bg-muted" />
             </HStack>
 
             <Pressable
               onPress={handleGoogleSignIn}
               disabled={isSubmitting}
-              className="py-3 rounded-lg border border-gray-300 items-center active:bg-gray-50 disabled:opacity-50"
+              className="py-3 rounded-lg border border-border items-center active:bg-secondary disabled:opacity-50"
             >
-              <RNText className="text-sm font-semibold text-gray-800">Continue with Google</RNText>
+              <RNText className="text-sm font-semibold text-foreground">Continue with Google</RNText>
             </Pressable>
           </>
         )}
 
         {step === 'code' && (
           <>
-            <RNText className="text-sm text-gray-500">
+            <RNText className="text-sm text-muted-foreground">
               Enter the 6-digit code we sent to {email}.
             </RNText>
             <Input className="rounded-lg h-11 px-3">
@@ -189,12 +191,12 @@ export default function EnableSyncScreen() {
               )}
             </Pressable>
             <Pressable onPress={() => setStep('email')} className="items-center py-2">
-              <RNText className="text-xs text-gray-400">Use a different email</RNText>
+              <RNText className="text-xs text-muted-foreground">Use a different email</RNText>
             </Pressable>
           </>
         )}
 
-        {error && <RNText className="text-xs text-red-500">{error}</RNText>}
+        {error && <RNText className="text-xs text-destructive">{error}</RNText>}
       </VStack>
     </SafeAreaView>
   );

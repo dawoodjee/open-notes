@@ -24,6 +24,7 @@ import {
   saveUiState,
 } from '@/lib/powersync/db';
 import { isBlankNote } from '@/types/note';
+import { BACKGROUND, useTheme } from '@/contexts/ThemeContext';
 
 // =============================================================================
 // MAIN COMPONENT
@@ -31,6 +32,7 @@ import { isBlankNote } from '@/types/note';
 
 export default function NotesLayout() {
   const { session } = useAuth();
+  const { scheme } = useTheme();
   const [state, dispatch] = useReducer(notesReducer, initialNotesState);
   const { notes, selectedNoteId, searchQuery } = state;
 
@@ -388,9 +390,9 @@ export default function NotesLayout() {
   }, [selectedNote?.id]);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#ffffff' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND[scheme] }}>
       <HStack
-        className="flex-1 w-full bg-white select-none"
+        className="flex-1 w-full bg-background select-none"
         {...(Platform.OS === 'web'
           ? {
               onMouseMove: (e: any) => resize(e),

@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, ScrollView, Text as RNText, View } from '
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react-native';
 import { Icon } from '@/components/ui/icon';
+import { BACKGROUND, useTheme } from '@/contexts/ThemeContext';
 
 /**
  * What the app shows when the vault or the database refuses to open.
@@ -30,6 +31,7 @@ export function BootFailureScreen({
   error: string | null;
   onReset: () => Promise<void>;
 }) {
+  const { scheme } = useTheme();
   const [showDetail, setShowDetail] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -44,14 +46,14 @@ export function BootFailureScreen({
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#ffffff' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND[scheme] }}>
       <ScrollView className="flex-1 px-6 pt-10">
         <View className="flex-row items-center mb-4">
           <Icon as={AlertTriangle} className="text-amber-500 w-6 h-6 mr-2" />
-          <RNText className="text-xl font-bold text-gray-900">Notes couldn’t start</RNText>
+          <RNText className="text-xl font-bold text-foreground">Notes couldn’t start</RNText>
         </View>
 
-        <RNText className="text-sm text-gray-500 leading-5 mb-6">
+        <RNText className="text-sm text-muted-foreground leading-5 mb-6">
           The local database didn’t open. Your notes are still encrypted and the server still
           can’t read them — this is a problem with the copy on this device.
         </RNText>
@@ -62,14 +64,14 @@ export function BootFailureScreen({
         >
           <Icon
             as={showDetail ? ChevronDown : ChevronRight}
-            className="text-gray-400 w-4 h-4 mr-1"
+            className="text-muted-foreground w-4 h-4 mr-1"
           />
-          <RNText className="text-sm text-gray-500">Technical details</RNText>
+          <RNText className="text-sm text-muted-foreground">Technical details</RNText>
         </Pressable>
 
         {showDetail ? (
-          <View className="bg-gray-50 rounded-xl p-3 mb-6">
-            <RNText className="text-xs text-gray-600 font-mono leading-4">
+          <View className="bg-secondary rounded-xl p-3 mb-6">
+            <RNText className="text-xs text-muted-foreground font-mono leading-4">
               {error ?? 'No error message was captured.'}
             </RNText>
           </View>
@@ -78,8 +80,8 @@ export function BootFailureScreen({
         )}
 
         {confirming ? (
-          <View className="bg-red-50 rounded-2xl p-4 mb-4">
-            <RNText className="text-sm text-red-700 leading-5 mb-4">
+          <View className="bg-red-50 dark:bg-red-950/40 rounded-2xl p-4 mb-4">
+            <RNText className="text-sm text-red-700 dark:text-red-300 leading-5 mb-4">
               This deletes every note stored on this device. Notes synced to your account will
               come back when you sign in. Notes written before you signed in will not.
             </RNText>
@@ -97,15 +99,15 @@ export function BootFailureScreen({
               )}
             </Pressable>
             <Pressable onPress={() => setConfirming(false)} className="items-center py-3">
-              <RNText className="text-sm text-gray-500">Cancel</RNText>
+              <RNText className="text-sm text-muted-foreground">Cancel</RNText>
             </Pressable>
           </View>
         ) : (
           <Pressable
             onPress={() => setConfirming(true)}
-            className="py-3.5 rounded-2xl bg-gray-100 items-center active:bg-gray-200"
+            className="py-3.5 rounded-2xl bg-muted items-center active:bg-accent"
           >
-            <RNText className="text-sm font-medium text-gray-700">Reset this device</RNText>
+            <RNText className="text-sm font-medium text-foreground">Reset this device</RNText>
           </Pressable>
         )}
 

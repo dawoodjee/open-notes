@@ -1,0 +1,121 @@
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { Appearance, ColorSchemeName, useColorScheme } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
+import * as SystemUI from 'expo-system-ui';
+
+/**
+ * Which appearance the user picked, and what that resolves to right now.
+ *
+ * HOW THEMING WORKS HERE, because it isn't NativeWind's own API. NativeWind
+ * v5-preview deprecated its useColorScheme in favour of React Native's
+ * (`@deprecated Use useColorScheme from "react-native" instead`), so the one
+ * switch that drives everything is RN's:
+ *
+ *     Appearance.setColorScheme('light' | 'dark' | null)   // null = follow OS
+ *
+ * That single call drives Tailwind's `dark:` variants AND the
+ * `@media (prefers-color-scheme: dark)` block in global.css, which is where
+ * the --background / --foreground / --border token values live. So components
+ * written in semantic tokens (bg-background, text-foreground) flip on their
+ * own with no prop threading and no re-render plumbing.
+ *
+ * components/ui/gluestack-ui-provider does exactly this already -- which is
+ * why a hardcoded <GluestackUIProvider mode="light"> was what pinned the whole
+ * app light. It now takes its mode from here.
+ */
+
+export type ThemePreference = 'system' | 'light' | 'dark';
+
+/**
+ * SecureStore, NOT the ui_state table, and not for secrecy.
+ *
+ * The theme has to be readable BEFORE the encrypted database opens: the boot
+ * spinner, the lock screen and the boot-failure screen all render while
+ * PowerSync doesn't exist yet. Reading it from ui_state would mean every one
+ * of those paints in the wrong colours first. This is the same constraint that
+ * already made lock settings mirror into the SecureStore vault blob.
+ */
+const THEME_KEY = 'notes.appearance.v1';
+
+/**
+ * The one place a literal background colour is allowed.
+ *
+ * Everything styleable goes through `bg-background`. These values exist for
+ * the handful of places a Tailwind class cannot reach: the native root view
+ * behind React's tree, and third-party components taking a `style` prop rather
+ * than a className. Kept in step with --background in global.css by hand,
+ * which is exactly why the list is kept this short.
+ */
+export const BACKGROUND = { light: '#ffffff', dark: '#0a0a0a' } as const;
+
+interface ThemeContextValue {
+  preference: ThemePreference;
+  /** What the preference actually resolves to right now. 'system' follows the
+   *  device, so this is the value to branch on when a literal colour is
+   *  unavoidable -- the WebView stylesheet, a status bar style. */
+  scheme: 'light' | 'dark';
+  setPreference: (next: ThemePreference) => Promise<void>;
+}
+
+const ThemeContext = createContext<ThemeContextValue | null>(null);
+
+export function useTheme() {
+  const ctx = useContext(ThemeContext);
+  if (!ctx) throw new Error('useTheme must be used inside <ThemeProvider>');
+  return ctx;
+}
+
+function toColorScheme(preference: ThemePreference): ColorSchemeName {
+  // null is what "follow the device" is spelled as. Passing the string
+  // 'system' straight through -- which gluestack's provider does -- is not the
+  // same thing: setColorScheme only understands 'light', 'dark' and null.
+  return preference === 'system' ? null : preference;
+}
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const [preference, setPreferenceState] = useState<ThemePreference>('system');
+  const deviceScheme = useColorScheme();
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const stored = await SecureStore.getItemAsync(THEME_KEY);
+        if (stored === 'light' || stored === 'dark' || stored === 'system') {
+          setPreferenceState(stored);
+        }
+      } catch {
+        // A missing or unreadable preference is not worth failing a launch
+        // over -- 'system' is a perfectly good answer.
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    Appearance.setColorScheme(toColorScheme(preference));
+  }, [preference]);
+
+  const scheme: 'light' | 'dark' =
+    preference === 'system' ? (deviceScheme === 'dark' ? 'dark' : 'light') : preference;
+
+  // The native root view behind React's tree. Without this a dark launch shows
+  // a white flash before the first frame paints -- the one bit of theming no
+  // amount of styling inside the app can reach.
+  useEffect(() => {
+    void SystemUI.setBackgroundColorAsync(BACKGROUND[scheme]);
+  }, [scheme]);
+
+  const setPreference = useCallback(async (next: ThemePreference) => {
+    setPreferenceState(next);
+    try {
+      await SecureStore.setItemAsync(THEME_KEY, next);
+    } catch {
+      // The choice still applies for this launch; only persistence failed.
+    }
+  }, []);
+
+  return (
+    <ThemeContext.Provider value={{ preference, scheme, setPreference }}>
+      {children}
+    </ThemeContext.Provider>
+  );
+}

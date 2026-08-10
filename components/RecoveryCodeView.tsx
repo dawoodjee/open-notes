@@ -38,11 +38,11 @@ export function RecoveryCodeView({
   if (step === 'save') {
     return (
       <View className="flex-1 justify-center px-8">
-        <Text className="text-xl font-semibold text-gray-900 mb-3">{headline}</Text>
-        <Text className="text-sm text-gray-500 mb-6">{blurb}</Text>
+        <Text className="text-xl font-semibold text-foreground mb-3">{headline}</Text>
+        <Text className="text-sm text-muted-foreground mb-6">{blurb}</Text>
 
-        <View className="bg-gray-100 rounded-2xl py-5 px-4 mb-6">
-          <Text className="text-center text-lg tracking-widest text-gray-900 font-mono">{code}</Text>
+        <View className="bg-muted rounded-2xl py-5 px-4 mb-6">
+          <Text className="text-center text-lg tracking-widest text-foreground font-mono">{code}</Text>
         </View>
 
         <Pressable
@@ -57,15 +57,15 @@ export function RecoveryCodeView({
 
   return (
     <View className="flex-1 justify-center px-8">
-      <Text className="text-xl font-semibold text-gray-900 mb-3">Type it back</Text>
-      <Text className="text-sm text-gray-500 mb-6">
+      <Text className="text-xl font-semibold text-foreground mb-3">Type it back</Text>
+      <Text className="text-sm text-muted-foreground mb-6">
         Just to be sure you have it. Dashes and capitals don&apos;t matter.
       </Text>
 
       <RecoveryCodeInput value={typed} onChange={setTyped} />
 
       <View className="h-8 justify-center">
-        <Text className="text-sm text-gray-500">
+        <Text className="text-sm text-muted-foreground">
           {normalized.length === 0
             ? ''
             : matches
@@ -85,10 +85,10 @@ export function RecoveryCodeView({
         }}
         disabled={!matches || busy}
         className={`rounded-2xl h-12 items-center justify-center ${
-          matches && !busy ? 'bg-black active:opacity-70' : 'bg-gray-200'
+          matches && !busy ? 'bg-black active:opacity-70' : 'bg-muted'
         }`}
       >
-        <Text className={`font-semibold ${matches && !busy ? 'text-white' : 'text-gray-400'}`}>
+        <Text className={`font-semibold ${matches && !busy ? 'text-white' : 'text-muted-foreground'}`}>
           {busy ? 'Saving…' : 'Done'}
         </Text>
       </Pressable>
@@ -112,7 +112,7 @@ export function RecoveryCodeInput({
       spellCheck={false}
       placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
       placeholderTextColor="#9CA3AF"
-      className="border border-gray-300 rounded-2xl h-12 px-4 text-base text-gray-900 tracking-wider"
+      className="border border-border rounded-2xl h-12 px-4 text-base text-foreground tracking-wider"
     />
   );
 }

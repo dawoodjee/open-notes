@@ -8,6 +8,8 @@ import { AdoptKeyScreen, usePendingAdoption } from '@/components/AdoptKeyScreen'
 import { SecureAccountScreen, usePendingKeySetup } from '@/components/SecureAccountScreen';
 import { PlaintextConsentDialog } from '@/components/PlaintextConsentDialog';
 import { BootFailureScreen } from '@/components/BootFailureScreen';
+import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
+import { StatusBar } from 'expo-status-bar';
 
 import '@/global.css';
 
@@ -36,15 +38,28 @@ function KeyStepOverlay() {
   if (!adoption && !keySetup) return null;
 
   return (
-    <View className="absolute inset-0 bg-white">
+    <View className="absolute inset-0 bg-background">
       {adoption ? <AdoptKeyScreen /> : <SecureAccountScreen />}
     </View>
   );
 }
 
 export default function RootLayout() {
+  // ThemeProvider sits outermost: the appearance has to be settled before
+  // anything paints, including the boot spinner and the failure screen, both
+  // of which render before the database exists.
   return (
-    <GluestackUIProvider mode="light">
+    <ThemeProvider>
+      <ThemedRoot />
+    </ThemeProvider>
+  );
+}
+
+function ThemedRoot() {
+  const { scheme } = useTheme();
+  return (
+    <GluestackUIProvider mode={scheme}>
+      <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
       <VaultProvider>
         <VaultGate />
       </VaultProvider>
@@ -76,7 +91,7 @@ function VaultGate() {
     // boot look identical to a dead one -- there was no way to tell "still
     // working" from "gave up" without attaching a debugger.
     return (
-      <View className="flex-1 bg-white items-center justify-center">
+      <View className="flex-1 bg-background items-center justify-center">
         <ActivityIndicator color="#84CC16" />
       </View>
     );
@@ -100,7 +115,7 @@ function VaultGate() {
       {status === 'locked' ? (
         // Opaque and absolutely positioned rather than conditional, so the
         // note UI underneath is never briefly visible behind it.
-        <View className="absolute inset-0 bg-white">
+        <View className="absolute inset-0 bg-background">
           <LockScreen />
         </View>
       ) : (

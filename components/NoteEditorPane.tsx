@@ -84,37 +84,37 @@ export default function NoteEditorPane({
   return (
     <VStack
       className={`
-        flex-1 bg-white
+        flex-1 bg-background
         ${!selectedNoteId ? 'hidden md:flex' : 'w-full flex-1'}
       `}
     >
       {selectedNote ? (
         <>
           {/* Top Navigation Row */}
-          <HStack className="justify-between items-center px-4 py-3 border-b border-gray-100">
+          <HStack className="justify-between items-center px-4 py-3 border-b border-border">
             <HStack className="items-center space-x-1">
               {/* Mobile Back Button */}
               <Pressable
                 onPress={onBackToList}
                 className="md:hidden flex-row items-center"
               >
-                <Icon as={ChevronLeft} className="text-gray-600 w-6 h-6" />
+                <Icon as={ChevronLeft} className="text-muted-foreground w-6 h-6" />
               </Pressable>
 
               {/* Desktop Sidebar Tuck/Untuck Toggle */}
               <Pressable
                 onPress={onToggleSidebar}
-                className="hidden md:flex p-1.5 rounded-md hover:bg-gray-100"
+                className="hidden md:flex p-1.5 rounded-md hover:bg-muted"
               >
-                <Icon as={Menu} className="text-gray-600 w-5 h-5" />
+                <Icon as={Menu} className="text-muted-foreground w-5 h-5" />
               </Pressable>
             </HStack>
 
             {/* Header Actions */}
             <HStack className="items-center space-x-3">
               {/* Share Action */}
-              <Pressable className="p-1.5 rounded-full hover:bg-gray-100">
-                <Icon as={Share} className="text-gray-600 w-5 h-5" />
+              <Pressable className="p-1.5 rounded-full hover:bg-muted">
+                <Icon as={Share} className="text-muted-foreground w-5 h-5" />
               </Pressable>
 
               {/* More Options (...) Menu */}
@@ -129,9 +129,9 @@ export default function NoteEditorPane({
                 trigger={({ ...triggerProps }) => (
                   <Pressable
                     {...triggerProps}
-                    className="p-1.5 rounded-full hover:bg-gray-100 mr-2"
+                    className="p-1.5 rounded-full hover:bg-muted mr-2"
                   >
-                    <Icon as={MoreVertical} className="text-gray-600 w-5 h-5" />
+                    <Icon as={MoreVertical} className="text-muted-foreground w-5 h-5" />
                   </Pressable>
                 )}
               >
@@ -152,11 +152,11 @@ export default function NoteEditorPane({
                 >
                   <Icon
                     as={selectedNote.isHiddenFromApi ? EyeOff : Eye}
-                    className={`w-4 h-4 ${apiGateOpen ? 'text-gray-600' : 'text-gray-300'}`}
+                    className={`w-4 h-4 ${apiGateOpen ? 'text-muted-foreground' : 'text-muted-foreground/60'}`}
                   />
                   <MenuItemLabel
                     className={`text-sm font-medium ${
-                      apiGateOpen ? 'text-gray-800' : 'text-gray-400'
+                      apiGateOpen ? 'text-foreground' : 'text-muted-foreground'
                     }`}
                   >
                     Visible to Apps
@@ -169,8 +169,8 @@ export default function NoteEditorPane({
                   onPress={() => onTrashNote(selectedNote.id)}
                   className="p-2.5 flex-row items-center gap-2"
                 >
-                  <Icon as={Trash2} className="text-red-500 w-4 h-4" />
-                  <MenuItemLabel className="text-sm font-medium text-red-600">
+                  <Icon as={Trash2} className="text-destructive w-4 h-4" />
+                  <MenuItemLabel className="text-sm font-medium text-destructive">
                     Delete
                   </MenuItemLabel>
                 </MenuItem>
@@ -194,8 +194,8 @@ export default function NoteEditorPane({
           </Box>
         </>
       ) : (
-        <VStack className="flex-1 items-center justify-center p-4 bg-gray-50/50">
-          <RNText className="text-gray-400 text-base font-medium">
+        <VStack className="flex-1 items-center justify-center p-4 bg-secondary">
+          <RNText className="text-muted-foreground text-base font-medium">
             Select a note or create a new one.
           </RNText>
         </VStack>
