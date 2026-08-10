@@ -6,6 +6,7 @@ import { VaultProvider, useVault } from '@/contexts/VaultContext';
 import { LockScreen } from '@/components/LockScreen';
 import { AdoptKeyScreen, usePendingAdoption } from '@/components/AdoptKeyScreen';
 import { SecureAccountScreen, usePendingKeySetup } from '@/components/SecureAccountScreen';
+import { PlaintextConsentDialog } from '@/components/PlaintextConsentDialog';
 
 import '@/global.css';
 
@@ -95,6 +96,11 @@ function VaultGate() {
         // account content behind it.
         <KeyStepOverlay />
       )}
+
+      {/* Last, so it sits above everything including the settings sheet it is
+          usually triggered from. A consent prompt that can be obscured by the
+          screen that raised it is a consent prompt people dismiss blind. */}
+      <PlaintextConsentDialog />
     </View>
   );
 }

@@ -46,21 +46,54 @@ A hosted model cannot be handed ciphertext and do anything useful with it. So
 any server-side AI feature requires the app to decrypt locally and send
 plaintext out — which is a real, visible change in what the product promises.
 
-If that's ever built, the non-negotiables are:
+This was built in Stage 6.5. See `lib/plaintext/`.
 
-1. **Per-action consent, not a settings toggle.** "Summarise this note with a
-   cloud model" is a decision about *this note*, made at the moment it's sent.
-   A one-time switch buried in settings that silently uploads plaintext
-   forever is the thing this stage exists to prevent.
-2. **Scoped to what was asked.** Send the one note, not the notebook. Never
+### Amended: the per-action consent rule
+
+This section originally said **"per-action consent, not a settings toggle"**,
+on the grounds that a switch buried in settings which silently uploads
+plaintext forever is precisely what this stage exists to prevent. That is still
+the right description of the failure mode, and the two toggles now in
+Settings → Security do not simply overrule it. What shipped is a toggle *plus*
+the things that stop it becoming that switch:
+
+- **An expiry.** 30 / 90 / 365 days, or Forever if the user insists. Turning
+  one on defaults to 90 days, so the safer option is the one you get by not
+  thinking about it. A permission that lapses cannot outlive the reason it was
+  granted.
+- **Per-request scope.** `requestPlaintext()` takes explicit note ids. There is
+  deliberately no "all notes" form, so a gate being on never means "everything
+  is readable".
+- **Per-destination consent.** The first time plaintext would go to a given
+  endpoint, the user is asked, and the prompt names the host. Editing an
+  endpoint's URL clears that approval, so "approve something harmless, then
+  repoint it" is not a bypass.
+- **An audit log.** Every disclosure writes a row to `plaintext_disclosures`
+  before the request goes out — ids and byte counts, never content. That is
+  what makes a standing permission inspectable rather than a promise.
+
+The remaining rules are unchanged and were implemented as written:
+
+1. **Scoped to what was asked.** Send the one note, not the notebook. Never
    background-sync plaintext "so the feature feels fast".
-3. **Named in the UI, at the point of use.** The user should be able to tell,
+2. **Named in the UI, at the point of use.** The user should be able to tell,
    without reading a policy, which actions leave the device.
-4. **A separate transport.** Not the `notes` table, not the sync bucket. The
-   sync path must keep its current property — that everything travelling
-   through it is opaque to the server — because that property is only useful
-   if it has no exceptions.
-5. **No retention by default.** Send, use, discard.
+3. **A separate transport.** Not the `notes` table, not the sync bucket, and
+   deliberately not a PostgREST path — `lib/plaintext/` imports Supabase
+   nowhere, asserted by `scripts/verify-plaintext-gates.ts`. The sync path
+   must keep its current property, that everything travelling through it is
+   opaque to the server, because that property is only useful with no
+   exceptions.
+4. **No retention by default.** Send, use, discard. A grant is single-use and
+   expires after 60 seconds.
+
+### The one thing that did not move
+
+The server never gains the ability to decrypt. No key copy, no escrow, no
+"just this once". Plaintext leaves the device only because the device
+decrypted it for one named request, and `getDataKey` is unreachable outside
+`lib/crypto/` — enforced by a lint rule and by a grep assertion in CI, not by
+convention.
 
 ---
 

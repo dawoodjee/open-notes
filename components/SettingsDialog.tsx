@@ -18,6 +18,7 @@ import {
   SettingsSubHeader,
 } from '@/components/ui/settings-group';
 import { SecurityView } from '@/components/SecurityView';
+import { EndpointsView } from '@/components/EndpointsView';
 import { useVault } from '@/contexts/VaultContext';
 
 export interface SettingsDialogProps {
@@ -87,7 +88,7 @@ function AdvancedView({ onBack }: { onBack: () => void }) {
 }
 
 export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
-  const [view, setView] = useState<'root' | 'advanced' | 'security'>('root');
+  const [view, setView] = useState<'root' | 'advanced' | 'security' | 'endpoints'>('root');
   // Read here, in the normal tree, and handed down as props. Everything below
   // <Modal> is hoisted to an overlay root above <VaultProvider>, where this
   // hook would throw -- see the note on SecurityView.
@@ -142,7 +143,10 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
             onBack={() => setView('root')}
             lockSettings={lockSettings}
             updateLockSettings={updateLockSettings}
+            onManageEndpoints={() => setView('endpoints')}
           />
+        ) : view === 'endpoints' ? (
+          <EndpointsView onBack={() => setView('security')} />
         ) : (
           <AdvancedView onBack={() => setView('root')} />
         )}

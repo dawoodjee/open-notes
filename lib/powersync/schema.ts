@@ -19,12 +19,73 @@ export const uiStateTable = new Table(
   {
     last_opened_note_id: column.text,
     editor_scroll_offset: column.integer,
-    // ISO-8601. When the PIN was last actually typed, which is not the same
-    // as when the app was last opened -- the vault stays unlocked across
-    // short backgrounding, so someone can use the app for weeks without ever
-    // re-entering it. Drives the periodic reminder (Stage 6), because a PIN
-    // you never type is a PIN you forget, and forgetting it means falling
-    // back to the recovery code.
+    // The two plaintext gates (Stage 6.5). Three states in one column, which
+    // is worth stating explicitly because the encoding is load-bearing:
+    //
+    //   NULL      the gate is OFF. This is the default and the only state in
+    //             which lib/plaintext/broker.ts will refuse before decrypting
+    //             anything at all.
+    //   'never'   on, no expiry ("Forever" in Settings).
+    //   ISO-8601  on until this instant, then treated as off.
+    //
+    // An expiry rather than a plain boolean because a standing permission to
+    // send plaintext off the device should have to be renewed deliberately.
+    ai_gate_expires_at: column.text,
+    api_gate_expires_at: column.text,
+  },
+  { localOnly: true }
+);
+
+/**
+ * Destinations this device is allowed to send decrypted note text to.
+ *
+ * localOnly, and deliberately so: an allow-list of places your plaintext may
+ * go is a per-device decision, and syncing it would let one device widen
+ * another's. There is no Postgres counterpart and there should not be one.
+ *
+ * NOTE WHAT IS ABSENT: the bearer token. Tokens live one-per-item in
+ * SecureStore (see lib/plaintext/endpoints.ts) because SecureStore's ~2KB
+ * per-value cap makes a growing list in a single item a time bomb -- the same
+ * cap that forced the LargeSecureStore workaround in lib/supabase/client.ts.
+ * Metadata belongs in the encrypted database; only the secret needs hardware
+ * backing.
+ */
+export const apiEndpointsTable = new Table(
+  {
+    name: column.text, // user-facing label; may be empty, shown as "Untitled"
+    url: column.text,
+    use: column.text, // 'ai' | 'api' -- which gate governs this destination
+    // When the user first approved sending plaintext here. NULL means the
+    // consent prompt still has to run, even if the gate is on: the toggle is
+    // permission to use the feature, not blanket permission for every
+    // destination someone later adds to this list.
+    confirmed_at: column.text,
+    created_at: column.text,
+    last_used_at: column.text,
+  },
+  { localOnly: true }
+);
+
+/**
+ * Every time plaintext left this device, and what left.
+ *
+ * This is what makes a standing toggle inspectable rather than a promise.
+ * Written BEFORE the outbound call, so a request that fails midway still
+ * leaves a record -- the interesting question is what was exposed, not what
+ * succeeded.
+ *
+ * Stores note IDs and a byte count, never note content. Same discipline as
+ * sync_issues, and for the same reason: a log of what leaked must not itself
+ * leak. localOnly and never synced.
+ */
+export const plaintextDisclosuresTable = new Table(
+  {
+    occurred_at: column.text,
+    gate: column.text, // 'ai' | 'api'
+    note_ids: column.text, // JSON array of ids
+    endpoint_id: column.text,
+    purpose: column.text,
+    byte_count: column.integer,
   },
   { localOnly: true }
 );
@@ -83,6 +144,8 @@ export const AppSchema = new Schema({
   ui_state: uiStateTable,
   sync_issues: syncIssuesTable,
   note_sync_base: noteSyncBaseTable,
+  api_endpoints: apiEndpointsTable,
+  plaintext_disclosures: plaintextDisclosuresTable,
 });
 
 export type Database = (typeof AppSchema)['types'];

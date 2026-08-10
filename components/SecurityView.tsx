@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ScrollView, Text as RNText, View } from 'react-native';
 import {
   SettingsGroup,
   SettingsRow,
@@ -9,6 +9,16 @@ import {
 } from '@/components/ui/settings-group';
 import { LockCapability, getLockCapability } from '@/lib/auth/deviceAuth';
 import type { LockSettings } from '@/lib/crypto/vault';
+import {
+  GATE_WINDOW_OPTIONS,
+  Gate,
+  GateState,
+  GateWindow,
+  closeGate,
+  getGateStates,
+  openGate,
+} from '@/lib/plaintext/gates';
+import { Disclosure, listDisclosures } from '@/lib/plaintext/broker';
 
 const LOCK_AFTER_OPTIONS = [
   { label: 'Now', value: 0 },
@@ -37,22 +47,38 @@ export function SecurityView({
   onBack,
   lockSettings,
   updateLockSettings,
+  onManageEndpoints,
 }: {
   onBack: () => void;
   lockSettings: LockSettings;
   updateLockSettings: (next: LockSettings) => Promise<void>;
+  onManageEndpoints: () => void;
 }) {
   const [capability, setCapability] = useState<LockCapability | null>(null);
+  const [gates, setGates] = useState<Record<Gate, GateState> | null>(null);
+  const [disclosures, setDisclosures] = useState<Disclosure[]>([]);
+
+  const refreshGates = useCallback(async () => {
+    setGates(await getGateStates());
+    setDisclosures(await listDisclosures(20));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     void getLockCapability().then((c) => {
       if (!cancelled) setCapability(c);
     });
+    void refreshGates();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshGates]);
+
+  const setGate = async (gate: Gate, on: boolean, window: GateWindow = 90) => {
+    if (on) await openGate(gate, window);
+    else await closeGate(gate);
+    await refreshGates();
+  };
 
   // Null means we haven't asked the OS yet. Treating that as 'none' would make
   // the switch flicker from disabled to enabled on every open.
@@ -102,6 +128,42 @@ export function SecurityView({
         </SettingsGroup>
 
         <SettingsGroup
+          caption="Data access"
+          footnote="Off, nothing can read your notes but this app. On, notes you use with that feature are decrypted here and sent as readable text to an endpoint you choose. Your key never leaves this device, and the server still can’t read your notes on its own."
+        >
+          <GateRow
+            label="Allow AI access"
+            gate="ai"
+            state={gates?.ai}
+            onToggle={setGate}
+          />
+          <GateRow
+            label="Allow API access to deciphered data"
+            gate="api"
+            state={gates?.api}
+            onToggle={setGate}
+          />
+          <SettingsRow label="Manage endpoints" onPress={onManageEndpoints} />
+        </SettingsGroup>
+
+        {disclosures.length > 0 ? (
+          <SettingsGroup
+            caption="Recent disclosures"
+            footnote="What has actually left this device. Recorded before each request, so a failed one still shows up."
+          >
+            {disclosures.slice(0, 5).map((d) => (
+              <SettingsRow
+                key={d.id}
+                label={d.purpose || 'Request'}
+                sublabel={`${d.gate.toUpperCase()} · ${d.noteIds.length} note${
+                  d.noteIds.length === 1 ? '' : 's'
+                } · ${new Date(d.occurredAt).toLocaleString()}`}
+              />
+            ))}
+          </SettingsGroup>
+        ) : null}
+
+        <SettingsGroup
           caption="Encryption"
           footnote="Your notes are encrypted on this device and stay encrypted on the server. Nobody else — including us — can read them."
         >
@@ -112,4 +174,64 @@ export function SecurityView({
       </ScrollView>
     </>
   );
+}
+
+/**
+ * A gate is two controls, not one: whether it's on, and for how long.
+ *
+ * The window only appears once the gate is on, so the default state stays a
+ * single unambiguous switch. Turning one on defaults to 90 days rather than
+ * Forever -- the safer of the two is the one you get by not thinking about it.
+ */
+function GateRow({
+  label,
+  gate,
+  state,
+  onToggle,
+}: {
+  label: string;
+  gate: Gate;
+  state: GateState | undefined;
+  onToggle: (gate: Gate, on: boolean, window?: GateWindow) => void | Promise<void>;
+}) {
+  const enabled = state?.enabled ?? false;
+
+  return (
+    <>
+      <SettingsRow
+        label={label}
+        sublabel={
+          state?.expired
+            ? 'Expired. Turn it back on to keep using it.'
+            : enabled && state?.expiresAt
+              ? `Until ${state.expiresAt.toLocaleDateString()}`
+              : enabled
+                ? 'No expiry'
+                : undefined
+        }
+        right={
+          <SettingsToggle value={enabled} onChange={(next) => void onToggle(gate, next)} />
+        }
+      />
+      {enabled ? (
+        <View className="px-4 py-3">
+          <RNText className="text-xs text-gray-400 mb-2">Allow for</RNText>
+          <SettingsSegmented
+            options={GATE_WINDOW_OPTIONS}
+            value={windowFor(state)}
+            onChange={(w) => void onToggle(gate, true, w)}
+          />
+        </View>
+      ) : null}
+    </>
+  );
+}
+
+/** Which window button to light up, recovered from the stored expiry. */
+function windowFor(state: GateState | undefined): GateWindow {
+  if (!state?.expiresAt) return 'never';
+  const days = Math.round((state.expiresAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+  if (days <= 30) return 30;
+  if (days <= 90) return 90;
+  return 365;
 }
