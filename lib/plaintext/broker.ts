@@ -97,9 +97,20 @@ export async function requestPlaintext(req: PlaintextRequest): Promise<BrokerRes
   }
 
   // Only now is anything decrypted.
+  //
+  // is_hidden_from_api filters in the QUERY rather than after decryption. A
+  // hidden note must never be decrypted at all on behalf of an outside caller
+  // -- filtering a decrypted list afterwards would mean the plaintext briefly
+  // existed for a note the user explicitly excluded, and one careless log line
+  // away from leaking.
+  //
+  // Hidden notes are silently omitted rather than failing the whole request:
+  // the caller gets what it is allowed to have. If everything it asked for is
+  // hidden, the no-notes denial below covers it.
   const placeholders = req.noteIds.map(() => '?').join(',');
   const rows = await getPowerSync().getAll<any>(
-    `SELECT id, title, body FROM notes WHERE id IN (${placeholders}) AND is_trashed = 0`,
+    `SELECT id, title, body FROM notes
+     WHERE id IN (${placeholders}) AND is_trashed = 0 AND is_hidden_from_api = 0`,
     req.noteIds
   );
   if (rows.length === 0) return { ok: false, denied: 'no-notes' };

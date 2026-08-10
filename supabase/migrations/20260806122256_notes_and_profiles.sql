@@ -44,7 +44,24 @@ create table public.notes (
   -- already moves on both trash and restore, and a second timestamp could
   -- disagree with this flag. One field means the invalid combinations
   -- ("trashed with no timestamp", "untrashed with one") cannot be represented.
-  is_trashed boolean not null default false
+  is_trashed boolean not null default false,
+
+  -- Per-note opt-OUT of the API access gate (Stage 6.5). A note with this set
+  -- is excluded from everything lib/plaintext/ hands to an outside caller --
+  -- not just its content, but its metadata too, so an app cannot learn the
+  -- note exists at all.
+  --
+  -- Named for what it actually governs. A generic `is_private` would invite
+  -- the assumption that it hides the note from something else as well: it does
+  -- not. This app reads and syncs the note exactly as before; the only thing
+  -- it changes is what leaves the device through the API gate.
+  --
+  -- Default false (visible) on purpose, which is the opposite of how the gate
+  -- itself defaults. The gate is the real control and is off until the user
+  -- turns it on; this is a per-note exception INSIDE a permission already
+  -- granted. Defaulting to hidden would mean the API returned nothing until
+  -- every note had been toggled one at a time.
+  is_hidden_from_api boolean not null default false
 );
 
 -- The list query is `order by updated_at desc` filtered to a user's own rows.

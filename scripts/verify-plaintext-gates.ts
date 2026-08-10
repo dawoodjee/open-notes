@@ -187,6 +187,24 @@ console.log('\n--- chokepoint ---');
   // lib/supabase/client.ts in a comment about SecureStore's size cap, and a
   // grep that can't tell a citation from a dependency is a check that will be
   // silenced rather than fixed.
+  // Per-note opt-out. Both outbound query sites must filter on it, and BOTH
+  // matter: the broker for content, the metadata listing so an app cannot
+  // even learn a hidden note exists.
+  //
+  // Being straight about the weakness: these are source checks, not
+  // behavioural ones. The filter is a SQL predicate rather than policy logic,
+  // so it cannot be run under Node the way decideAccess is -- the real proof
+  // is toggling a note on device and watching it drop out of both results.
+  check(
+    'the broker query excludes notes hidden from the API',
+    /is_hidden_from_api\s*=\s*0/.test(brokerSource)
+  );
+  const mcpSource = execSync('cat lib/plaintext/mcp.ts', { encoding: 'utf-8' });
+  check(
+    'the metadata query excludes them too, so their existence is hidden as well',
+    /is_hidden_from_api\s*=\s*0/.test(mcpSource)
+  );
+
   const supabaseImports = execSync(
     `grep -rnE "^\\s*import .*(@supabase/|lib/supabase)" lib/plaintext || true`,
     { encoding: 'utf-8' }

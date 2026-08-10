@@ -19,7 +19,15 @@ const SYNC_ISSUE_MAX_AGE_MS = 60 * 24 * 60 * 60 * 1000; // 2 months
 // supabase/migrations/20260806122256_notes_and_profiles.sql. Used to narrow
 // each op's opData before sending it, since a stale pre-Stage-5 queue entry
 // can carry a dropped column (e.g. `version`) that would otherwise 400.
-const NOTES_COLUMNS = ['user_id', 'body', 'title', 'created_at', 'updated_at', 'is_trashed'] as const;
+const NOTES_COLUMNS = [
+  'user_id',
+  'body',
+  'title',
+  'created_at',
+  'updated_at',
+  'is_trashed',
+  'is_hidden_from_api',
+] as const;
 
 function pickNotesColumns(data: Record<string, any> | undefined) {
   const out: Record<string, any> = {};
@@ -27,10 +35,11 @@ function pickNotesColumns(data: Record<string, any> | undefined) {
   for (const col of NOTES_COLUMNS) {
     if (col in data) out[col] = data[col];
   }
-  // SQLite has no boolean type, so is_trashed round-trips as 0/1 while
-  // Postgres declares it boolean. PostgREST accepts both, but normalizing
-  // here keeps the payload honest about what the column actually is.
+  // SQLite has no boolean type, so these round-trip as 0/1 while Postgres
+  // declares them boolean. PostgREST accepts both, but normalizing here keeps
+  // the payload honest about what the columns actually are.
   if ('is_trashed' in out) out.is_trashed = Boolean(out.is_trashed);
+  if ('is_hidden_from_api' in out) out.is_hidden_from_api = Boolean(out.is_hidden_from_api);
   return out;
 }
 

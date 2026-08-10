@@ -16,6 +16,7 @@ import {
   initPowerSync,
   mapRowToNote,
   createNoteInDB,
+  setNoteHiddenFromApi,
   updateNoteInDB,
   trashNoteInDB,
   getUiState,
@@ -141,6 +142,14 @@ export default function NotesLayout() {
       dispatch({ type: 'SELECT_NOTE', payload: { id: newNote.id } });
     } catch (err) {
       console.error('Failed to create note in local SQLite:', err);
+    }
+  }, []);
+
+  const handleSetHiddenFromApi = useCallback(async (id: string, hidden: boolean) => {
+    try {
+      await setNoteHiddenFromApi(id, hidden);
+    } catch (err) {
+      console.error('Failed to change API visibility in local SQLite:', err);
     }
   }, []);
 
@@ -278,6 +287,7 @@ export default function NotesLayout() {
           onToggleSidebar={() => setIsSidebarTucked(!isSidebarTucked)}
           onBackToList={() => dispatch({ type: 'SELECT_NOTE', payload: { id: null } })}
           onTrashNote={handleTrashNote}
+          onSetHiddenFromApi={handleSetHiddenFromApi}
           onNoteChange={handleNoteChange}
           initialEditorScrollOffset={restoredEditorScrollRef.current}
           onEditorScrollOffsetChange={handleEditorScrollChange}

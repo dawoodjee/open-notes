@@ -11,6 +11,10 @@ export const notesTable = new Table({
   created_at: column.text, // ISO-8601 -> timestamptz
   updated_at: column.text, // ISO-8601 -> timestamptz
   is_trashed: column.integer, // 0/1 -> boolean
+  // Per-note opt-out of the API gate. 0/1 -> boolean, same as is_trashed.
+  // Syncs like any other column: hiding a note from apps is a property of the
+  // note, not of one device, so a second device has to honour it.
+  is_hidden_from_api: column.integer,
 });
 
 // Deliberately localOnly with no user_id and no Postgres counterpart: which note

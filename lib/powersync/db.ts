@@ -210,6 +210,7 @@ export function mapRowToNote(row: any): Note {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     isTrashed: Boolean(row.is_trashed),
+    isHiddenFromApi: Boolean(row.is_hidden_from_api),
     // Surfaced rather than swallowed. An undecryptable note must not look
     // like an empty note: the editor would happily save over it, turning a
     // temporary key problem into permanent data loss. updateNoteInDB refuses
@@ -236,8 +237,8 @@ export async function createNoteInDB(): Promise<Note> {
   // any sync bucket). The note vanishes seconds after being created.
   const userId = getCurrentUserId();
   await getPowerSync().execute(
-    `INSERT INTO notes (id, user_id, body, title, created_at, updated_at, is_trashed)
-     VALUES (?, ?, ?, ?, ?, ?, 0)`,
+    `INSERT INTO notes (id, user_id, body, title, created_at, updated_at, is_trashed, is_hidden_from_api)
+     VALUES (?, ?, ?, ?, ?, ?, 0, 0)`,
     [id, userId, encryptField(body), encryptField(title), now, now]
   );
 
@@ -249,6 +250,7 @@ export async function createNoteInDB(): Promise<Note> {
     createdAt: now,
     updatedAt: now,
     isTrashed: false,
+    isHiddenFromApi: false,
   };
 }
 
@@ -303,6 +305,29 @@ export async function trashNoteInDB(id: string): Promise<void> {
     `UPDATE notes SET is_trashed = 1, updated_at = ? WHERE id = ?`,
     [now, id]
   );
+}
+
+/**
+ * Hide or unhide a note from the API gate.
+ *
+ * DELIBERATELY DOES NOT TOUCH updated_at, unlike trash and restore above.
+ * The note list is ordered by `updated_at desc`, so bumping it would send a
+ * note to the top of the list every time its visibility was toggled -- and
+ * changing who may read a note is not an edit to the note. Same reasoning as
+ * lib/crypto/reEncrypt.ts, which leaves the timestamp alone for the same
+ * reason.
+ *
+ * It still syncs: PowerSync records a CRUD op for any UPDATE, whatever the
+ * columns. And it is safe through the merge path in connector.ts, because the
+ * body is unchanged -- mergeBody sees identical plaintext on both sides and
+ * returns clean, which is the no-op re-save case verify-merge-encrypted
+ * already covers.
+ */
+export async function setNoteHiddenFromApi(id: string, hidden: boolean): Promise<void> {
+  await getPowerSync().execute(`UPDATE notes SET is_hidden_from_api = ? WHERE id = ?`, [
+    hidden ? 1 : 0,
+    id,
+  ]);
 }
 
 export async function restoreNoteInDB(id: string): Promise<void> {

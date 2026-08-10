@@ -131,7 +131,7 @@ export function SecurityView({
           footnote="Off, nothing can read your notes but this app. On, notes an outside request asks for are decrypted here and sent as readable text to an endpoint you choose. Your key never leaves this device, and the server still can’t read your notes on its own."
         >
           <GateRow
-            label="Allow API access to deciphered data"
+            label="Allow API access"
             state={gate ?? undefined}
             onToggle={updateGate}
           />

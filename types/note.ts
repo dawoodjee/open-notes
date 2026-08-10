@@ -15,6 +15,11 @@ export interface Note {
   // second field could contradict this one. One field = no illegal states.
   isTrashed: boolean;
 
+  // Per-note opt-out of the API access gate. This app reads, edits and syncs
+  // the note exactly as before either way -- the flag governs only what
+  // lib/plaintext/ will hand to an outside caller, content and metadata alike.
+  isHiddenFromApi: boolean;
+
   // True when the stored ciphertext could not be decrypted with the current
   // data key -- a locked vault, or content written under a different key.
   // Distinguishes "this note is empty" from "this note is unreadable right

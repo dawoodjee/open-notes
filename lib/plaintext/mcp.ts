@@ -40,8 +40,15 @@ export async function listNoteMetadata(): Promise<NoteMetadata[]> {
   // Deliberately does not select title or body. Not "selects them and drops
   // them" -- a query that never reads the ciphertext cannot leak it through a
   // logged row or a stray spread.
+  //
+  // Hidden notes are excluded HERE too, not only from the broker. "Visible to
+  // Apps: off" has to mean invisible rather than merely unreadable: leaving a
+  // hidden note in the metadata would still tell an app that the note exists,
+  // when it was written and when it last changed, which is most of what
+  // someone hiding a note is trying not to say.
   const rows = await getPowerSync().getAll<any>(
-    'SELECT id, created_at, updated_at, is_trashed FROM notes ORDER BY updated_at DESC'
+    `SELECT id, created_at, updated_at, is_trashed FROM notes
+     WHERE is_hidden_from_api = 0 ORDER BY updated_at DESC`
   );
   return rows.map((row) => ({
     id: row.id,
