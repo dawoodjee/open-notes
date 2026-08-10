@@ -171,8 +171,27 @@ says what it says.
 `op-sqlite.sqlcipher` flag from `package.json` that the iOS podspec does, and
 swaps in the SQLCipher amalgamation.
 
-**None of this is verified on Android hardware.** No Android device was
-available at any point in Stage 6 or 6.5. Everything above is read from the
-installed native sources, not observed running. Treat the Android column as
-designed-for, not tested — including hardware-back behaviour, which has been
-unverified since Stage 5.
+**Verified on an Android emulator (Pixel 6a, API 36), not on physical
+hardware.** What was actually observed running, rather than read from source:
+
+- `[OP-SQLITE] using sqlcipher.` in the Android build output — the SQLCipher
+  amalgamation compiles in, not stock SQLite.
+- `scripts/probe-local-db-android.sh`: `notes-v2.db` does not begin with the
+  `SQLite format 3` header, and a canary string from a real note appears
+  nowhere in the database, the `-wal`, the `-shm`, or anywhere else in the
+  app's private storage.
+- The lock: enabling it and cold-starting raised Android's `BiometricPrompt`
+  focused as a `KEYGUARD_DIALOG`, accepted the device PIN with no biometrics
+  enrolled, and unlocked. That is `disableDeviceFallback: false` doing exactly
+  what `expo-secure-store`'s `requireAuthentication` cannot.
+- The platform wording, in two of its three states: with no lock set, *"No
+  screen lock is set on this device"*; with a PIN set, *"Unlocks with your
+  screen lock"*. iOS says "passcode" in both.
+- Hardware back: editor → list, note saved, app not killed.
+- The grouped-list UI renders identically to iOS. Not Material.
+
+**Still unverified on Android:** the biometric wording branch (*"your
+fingerprint or screen lock"*) — the emulator had no fingerprint enrolled, and
+only the credential path was exercised. And everything above is an emulator,
+which is not a phone: hardware-backed Keystore behaviour in particular is
+emulated.
