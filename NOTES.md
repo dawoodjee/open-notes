@@ -190,8 +190,55 @@ hardware.** What was actually observed running, rather than read from source:
 - Hardware back: editor → list, note saved, app not killed.
 - The grouped-list UI renders identically to iOS. Not Material.
 
+**Android screenshots of a locked app are blank, and that is not a bug.**
+`BiometricPrompt` is focused as a `KEYGUARD_DIALOG` and is `FLAG_SECURE`, so
+`adb exec-out screencap` returns an empty frame — black if the app happens to
+be in dark mode, white if light. Nothing is wrong with the app; the OS is
+refusing to let the screen be captured. Confirm what is actually on screen
+with `adb shell dumpsys window | grep mCurrentFocus` (it will name
+`Window{BiometricPrompt}`) and read the underlying tree with
+`adb shell uiautomator dump`, which is not blocked. This cost real time once:
+a blank capture was mistaken for a rendering regression, and reproducing it
+against the pre-change commit — which was blank in exactly the same way —
+is what ruled that out.
+
 **Still unverified on Android:** the biometric wording branch (*"your
 fingerprint or screen lock"*) — the emulator had no fingerprint enrolled, and
 only the credential path was exercised. And everything above is an emulator,
 which is not a phone: hardware-backed Keystore behaviour in particular is
 emulated.
+
+## How theming works (and why it isn't NativeWind's API)
+
+Worth writing down because the obvious place to look is wrong.
+
+NativeWind v5-preview has no colour-scheme setter of its own — its
+`useColorScheme` carries `@deprecated Use useColorScheme from "react-native"
+instead`. The single switch for the whole app is React Native's:
+
+    Appearance.setColorScheme('light' | 'dark' | null)   // null = follow the OS
+
+That one call drives Tailwind's `dark:` variants *and* the
+`@media (prefers-color-scheme: dark)` block in `global.css`, which is where the
+`--background` / `--foreground` / `--border` values live. `@theme inline` maps
+those to real utilities, so `bg-background` and `text-foreground` flip on their
+own — no prop threading, no re-render plumbing, no theme objects.
+
+Two consequences that are easy to get wrong:
+
+- `'system'` is spelled `null`. `components/ui/gluestack-ui-provider` passes its
+  `mode` straight to `setColorScheme`, so `mode="system"` sends the literal
+  string, which is not a `ColorSchemeName`. `contexts/ThemeContext.tsx`
+  translates it rather than relying on that.
+- The preference lives in **SecureStore, not `ui_state`**, and not for secrecy.
+  The boot spinner, the lock screen and the boot-failure screen all render
+  before the encrypted database is open, so a theme read from inside that
+  database would paint every one of them in the wrong colours first. Same
+  ordering constraint that already put lock settings in the vault blob.
+
+The editor is the exception: a WebView is its own document, and no Tailwind
+class or `Appearance` call reaches inside it. Its stylesheet is written against
+CSS custom properties and the values are pushed over TenTap's bridge with
+`injectJS` — on theme change and on every load. Injection rather than
+remounting, because keying the editor on the theme would drop the caret and
+re-run the scroll restore every time the OS crossed sunset in Device mode.
