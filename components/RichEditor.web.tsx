@@ -17,7 +17,12 @@ import {
   Heading2,
   Code,
   Quote,
+  IndentIncrease,
+  IndentDecrease,
 } from 'lucide-react-native';
+
+/** See the note of the same name in RichEditor.native.tsx. */
+const REMOTE_APPLY_IDLE_MS = 1500;
 
 export interface RichEditorProps {
   initialContent?: string;
@@ -94,6 +99,13 @@ export default function RichEditor({
     [initialContent]
   );
 
+  // Same three refs, and the same reasoning, as RichEditor.native.tsx: the
+  // editor's content is set once at construction, so a note open on another
+  // device never updated here either.
+  const lastEmittedRef = React.useRef<string>(initialContent);
+  const lastTypedAtRef = React.useRef<number>(0);
+  const pendingRemoteRef = React.useRef<string | null>(null);
+
   const editor = useEditor({
     autofocus: autoFocus ? 'start' : false,
     extensions: [
@@ -108,14 +120,51 @@ export default function RichEditor({
     ],
     content: formattedContent,
     onUpdate: ({ editor }) => {
-      if (onChange) {
-        const cleanHtml = sanitizeHtmlOutput(editor.getHTML());
-        onChange(cleanHtml);
-      }
+      lastTypedAtRef.current = Date.now();
+      const cleanHtml = sanitizeHtmlOutput(editor.getHTML());
+      lastEmittedRef.current = cleanHtml;
+      if (onChange) onChange(cleanHtml);
     },
   });
 
+  React.useEffect(() => {
+    if (!editor) return;
+    if (initialContent === lastEmittedRef.current) return;
+
+    const apply = (raw: string) => {
+      pendingRemoteRef.current = null;
+      lastEmittedRef.current = raw;
+      // emitUpdate: false, so applying a remote edit isn't mistaken for a
+      // local one and echoed straight back out.
+      editor.commands.setContent(formatInitialContent(raw), { emitUpdate: false });
+    };
+
+    const sinceTyping = Date.now() - lastTypedAtRef.current;
+    if (sinceTyping > REMOTE_APPLY_IDLE_MS) {
+      apply(initialContent);
+      return;
+    }
+
+    // Held with its own self-rescheduling timer, which re-checks that typing
+    // has actually stopped rather than trusting the delay it was scheduled
+    // with. See the fuller note in RichEditor.native.tsx.
+    pendingRemoteRef.current = initialContent;
+    let timer: ReturnType<typeof setTimeout>;
+    const flush = () => {
+      const pending = pendingRemoteRef.current;
+      if (pending === null) return;
+      const idleFor = Date.now() - lastTypedAtRef.current;
+      if (idleFor >= REMOTE_APPLY_IDLE_MS) apply(pending);
+      else timer = setTimeout(flush, REMOTE_APPLY_IDLE_MS - idleFor);
+    };
+    timer = setTimeout(flush, REMOTE_APPLY_IDLE_MS - sinceTyping);
+    return () => clearTimeout(timer);
+  }, [initialContent, editor]);
+
   if (!editor) return null;
+
+  const canSink = editor.can().sinkListItem('listItem');
+  const canLift = editor.can().liftListItem('listItem');
 
   return (
     <Box className="flex-1 bg-white flex flex-col">
@@ -235,6 +284,26 @@ export default function RichEditor({
               }`}
             />
           </Pressable>
+
+          {/* Outdent / Indent -- enabled/disabled rather than toggled. See
+              the fuller note in RichEditor.native.tsx. */}
+          <Pressable
+            onPress={() => editor.chain().focus().liftListItem('listItem').run()}
+            disabled={!canLift}
+            className={`p-2 rounded-lg ${canLift ? '' : 'opacity-30'}`}
+          >
+            <Icon as={IndentDecrease} className="w-4 h-4 text-gray-600" />
+          </Pressable>
+
+          <Pressable
+            onPress={() => editor.chain().focus().sinkListItem('listItem').run()}
+            disabled={!canSink}
+            className={`p-2 rounded-lg ${canSink ? '' : 'opacity-30'}`}
+          >
+            <Icon as={IndentIncrease} className="w-4 h-4 text-gray-600" />
+          </Pressable>
+
+          <Box className="w-px h-4 bg-gray-200 mx-1" />
 
           <Pressable
             onPress={() => editor.chain().focus().toggleBlockquote().run()}

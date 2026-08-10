@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useMemo } from 'react';
+import React, { useCallback, useRef, useEffect, useMemo } from 'react';
 import type { WebViewMessageEvent } from 'react-native-webview';
 import {
   useEditorBridge,
@@ -26,6 +26,8 @@ import {
   Heading2,
   Code,
   Quote,
+  IndentIncrease,
+  IndentDecrease,
 } from 'lucide-react-native';
 
 export interface RichEditorProps {
@@ -38,6 +40,16 @@ export interface RichEditorProps {
 
 // Namespaced so it can't collide with TenTap's own bridge message types
 const SCROLL_MESSAGE_TYPE = 'notes-editor-scroll';
+
+/**
+ * How long the user must have stopped typing before a remote edit is allowed
+ * to replace the document.
+ *
+ * Long enough to sit clear of the 200ms save debounce and ordinary pauses
+ * between words, short enough that putting the phone down for a moment is all
+ * it takes for the other device's text to appear.
+ */
+const REMOTE_APPLY_IDLE_MS = 1500;
 
 // Walks up from the ProseMirror node to whichever ancestor actually scrolls,
 // rather than assuming it's the document (it isn't — TenTap scrolls a container).
@@ -161,6 +173,19 @@ export default function RichEditor({
   const onChangeRef = useRef(onChange);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // --- Live remote updates -------------------------------------------------
+  // The last HTML this editor produced. Content coming back in that matches it
+  // is the echo of our own save returning through the watch query, not a
+  // change from another device, and re-applying it would be a pointless
+  // document reset.
+  const lastEmittedRef = useRef<string>(initialContent);
+  // When the user last typed. Remote content is never applied on top of active
+  // typing -- setContent resets the document and takes the caret with it.
+  const lastTypedAtRef = useRef<number>(0);
+  // Remote content that arrived mid-sentence and is waiting for a pause.
+  const pendingRemoteRef = useRef<string | null>(null);
+  const pendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     onChangeRef.current = onChange;
   }, [onChange]);
@@ -175,6 +200,8 @@ export default function RichEditor({
     ],
     avoidIosKeyboard: true,
     onChange: () => {
+      lastTypedAtRef.current = Date.now();
+
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
@@ -183,17 +210,104 @@ export default function RichEditor({
         if (onChangeRef.current && editor) {
           const html = await editor.getHTML();
           const cleanHtml = sanitizeHtmlOutput(html);
+          lastEmittedRef.current = cleanHtml;
           onChangeRef.current(cleanHtml);
         }
+        // Typing has stopped for at least one debounce window, so this is the
+        // moment a held-back remote edit can land without stealing the caret.
+        applyPendingRemote();
       }, 200);
     },
   });
 
+  /**
+   * Push content from another device into the live document.
+   *
+   * setContent replaces the whole document, so the caret goes back to the
+   * start -- acceptable when the user isn't typing, jarring when they are.
+   * Hence the idle test rather than applying unconditionally.
+   */
+  const applyRemote = useCallback(
+    (rawHtml: string) => {
+      pendingRemoteRef.current = null;
+      if (pendingTimerRef.current) {
+        clearTimeout(pendingTimerRef.current);
+        pendingTimerRef.current = null;
+      }
+      lastEmittedRef.current = rawHtml;
+      editor.setContent(formatInitialContent(rawHtml));
+    },
+    [editor]
+  );
+
+  /**
+   * Apply a held remote edit once typing has actually stopped.
+   *
+   * Re-checks rather than trusting the delay it was scheduled with: the user
+   * may have carried on typing since, and a timer that fires regardless would
+   * reset the document mid-sentence -- the exact thing the hold exists to
+   * prevent. Reschedules itself instead, so it lands on the first real pause.
+   */
+  const applyPendingRemote = useCallback(() => {
+    const pending = pendingRemoteRef.current;
+    if (pending === null) return;
+
+    const sinceTyping = Date.now() - lastTypedAtRef.current;
+    if (sinceTyping >= REMOTE_APPLY_IDLE_MS) {
+      applyRemote(pending);
+      return;
+    }
+    pendingTimerRef.current = setTimeout(
+      applyPendingRemote,
+      REMOTE_APPLY_IDLE_MS - sinceTyping
+    );
+  }, [applyRemote]);
+
+  /**
+   * React to a changed `initialContent` -- which, despite the name, is the
+   * live body of the open note.
+   *
+   * It used to be read exactly once, at bridge construction. Since
+   * NoteEditorPane keys this component on the note's id, and a remote edit
+   * doesn't change the id, nothing remounted and nothing pushed the new text
+   * in: a note open on two devices never updated on the second until it was
+   * closed and reopened. Worse, the next keystroke saved the stale buffer back
+   * over the merged content.
+   */
+  useEffect(() => {
+    // Compared RAW, against what this editor last emitted -- because what it
+    // emitted is what got stored, and what got stored is what comes back.
+    // Comparing the *formatted* version instead would produce phantom remote
+    // edits: an emitted `<p></p>` is stored as `<p></p>` but formats to
+    // `<h1></h1>`, so every empty note would look like a change from another
+    // device and reset itself on a loop.
+    if (initialContent === lastEmittedRef.current) return;
+
+    const sinceTyping = Date.now() - lastTypedAtRef.current;
+    if (sinceTyping > REMOTE_APPLY_IDLE_MS) {
+      applyRemote(initialContent);
+      return;
+    }
+
+    // Held, not dropped -- and held with its OWN timer.
+    //
+    // Relying on the onChange debounce to flush this was a bug: onChange only
+    // fires on a keystroke, so an edit arriving just as the user stopped
+    // typing would sit here until they typed again. Which is precisely the
+    // common case -- you pause, and that pause is when the other device's
+    // text should appear.
+    pendingRemoteRef.current = initialContent;
+    if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current);
+    pendingTimerRef.current = setTimeout(
+      applyPendingRemote,
+      REMOTE_APPLY_IDLE_MS - sinceTyping
+    );
+  }, [initialContent, applyRemote, applyPendingRemote]);
+
   useEffect(() => {
     return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (pendingTimerRef.current) clearTimeout(pendingTimerRef.current);
     };
   }, []);
 
@@ -411,6 +525,34 @@ export default function RichEditor({
               }`}
             />
           </Pressable>
+
+          {/* Outdent / Indent.
+              These are the only ENABLED/DISABLED controls in this toolbar --
+              everything else is a toggle with an on state to light up, and
+              there is no such thing as "currently indenting". So they
+              deliberately skip the bg-lime-100 active pill and use opacity
+              instead: reusing the pill would claim a state that doesn't
+              exist. TenTap exposes canLift/canSink in the bridge state, which
+              is what makes the boundaries honest rather than guessed --
+              outside a list both go dim, and at the top level only outdent
+              does. */}
+          <Pressable
+            onPress={() => editorState.canLift && editor.lift()}
+            disabled={!editorState.canLift}
+            className={`p-2 rounded-lg ${editorState.canLift ? '' : 'opacity-30'}`}
+          >
+            <Icon as={IndentDecrease} className="w-4 h-4 text-gray-600" />
+          </Pressable>
+
+          <Pressable
+            onPress={() => editorState.canSink && editor.sink()}
+            disabled={!editorState.canSink}
+            className={`p-2 rounded-lg ${editorState.canSink ? '' : 'opacity-30'}`}
+          >
+            <Icon as={IndentIncrease} className="w-4 h-4 text-gray-600" />
+          </Pressable>
+
+          <Box className="w-px h-4 bg-gray-200 mx-1" />
 
           {/* Blockquote */}
           <Pressable
