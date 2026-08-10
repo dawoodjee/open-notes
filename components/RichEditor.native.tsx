@@ -386,7 +386,12 @@ export default function RichEditor({
   // mounts while dark is active would otherwise start white and stay white.
   const { scheme } = useTheme();
   const applyEditorTheme = useCallback(() => {
-    editor.injectJS(applyEditorThemeJS(scheme));
+    // webviewRef.injectJavaScript, not TenTap's editor.injectJS. The latter
+    // wraps the string in its own envelope, which changes the script's
+    // completion value and makes WKWebView log "Error evaluating
+    // injectedJavaScript ... unsupported return type" on every call. The
+    // scroll plumbing below already uses this same route for the same reason.
+    editor.webviewRef?.current?.injectJavaScript(applyEditorThemeJS(scheme));
   }, [editor, scheme]);
 
   useEffect(() => {
