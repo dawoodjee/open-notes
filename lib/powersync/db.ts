@@ -43,33 +43,73 @@ export function isPowerSyncReady(): boolean {
  * a key wasn't ready is exactly the silent failure this stage exists to
  * prevent.
  */
+let initInFlight: Promise<void> | null = null;
+
 export async function initPowerSync(): Promise<void> {
   if (instance) return;
+  // Concurrent callers await the SAME init rather than starting a second one.
+  // There are three call sites (VaultContext boot, unlock, and NotesLayout's
+  // watch setup) and the `if (instance)` guard alone does not stop two of them
+  // overlapping: `instance` isn't assigned until well after the first await,
+  // so both would sail past the guard and run the migration twice.
+  if (initInFlight) return initInFlight;
 
-  // Converts a pre-Stage-6 plaintext notes.db, if one is present. SQLCipher
-  // cannot open an unencrypted file, so without this every note written
-  // before this stage would be unreachable on first launch.
-  await migrateToEncrypted(getDatabaseKey());
+  initInFlight = (async () => {
+    // Converts a pre-Stage-6 plaintext notes.db, if one is present. SQLCipher
+    // cannot open an unencrypted file, so without this every note written
+    // before this stage would be unreachable on first launch.
+    await migrateToEncrypted(getDatabaseKey());
 
-  instance = new PowerSyncDatabase({
-    schema: AppSchema,
-    database: {
-      dbFilename: DB_FILENAME,
-      // Note the nesting: sqliteOptions belongs to the op-sqlite adapter's
-      // open options, NOT to PowerSyncDatabase's root options. Put it at the
-      // top level and TypeScript rejects it; the encryption would simply
-      // never be configured.
-      //
-      // Whole-file encryption: SQLCipher works at the page level, so notes,
-      // ui_state, sync_issues and note_sync_base are all covered by this one
-      // option -- there is nothing table-specific to configure.
-      sqliteOptions: {
-        encryptionKey: getDatabaseKey(),
+    const db = new PowerSyncDatabase({
+      schema: AppSchema,
+      database: {
+        dbFilename: DB_FILENAME,
+        // Note the nesting: sqliteOptions belongs to the op-sqlite adapter's
+        // open options, NOT to PowerSyncDatabase's root options. Put it at the
+        // top level and TypeScript rejects it; the encryption would simply
+        // never be configured.
+        //
+        // Whole-file encryption: SQLCipher works at the page level, so notes,
+        // ui_state, sync_issues and note_sync_base are all covered by this one
+        // option -- there is nothing table-specific to configure.
+        sqliteOptions: {
+          encryptionKey: getDatabaseKey(),
+        },
       },
-    },
-  });
+    });
 
-  await instance.init();
+    // Assigned only after init() resolves. Assigning first -- as this used to
+    // -- meant a failed init left a half-open database in the singleton, and
+    // every later getPowerSync() handed that broken object out as if it were
+    // fine. Worse, the `if (instance) return` above would then report success
+    // forever, so nothing could ever retry.
+    await db.init();
+    instance = db;
+  })();
+
+  try {
+    await initInFlight;
+  } finally {
+    initInFlight = null;
+  }
+}
+
+/**
+ * Close and forget the database so a later initPowerSync() genuinely reopens
+ * it. Used by the reset-after-boot-failure path, which deletes the file out
+ * from under any handle this module is still holding.
+ */
+export async function closePowerSync(): Promise<void> {
+  const open = instance;
+  instance = null;
+  syncBaseTrackingStarted = false;
+  if (!open) return;
+  try {
+    await open.close();
+  } catch {
+    // Best effort: the caller is about to delete the file regardless, and a
+    // close that fails must not block the one escape route from a dead boot.
+  }
 }
 
 // Not called from initPowerSync -- connecting is an auth-state decision

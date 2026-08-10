@@ -14,7 +14,7 @@ import {
   isUnlocked as vaultIsUnlocked,
 } from '@/lib/crypto/vault';
 import { wipeLocalDatabase } from '@/lib/powersync/migrateToEncrypted';
-import { initPowerSync } from '@/lib/powersync/db';
+import { closePowerSync, initPowerSync } from '@/lib/powersync/db';
 
 /**
  * Owns the lock state of the app.
@@ -39,17 +39,22 @@ import { initPowerSync } from '@/lib/powersync/db';
  * own notes is the friction this stage removed.
  */
 
-export type VaultStatus = 'loading' | 'locked' | 'unlocked';
+export type VaultStatus = 'loading' | 'locked' | 'unlocked' | 'failed';
 
 interface VaultContextValue {
   status: VaultStatus;
   /** True once the keys have been loaded at least once this launch. */
   hasBooted: boolean;
   lockSettings: LockSettings;
+  /** Set only when status is 'failed'. The raw message, deliberately. */
+  bootError: string | null;
   /** Raises the OS prompt. A cancel leaves the app locked. */
   unlock: () => Promise<void>;
   lock: () => void;
   updateLockSettings: (next: LockSettings) => Promise<void>;
+  /** Last resort out of a failed boot: throw the local database away and
+   *  start over. Notes owned by an account come back from the server. */
+  resetLocalData: () => Promise<void>;
 }
 
 const VaultContext = createContext<VaultContextValue | null>(null);
@@ -94,10 +99,18 @@ async function loadKeys(): Promise<boolean> {
   return true;
 }
 
+/** Everything between "app launched" and "note UI can mount", in one place so
+ *  the cold-launch path and the unlock path can't drift apart. */
+async function bootVault(): Promise<void> {
+  await loadKeys();
+  await initPowerSync();
+}
+
 export function VaultProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<VaultStatus>('loading');
   const [hasBooted, setHasBooted] = useState(false);
   const [lockSettings, setLockSettingsState] = useState<LockSettings>(DEFAULT_LOCK_SETTINGS);
+  const [bootError, setBootError] = useState<string | null>(null);
   const backgroundedAt = useRef<number | null>(null);
 
   // Read by the AppState listener, which is registered once and would
@@ -105,25 +118,38 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const lockRef = useRef(lockSettings);
   lockRef.current = lockSettings;
 
+  // EVERY await in here is inside the try, and that is the entire point.
+  //
+  // This used to be an uncaught async IIFE. A rejection anywhere in it meant
+  // setStatus was never reached, so `status` stayed 'loading' forever and
+  // VaultGate painted a blank white screen -- no error, no spinner, nothing to
+  // act on. That is exactly how a recoverable database problem presented as a
+  // dead app. A boot failure has to be visible or it cannot be reported.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const settings = await getLockSettings();
-      if (cancelled) return;
-      setLockSettingsState(settings);
+      try {
+        const settings = await getLockSettings();
+        if (cancelled) return;
+        setLockSettingsState(settings);
 
-      if (settings.enabled) {
-        // Keys stay unloaded until the OS prompt succeeds. LockScreen raises
-        // it on mount, so this is not a dead end.
-        setStatus('locked');
-        return;
+        if (settings.enabled) {
+          // Keys stay unloaded until the OS prompt succeeds. LockScreen raises
+          // it on mount, so this is not a dead end.
+          setStatus('locked');
+          return;
+        }
+
+        await bootVault();
+        if (cancelled) return;
+        setHasBooted(true);
+        setStatus('unlocked');
+      } catch (err) {
+        if (cancelled) return;
+        console.error('Vault boot failed:', err);
+        setBootError(err instanceof Error ? `${err.message}\n\n${err.stack ?? ''}` : String(err));
+        setStatus('failed');
       }
-
-      await loadKeys();
-      await initPowerSync();
-      if (cancelled) return;
-      setHasBooted(true);
-      setStatus('unlocked');
     })();
     return () => {
       cancelled = true;
@@ -138,14 +164,51 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     // than a security measure.
     if (outcome === 'cancelled') return;
 
-    if (!vaultIsUnlocked()) {
-      await loadKeys();
+    try {
+      if (!vaultIsUnlocked()) {
+        await loadKeys();
+      }
+      // No-op after the first call, which is what makes the cold-launch path
+      // and the re-lock path the same code.
+      await initPowerSync();
+      setHasBooted(true);
+      setStatus('unlocked');
+    } catch (err) {
+      // Same reasoning as the boot effect: a throw here would otherwise leave
+      // the lock screen up with a button that silently does nothing.
+      console.error('Unlock failed:', err);
+      setBootError(err instanceof Error ? `${err.message}\n\n${err.stack ?? ''}` : String(err));
+      setStatus('failed');
     }
-    // No-op after the first call, which is what makes the cold-launch path
-    // and the re-lock path the same code.
-    await initPowerSync();
-    setHasBooted(true);
-    setStatus('unlocked');
+  }, []);
+
+  /**
+   * Throw the local database away and rebuild an empty vault.
+   *
+   * Offered only from the failure screen, because it is destructive: notes
+   * that were never synced to an account exist nowhere else. It is still the
+   * right escape hatch, since the alternative on offer is an app that cannot
+   * start at all -- and a signed-in user gets everything back on next sync.
+   */
+  const resetLocalData = useCallback(async () => {
+    setStatus('loading');
+    setBootError(null);
+    try {
+      // Close before deleting: wipeLocalDatabase removes the files, and any
+      // handle this process still holds would otherwise keep writing to a
+      // deleted inode -- the reset would appear to work and then undo itself.
+      await closePowerSync();
+      await clearLegacyVault();
+      wipeLocalDatabase();
+      await createLocalVault();
+      await initPowerSync();
+      setHasBooted(true);
+      setStatus('unlocked');
+    } catch (err) {
+      console.error('Reset failed:', err);
+      setBootError(err instanceof Error ? `${err.message}\n\n${err.stack ?? ''}` : String(err));
+      setStatus('failed');
+    }
   }, []);
 
   const lock = useCallback(() => setStatus('locked'), []);
@@ -177,7 +240,16 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <VaultContext.Provider
-      value={{ status, hasBooted, lockSettings, unlock, lock, updateLockSettings }}
+      value={{
+        status,
+        hasBooted,
+        lockSettings,
+        bootError,
+        unlock,
+        lock,
+        updateLockSettings,
+        resetLocalData,
+      }}
     >
       {children}
     </VaultContext.Provider>

@@ -1,4 +1,4 @@
-import { LogBox, View } from 'react-native';
+import { ActivityIndicator, LogBox, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import { AuthProvider } from '@/contexts/AuthContext';
@@ -7,6 +7,7 @@ import { LockScreen } from '@/components/LockScreen';
 import { AdoptKeyScreen, usePendingAdoption } from '@/components/AdoptKeyScreen';
 import { SecureAccountScreen, usePendingKeySetup } from '@/components/SecureAccountScreen';
 import { PlaintextConsentDialog } from '@/components/PlaintextConsentDialog';
+import { BootFailureScreen } from '@/components/BootFailureScreen';
 
 import '@/global.css';
 
@@ -68,10 +69,21 @@ export default function RootLayout() {
  * this collapses to "show the app".
  */
 function VaultGate() {
-  const { status, hasBooted } = useVault();
+  const { status, hasBooted, bootError, resetLocalData } = useVault();
 
   if (status === 'loading') {
-    return <View className="flex-1 bg-white" />;
+    // The spinner is not decoration. An empty View here is what made a hung
+    // boot look identical to a dead one -- there was no way to tell "still
+    // working" from "gave up" without attaching a debugger.
+    return (
+      <View className="flex-1 bg-white items-center justify-center">
+        <ActivityIndicator color="#84CC16" />
+      </View>
+    );
+  }
+
+  if (status === 'failed') {
+    return <BootFailureScreen error={bootError} onReset={resetLocalData} />;
   }
 
   return (

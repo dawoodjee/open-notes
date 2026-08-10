@@ -45,6 +45,69 @@ export function wipeLocalDatabase(): void {
   }
 }
 
+/**
+ * Delete a database AND its write-ahead log, which is not the same thing.
+ *
+ * op-sqlite's delete() removes the main `.db` file and leaves `-wal` and
+ * `-shm` sitting next to it. In WAL mode most recent content lives in the log,
+ * not the main file, so the next open() -- which recreates the main file --
+ * finds a matching log and replays it. The database comes back from the dead.
+ *
+ * That is not a hypothetical. It is precisely how the blank-screen bug worked:
+ * the Stage 6 migration exported notes.db into notes-v2.db and deleted the
+ * original, the orphaned WAL resurrected it on the next launch, the migration
+ * saw a plaintext database again and re-ran the export into an already-
+ * populated encrypted file, and threw `table ps_migration already exists`
+ * before the note UI could mount. Every launch after that did the same thing.
+ *
+ * `PRAGMA journal_mode = DELETE` is the fix: switching out of WAL checkpoints
+ * the log into the main file and REMOVES the -wal and -shm files. Only then is
+ * delete() actually deleting the whole database.
+ */
+async function deleteDatabaseAndLog(name: string, encryptionKey?: string): Promise<void> {
+  try {
+    const db = open(encryptionKey ? { name, encryptionKey } : { name });
+    try {
+      await db.execute('PRAGMA journal_mode = DELETE');
+    } catch {
+      // An unreadable file has no log worth checkpointing; delete() still
+      // removes the main file below, which is the best available outcome.
+    }
+    db.delete();
+  } catch {
+    // Nothing there to delete.
+  }
+}
+
+/**
+ * Does the encrypted database already exist with a schema in it?
+ *
+ * Opened with the key and immediately closed, so PowerSync gets the file to
+ * itself afterwards. A `false` covers three cases that all mean the same
+ * thing here -- no file, an empty file, or a file this key cannot open -- and
+ * in every one of them running the migration is the right next move.
+ */
+async function encryptedDatabaseHasTables(encryptionKey: string): Promise<boolean> {
+  let db: ReturnType<typeof open> | null = null;
+  try {
+    db = open({ name: ENCRYPTED_DB_FILENAME, encryptionKey });
+    // Any query is also the key check: SQLCipher defers verification to the
+    // first read, so a wrong key surfaces here as "file is not a database".
+    const result = await db.execute(
+      `SELECT count(*) AS count FROM sqlite_master WHERE type = 'table'`
+    );
+    return Number(result.rows?.[0]?.count ?? 0) > 0;
+  } catch {
+    return false;
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      // Nothing to close.
+    }
+  }
+}
+
 export async function migrateToEncrypted(encryptionKey: string): Promise<void> {
   // The single most important line in this file.
   //
@@ -60,6 +123,27 @@ export async function migrateToEncrypted(encryptionKey: string): Promise<void> {
         'to package.json and rebuild the native app (pod install + expo run:ios). ' +
         'Refusing to continue, because the database would be stored unencrypted.'
     );
+  }
+
+  // Has this already been done? Asked FIRST, and the ordering is the fix for a
+  // boot failure that could not be escaped from inside the app.
+  //
+  // The export below is not idempotent: sqlcipher_export copies the whole
+  // schema, so running it a second time into an already-populated encrypted
+  // database throws `table ps_migration already exists`. That was survivable
+  // only as long as the legacy file was always deleted afterwards -- and if
+  // the process died between the export and that delete (or the delete simply
+  // didn't take), both files were left on disk and EVERY subsequent launch
+  // re-entered the migration, threw, and never reached the note UI. A
+  // permanent, self-inflicted brick from a single interrupted launch.
+  //
+  // So: an encrypted database that already has tables means the migration has
+  // run. There is nothing to move, and the plaintext leftover is exactly that
+  // -- a leftover, frozen at the moment of the original export, which the app
+  // has not written to since.
+  if (await encryptedDatabaseHasTables(encryptionKey)) {
+    await deleteDatabaseAndLog(LEGACY_DB_FILENAME);
+    return;
   }
 
   let legacy: ReturnType<typeof open>;
@@ -87,9 +171,9 @@ export async function migrateToEncrypted(encryptionKey: string): Promise<void> {
 
     if (tableCount === 0) {
       // open() creates the file if it's missing, so an empty database here
-      // means there was nothing before this call. Delete the file we just
-      // brought into existence rather than leaving a stray plaintext artifact
-      // next to the encrypted one.
+      // means there was nothing before this call. Drop out of WAL first so the
+      // -wal and -shm go with it -- see deleteDatabaseAndLog.
+      await legacy.execute('PRAGMA journal_mode = DELETE');
       legacy.delete();
       return;
     }
@@ -124,6 +208,10 @@ export async function migrateToEncrypted(encryptionKey: string): Promise<void> {
     // Only now is the plaintext original expendable. Ordering matters: if
     // anything above threw, the old file is still intact and the next launch
     // retries from a clean state.
+    //
+    // Out of WAL before deleting, so no -wal survives to resurrect the file on
+    // the next launch. This exact omission is what bricked the app once.
+    await legacy.execute('PRAGMA journal_mode = DELETE');
     legacy.delete();
   } finally {
     try {
