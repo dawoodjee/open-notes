@@ -131,7 +131,48 @@ Worth writing down because each one is an easy, well-intentioned mistake:
 
 ## The one thing users must understand
 
-Lose the PIN **and** the recovery code **and** every signed-in device, and the
-notes are gone. Not "gone until support restores them" — mathematically gone.
-That is the direct cost of the guarantee, and the setup flow says so in those
-words rather than softening it.
+Lose the recovery code **and** every signed-in device, and the notes are gone.
+Not "gone until support restores them" — mathematically gone. That is the
+direct cost of the guarantee, and the sign-in flow says so in those words
+rather than softening it.
+
+Note what is *not* in that sentence any more: there is no PIN to forget.
+Unlocking is the device's own credential (Stage 6.5), which means losing it is
+the same problem as being locked out of the phone itself, and is the phone's
+problem to solve rather than ours. The recovery code is the only secret this
+app asks anyone to keep.
+
+---
+
+## Where iOS and Android genuinely differ
+
+Worth writing down because the honest answer is "mostly the same, with two
+real exceptions", and because the app's own copy must not overclaim.
+
+**The lock is the same on both.** `lib/auth/deviceAuth.ts` uses
+`expo-local-authentication` with `disableDeviceFallback: false`, so biometrics
+*or* the device passcode satisfy one prompt on either platform. This is
+deliberately not `expo-secure-store`'s `requireAuthentication`, which is
+biometrics-only on **both** platforms and cannot accept a device credential —
+Android's prompt sets `setNegativeButtonText` (mutually exclusive with
+`DEVICE_CREDENTIAL`) and never calls `setAllowedAuthenticators`; iOS hardcodes
+`.biometryCurrentSet`.
+
+**At-rest protection is weaker on Android, and the difference is real.**
+`keychainAccessible` is iOS-only. On iOS the device key is stored
+`WHEN_UNLOCKED_THIS_DEVICE_ONLY`: unreadable while the phone is locked, never
+leaves the device, never enters a backup. Android Keystore has no equivalent
+attribute — the key is hardware-backed and non-exportable, but readable
+whenever the app's process runs. For a foreground app the practical difference
+is nil; the *stated guarantee* is weaker, which is why the Security screen
+says what it says.
+
+**SQLCipher is configured identically.** `android/build.gradle` reads the same
+`op-sqlite.sqlcipher` flag from `package.json` that the iOS podspec does, and
+swaps in the SQLCipher amalgamation.
+
+**None of this is verified on Android hardware.** No Android device was
+available at any point in Stage 6 or 6.5. Everything above is read from the
+installed native sources, not observed running. Treat the Android column as
+designed-for, not tested — including hardware-back behaviour, which has been
+unverified since Stage 5.
