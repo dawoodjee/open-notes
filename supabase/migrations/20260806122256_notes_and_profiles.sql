@@ -44,7 +44,24 @@ create table public.notes (
   -- already moves on both trash and restore, and a second timestamp could
   -- disagree with this flag. One field means the invalid combinations
   -- ("trashed with no timestamp", "untrashed with one") cannot be represented.
-  is_trashed boolean not null default false
+  is_trashed boolean not null default false,
+
+  -- Per-note opt-OUT of the API access gate (Stage 6.5). A note with this set
+  -- is excluded from everything lib/plaintext/ hands to an outside caller --
+  -- not just its content, but its metadata too, so an app cannot learn the
+  -- note exists at all.
+  --
+  -- Named for what it actually governs. A generic `is_private` would invite
+  -- the assumption that it hides the note from something else as well: it does
+  -- not. This app reads and syncs the note exactly as before; the only thing
+  -- it changes is what leaves the device through the API gate.
+  --
+  -- Default false (visible) on purpose, which is the opposite of how the gate
+  -- itself defaults. The gate is the real control and is off until the user
+  -- turns it on; this is a per-note exception INSIDE a permission already
+  -- granted. Defaulting to hidden would mean the API returned nothing until
+  -- every note had been toggled one at a time.
+  is_hidden_from_api boolean not null default false
 );
 
 -- The list query is `order by updated_at desc` filtered to a user's own rows.
@@ -342,3 +359,74 @@ grant select on public.notes to powersync_role;
 -- metadata, not offline-critical note content, and lives entirely server-side
 -- keyed by the same auth user id notes.user_id already references.
 -- =============================================================================
+
+-- =============================================================================
+-- user_keys — Stage 6 (end-to-end encryption)
+-- =============================================================================
+--
+-- One row per account, holding this account's note-encryption key in wrapped
+-- form so a second device can obtain it. The server never sees the raw key.
+--
+-- WHY A SEPARATE TABLE RATHER THAN COLUMNS ON profiles:
+-- profiles carries the policy "any authenticated user can read profiles",
+-- which exists so username availability can be checked before signup. That is
+-- exactly right for a username and exactly wrong for key material. Even
+-- wrapped, a key blob readable by every signed-in user hands an attacker an
+-- unlimited supply of offline targets. Separate table, owner-only both ways.
+--
+-- WHY IT IS WRAPPED UNDER THE RECOVERY CODE AND NOT THE PIN:
+-- A blob an attacker can take offline is protected only by the entropy of
+-- whatever wraps it. A 6-digit PIN is 10^6 candidates -- a GPU exhausts that
+-- in hours no matter how the KDF is tuned, because the attacker runs native
+-- code, not our JavaScript. The recovery code is 125 bits, which is not
+-- searchable by anyone, ever. The cost of this choice is that adding a device
+-- needs the recovery code rather than just the PIN; that was accepted
+-- deliberately.
+create table public.user_keys (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+
+  -- enc:v1 envelope (AES-256-GCM) of the account's 32-byte data key,
+  -- encrypted under hkdf(recovery code). See lib/crypto/keys.ts.
+  recovery_wrapped_key text not null,
+  recovery_salt text not null,
+
+  -- Records which KDF and parameters produced the wrapping key, so the cost
+  -- can be raised later without stranding blobs written under the old ones.
+  kdf_params jsonb not null,
+
+  -- A non-secret HKDF tag derived from the data key, used only to answer "is
+  -- the key this device holds the same one this account already uses?"
+  -- without either side revealing or transmitting the key itself. Comparing
+  -- wrapped blobs would not work: different salts and nonces make two
+  -- wrappings of the SAME key look completely different.
+  key_fingerprint text not null,
+
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.user_keys enable row level security;
+
+-- Owner-only, in both directions, with no shared-read policy of any kind.
+create policy "owners read their key"
+  on public.user_keys for select
+  to authenticated
+  using (auth.uid() = user_id);
+
+create policy "owners insert their key"
+  on public.user_keys for insert
+  to authenticated
+  with check (auth.uid() = user_id);
+
+-- Deliberately NO update or delete policy. Overwriting this row makes every
+-- note already encrypted under the old key permanently unreadable, and a
+-- delete does the same to every device that hasn't cached the key yet. Key
+-- rotation is a real feature that needs a re-encryption plan behind it, not
+-- something to leave one stray upsert away from happening by accident.
+
+grant select, insert on public.user_keys to authenticated;
+
+-- No updated_at trigger, deliberately: with no update policy above, this row
+-- is insert-once and can never be modified by a client, so updated_at can
+-- only ever equal created_at. It's kept as a column purely so a future
+-- key-rotation feature has somewhere to record itself.

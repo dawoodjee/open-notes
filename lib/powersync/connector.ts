@@ -8,6 +8,7 @@ import {
 import { supabase } from '@/lib/supabase/client';
 import { getCurrentSession } from '@/lib/auth/currentUser';
 import { mergeBody } from './mergeBody';
+import { encryptField, tryDecryptField } from '@/lib/crypto/noteCrypto';
 import { parseNoteContent } from '@/types/note';
 import * as Crypto from 'expo-crypto';
 
@@ -18,7 +19,15 @@ const SYNC_ISSUE_MAX_AGE_MS = 60 * 24 * 60 * 60 * 1000; // 2 months
 // supabase/migrations/20260806122256_notes_and_profiles.sql. Used to narrow
 // each op's opData before sending it, since a stale pre-Stage-5 queue entry
 // can carry a dropped column (e.g. `version`) that would otherwise 400.
-const NOTES_COLUMNS = ['user_id', 'body', 'title', 'created_at', 'updated_at', 'is_trashed'] as const;
+const NOTES_COLUMNS = [
+  'user_id',
+  'body',
+  'title',
+  'created_at',
+  'updated_at',
+  'is_trashed',
+  'is_hidden_from_api',
+] as const;
 
 function pickNotesColumns(data: Record<string, any> | undefined) {
   const out: Record<string, any> = {};
@@ -26,10 +35,11 @@ function pickNotesColumns(data: Record<string, any> | undefined) {
   for (const col of NOTES_COLUMNS) {
     if (col in data) out[col] = data[col];
   }
-  // SQLite has no boolean type, so is_trashed round-trips as 0/1 while
-  // Postgres declares it boolean. PostgREST accepts both, but normalizing
-  // here keeps the payload honest about what the column actually is.
+  // SQLite has no boolean type, so these round-trip as 0/1 while Postgres
+  // declares them boolean. PostgREST accepts both, but normalizing here keeps
+  // the payload honest about what the columns actually are.
   if ('is_trashed' in out) out.is_trashed = Boolean(out.is_trashed);
+  if ('is_hidden_from_api' in out) out.is_hidden_from_api = Boolean(out.is_hidden_from_api);
   return out;
 }
 
@@ -158,6 +168,12 @@ async function uploadEntry(database: AbstractPowerSyncDatabase, entry: CrudEntry
 
       const payload: Record<string, any> = { id: entry.id, ...pickNotesColumns(row) };
 
+      // The plaintext that will become this note's new sync ancestor. Held
+      // separately because payload.body is an envelope from here on, and
+      // note_sync_base must store plaintext for the next merge to be able to
+      // diff against it.
+      let ancestorPlaintext: string | null = null;
+
       // Before overwriting the server's body, check whether it moved since we
       // last agreed with it -- another device may have edited this same note
       // while we were offline. mergeBody replays only *our* changes onto
@@ -169,9 +185,33 @@ async function uploadEntry(database: AbstractPowerSyncDatabase, entry: CrudEntry
         .maybeSingle();
       if (readError) throw readError;
 
+      // --- the merge now runs on PLAINTEXT, never on ciphertext -----------
+      //
+      // This is the collision Stage 6 had to resolve rather than bolt on.
+      // diff-match-patch finds the edits one side made by diffing against a
+      // common ancestor. Ciphertext has no such structure: a one-character
+      // edit changes every byte after it, and a fresh nonce changes them all
+      // anyway. Diffing envelopes would produce garbage that still "merges"
+      // cleanly -- the worst kind of failure.
+      //
+      // So: decrypt both sides, merge, re-encrypt. note_sync_base keeps its
+      // ancestor in plaintext, which is safe now only because Phase 1
+      // encrypted the whole local database file.
       if (remote && typeof payload.body === 'string') {
+        const localPlain = tryDecryptField(payload.body);
+        const remotePlain = tryDecryptField(remote.body ?? '');
+
+        if (!localPlain.ok || !remotePlain.ok) {
+          // Cannot merge what cannot be read. Retryable rather than dropped:
+          // a locked vault resolves itself, and a foreign key is Phase 3's
+          // problem -- neither is a reason to destroy an edit.
+          throw new Error(
+            `Cannot merge note ${entry.id}: ${!localPlain.ok ? 'local' : 'remote'} content did not decrypt`
+          );
+        }
+
         const base = await getSyncBase(database, entry.id);
-        const result = mergeBody(base, payload.body, remote.body ?? '');
+        const result = mergeBody(base, localPlain.text, remotePlain.text);
 
         if (result.outcome === 'partial') {
           // Not fatal -- the merge still happened and most of the edit
@@ -184,12 +224,15 @@ async function uploadEntry(database: AbstractPowerSyncDatabase, entry: CrudEntry
           );
         }
 
-        if (result.body !== payload.body) {
-          payload.body = result.body;
+        // Compared as plaintext. Comparing the envelopes would be true every
+        // single time -- re-encrypting identical text yields different bytes
+        // -- so every upload would look like a merge and rewrite the row.
+        if (result.body !== localPlain.text) {
+          payload.body = encryptField(result.body);
           // Keep title consistent with the merged body -- title is derived
           // from body (parseNoteContent), so shipping a merged body with the
           // pre-merge title would make the two disagree.
-          payload.title = parseNoteContent(result.body).title;
+          payload.title = encryptField(parseNoteContent(result.body).title);
           // The merged text is also what this device should now show;
           // otherwise the other device's changes stay invisible here until
           // the next pull happens to overwrite them.
@@ -199,6 +242,17 @@ async function uploadEntry(database: AbstractPowerSyncDatabase, entry: CrudEntry
             entry.id,
           ]);
         }
+
+        // The ancestor is the plaintext both sides now agree on.
+        ancestorPlaintext = result.body;
+      } else if (typeof payload.body === 'string') {
+        // No server row yet -- nothing to merge against, so the ancestor is
+        // simply what we're about to upload.
+        const localPlain = tryDecryptField(payload.body);
+        if (!localPlain.ok) {
+          throw new Error(`Cannot upload note ${entry.id}: local content did not decrypt`);
+        }
+        ancestorPlaintext = localPlain.text;
       }
 
       // upsert(), never a bare update(): a note that was blocked by RLS while
@@ -210,8 +264,12 @@ async function uploadEntry(database: AbstractPowerSyncDatabase, entry: CrudEntry
       // Record the new common ancestor only after the write is confirmed --
       // claiming agreement we never actually reached would make the *next*
       // merge diff against a version the server never had.
-      if (typeof payload.body === 'string') {
-        await setSyncBase(database, entry.id, payload.body);
+      //
+      // Stored as PLAINTEXT. Storing the envelope would be useless: the next
+      // merge diffs against this value, and diffing ciphertext produces
+      // nonsense. Safe because the whole local database file is encrypted.
+      if (ancestorPlaintext !== null) {
+        await setSyncBase(database, entry.id, ancestorPlaintext);
       }
       break;
     }

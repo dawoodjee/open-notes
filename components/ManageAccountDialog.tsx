@@ -11,7 +11,7 @@ import { Pressable } from '@/components/ui/pressable';
 import { VStack } from '@/components/ui/vstack';
 import { HStack } from '@/components/ui/hstack';
 import { Icon } from '@/components/ui/icon';
-import { X, LogOut } from 'lucide-react-native';
+import { X, LogOut, UserRound } from 'lucide-react-native';
 
 import AccountField, { FieldTone } from '@/components/AccountField';
 import { useAuth } from '@/contexts/AuthContext';
@@ -473,7 +473,10 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
       <ModalBackdrop />
       <ModalContent className="w-full max-w-full h-4/5 mt-auto mb-0 mx-0 rounded-t-2xl rounded-b-none border-0 px-5 pb-13">
         <ModalHeader>
-          <RNText className="text-base font-semibold text-gray-900">Manage Account</RNText>
+          <HStack className="items-center">
+            <Icon as={UserRound} className="w-5 h-5 mr-2 text-gray-600" />
+            <RNText className="text-base font-semibold text-gray-900">Manage Account</RNText>
+          </HStack>
           {/* A plain Pressable, not ModalCloseButton: that one closes through
               the modal's own context and would bypass the required-field
               check, so the X and the backdrop would disagree. */}

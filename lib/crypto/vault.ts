@@ -1,0 +1,432 @@
+// Must be imported before anything calls into noble, which reaches for
+// crypto.getRandomValues(). React Native has no such global until this
+// polyfill installs it. (lib/supabase/client.ts imports it too; it's
+// idempotent, and relying on that file having been loaded first would be a
+// load-order bug waiting to happen.)
+import 'react-native-get-random-values';
+
+import * as SecureStore from 'expo-secure-store';
+import { hkdf } from '@noble/hashes/hkdf.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, utf8ToBytes } from '@noble/ciphers/utils.js';
+import {
+  KdfParams,
+  RECOVERY_KDF_PARAMS,
+  generateDataKey,
+  generateDeviceKey,
+  generateRecoveryCode,
+  generateSalt,
+  keyFingerprint,
+  unwrapWith,
+  wrapDataKeyWithRecoveryCode,
+  wrapWith,
+} from './keys';
+
+/**
+ * Everything that persists the vault, and the in-memory unlocked state.
+ *
+ * Split from keys.ts on purpose: keys.ts is pure computation with no Expo or
+ * React Native imports, which is what lets scripts/verify-crypto.ts exercise
+ * the real code under Node. This file is the part that can only run on a
+ * device, and it's deliberately thin so there's little here that isn't
+ * covered by that script.
+ *
+ * THE KEY MODEL, after the move to device-native unlock:
+ *
+ *   dataKey     encrypts note content. Wrapped under deviceKey locally, and
+ *               under the recovery code server-side.
+ *   dbSeed      derives the SQLCipher key for the local file. Device-local,
+ *               never uploaded, never recoverable -- see below.
+ *   deviceKey   32 random bytes in the OS keychain. Wraps both of the above.
+ *
+ * The user types nothing to unlock. Whether a lock screen appears at all is a
+ * separate, purely UI-level decision (see LockSettings and
+ * lib/auth/deviceAuth.ts) -- the keychain is what actually protects these
+ * bytes at rest, and the device credential is a gate in front of the app, not
+ * a second layer of encryption.
+ */
+
+const VAULT_KEY = 'notes.vault.v2';
+const DEVICE_KEY_ITEM = 'notes.devicekey.v2';
+
+/**
+ * The pre-6.5 vault, which wrapped its keys under scrypt(6-digit PIN).
+ *
+ * Kept only as a name to delete. There is deliberately no migration: unwrapping
+ * a v1 vault requires the PIN, and the screens that could collect one are gone.
+ * See hasLegacyVault().
+ */
+const LEGACY_VAULT_KEY = 'notes.vault.v1';
+
+/**
+ * Why this accessibility level and not the stronger-sounding one.
+ *
+ * WHEN_PASSCODE_SET_THIS_DEVICE_ONLY reads like the obvious choice for a
+ * security-sensitive item, and it is a trap: iOS **deletes** those items when
+ * the user removes their device passcode. Someone turning off their passcode
+ * would silently lose every note that had never synced. WHEN_UNLOCKED_THIS_-
+ * DEVICE_ONLY still requires the device to be unlocked, still never leaves the
+ * device, and still stays out of iCloud backups -- without the trapdoor.
+ *
+ * Android note: keychainAccessible is iOS-only. Android Keystore has no
+ * equivalent attribute, so the key there is hardware-backed and non-exportable
+ * but readable whenever this process runs. Practically the same for a
+ * foreground app; the guarantee is genuinely weaker, and the Security screen
+ * copy must not claim otherwise.
+ */
+const SECURE_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+};
+
+/** Whether to show a lock screen, and after how long away. */
+export interface LockSettings {
+  enabled: boolean;
+  /** 0 means lock the moment the app leaves the foreground. */
+  afterMs: number;
+}
+
+export const DEFAULT_LOCK_SETTINGS: LockSettings = { enabled: false, afterMs: 5 * 60 * 1000 };
+
+interface StoredVault {
+  /** The data key, wrapped under the device key. */
+  wrappedByDevice: string;
+  /**
+   * The SQLCipher seed, wrapped under the device key.
+   *
+   * WHY IT IS SEPARATE FROM THE DATA KEY (a Stage 6 mistake, corrected then and
+   * still load-bearing): the database key was originally derived from the data
+   * key. That is fine until a device has to ADOPT a different account's data
+   * key on login -- at which point the database key would silently change and
+   * the open database file would become unopenable, requiring a full SQLCipher
+   * rekey mid-login. Two secrets with two jobs avoids that entirely.
+   */
+  wrappedDbSeedByDevice: string;
+  /**
+   * The same data key, wrapped under the recovery code. Absent until the user
+   * signs in -- a device that has never had an account has nothing to transport
+   * the key TO, so there is nothing to recover and no reason to make someone
+   * transcribe 25 characters before writing their first note.
+   */
+  wrappedByRecoveryCode?: string;
+  recoverySalt?: string;
+  /** Travels with the blob so a future derivation change doesn't strand it. */
+  kdfParams?: KdfParams;
+  /** Whether wrappedByRecoveryCode has made it to public.user_keys yet. */
+  backedUp: boolean;
+  /**
+   * False between generating a recovery code and the user typing it back.
+   *
+   * Without this flag there's a window that produces an unrecoverable account:
+   * the code is displayed exactly once, and killing the app mid-screen would
+   * leave a vault whose recovery code nobody has ever seen. Treating an
+   * unconfirmed code as no code at all means the step simply runs again.
+   */
+  recoveryConfirmed: boolean;
+  /**
+   * Mirrored here, with ui_state as the editable source of truth.
+   *
+   * Not redundancy for its own sake: the boot path has to decide whether to
+   * show a lock screen BEFORE it can open the database, and ui_state lives
+   * inside that database. Something readable earlier has to hold the answer.
+   */
+  lock: LockSettings;
+}
+
+// --- in-memory unlocked state ----------------------------------------------
+//
+// Module-level rather than React state, mirroring lib/auth/currentUser.ts:
+// lib/powersync/connector.ts needs the key from inside uploadData(), which
+// has no component and no render cycle to read from.
+//
+// These stay in memory while the lock screen is showing. That is deliberate:
+// re-locking hides the UI, it does not tear down the database or disconnect
+// sync, so notes keep syncing while the phone is in a pocket. What the lock
+// protects against is someone picking up an unlocked phone -- not a memory
+// dump of a running process, which it was never going to stop anyway.
+let dataKey: Uint8Array | null = null;
+let dbSeed: Uint8Array | null = null;
+let deviceKey: Uint8Array | null = null;
+
+export function isUnlocked(): boolean {
+  return dataKey !== null;
+}
+
+export function getDataKey(): Uint8Array {
+  if (!dataKey) {
+    throw new Error('The vault is locked -- no data key available.');
+  }
+  return dataKey;
+}
+
+/** Only for sign-out and account switches, where the next user must not
+ *  inherit the previous one's key. Showing the lock screen does not call this. */
+export function forgetDataKey(): void {
+  if (dataKey) dataKey.fill(0);
+  dataKey = null;
+  if (dbSeed) dbSeed.fill(0);
+  dbSeed = null;
+  if (deviceKey) deviceKey.fill(0);
+  deviceKey = null;
+}
+
+// --- persistence ------------------------------------------------------------
+
+async function readVault(): Promise<StoredVault | null> {
+  const raw = await SecureStore.getItemAsync(VAULT_KEY, SECURE_STORE_OPTIONS);
+  return raw ? (JSON.parse(raw) as StoredVault) : null;
+}
+
+async function writeVault(vault: StoredVault): Promise<void> {
+  // Comfortably inside SecureStore's ~2KB per-value cap: two envelopes of a
+  // 32-byte key plus a salt is well under 600 bytes. (Contrast
+  // lib/supabase/client.ts, where a full session blew past the cap and needed
+  // the LargeSecureStore workaround.)
+  await SecureStore.setItemAsync(VAULT_KEY, JSON.stringify(vault), SECURE_STORE_OPTIONS);
+}
+
+export async function hasVault(): Promise<boolean> {
+  return (await readVault()) !== null;
+}
+
+/**
+ * Is there a pre-6.5 vault sitting in the keychain?
+ *
+ * Its keys are wrapped under a PIN this app can no longer collect, so both it
+ * and the database it belongs to are unreadable. The caller wipes both and
+ * starts fresh -- see contexts/VaultContext.tsx.
+ */
+export async function hasLegacyVault(): Promise<boolean> {
+  return (await SecureStore.getItemAsync(LEGACY_VAULT_KEY)) !== null;
+}
+
+export async function clearLegacyVault(): Promise<void> {
+  await SecureStore.deleteItemAsync(LEGACY_VAULT_KEY);
+}
+
+// --- lifecycle --------------------------------------------------------------
+
+/**
+ * First launch. Mints everything and leaves the vault unlocked.
+ *
+ * No PIN, no recovery code, no user interaction at all -- the point is that a
+ * new user reaches an empty note with nothing between them and it. The recovery
+ * code is generated later, at sign-in (see addRecoveryCode), which is the first
+ * moment the key has to become portable off this device.
+ */
+export async function createLocalVault(): Promise<void> {
+  const key = generateDataKey();
+  const seed = generateDataKey(); // same shape, different job -- see wrappedDbSeedByDevice
+  const device = generateDeviceKey();
+
+  await SecureStore.setItemAsync(DEVICE_KEY_ITEM, bytesToHex(device), SECURE_STORE_OPTIONS);
+  await writeVault({
+    wrappedByDevice: wrapWith(key, device),
+    wrappedDbSeedByDevice: wrapWith(seed, device),
+    backedUp: false,
+    recoveryConfirmed: false,
+    lock: DEFAULT_LOCK_SETTINGS,
+  });
+
+  dataKey = key;
+  dbSeed = seed;
+  deviceKey = device;
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+/**
+ * Load the keys into memory from the keychain.
+ *
+ * Returns false rather than throwing when the device key is missing, which is
+ * a real state: the keychain item survives app deletion on iOS while the
+ * database does not, so an odd combination can outlive a reinstall. The caller
+ * treats false as "start over".
+ */
+export async function unlockWithDeviceKey(): Promise<boolean> {
+  const vault = await readVault();
+  if (!vault) return false;
+
+  const hex = await SecureStore.getItemAsync(DEVICE_KEY_ITEM, SECURE_STORE_OPTIONS);
+  if (!hex) return false;
+
+  try {
+    const device = hexToBytes(hex);
+    dataKey = unwrapWith(vault.wrappedByDevice, device);
+    dbSeed = unwrapWith(vault.wrappedDbSeedByDevice, device);
+    deviceKey = device;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// --- lock settings ----------------------------------------------------------
+
+/** Readable before the database is open, which is the whole reason the
+ *  settings are mirrored into the vault blob. */
+export async function getLockSettings(): Promise<LockSettings> {
+  const vault = await readVault();
+  return vault?.lock ?? DEFAULT_LOCK_SETTINGS;
+}
+
+export async function setLockSettings(lock: LockSettings): Promise<void> {
+  const vault = await readVault();
+  if (!vault) return;
+  await writeVault({ ...vault, lock });
+}
+
+// --- recovery code ----------------------------------------------------------
+
+export async function hasRecoveryCode(): Promise<boolean> {
+  const vault = await readVault();
+  return !!vault?.wrappedByRecoveryCode && vault.recoveryConfirmed;
+}
+
+/**
+ * Generate the recovery code and wrap the data key under it.
+ *
+ * Returns the code in plaintext -- the ONLY time it is ever available that
+ * way. It is not stored in readable form anywhere, so if the user doesn't
+ * write it down here it genuinely cannot be produced again.
+ *
+ * Leaves recoveryConfirmed false; see markRecoveryConfirmed.
+ */
+export async function addRecoveryCode(): Promise<string> {
+  const vault = await readVault();
+  if (!vault) throw new Error('No vault on this device.');
+
+  const recoveryCode = generateRecoveryCode();
+  const recoverySalt = generateSalt();
+
+  await writeVault({
+    ...vault,
+    wrappedByRecoveryCode: wrapDataKeyWithRecoveryCode(getDataKey(), recoveryCode, recoverySalt),
+    recoverySalt,
+    kdfParams: RECOVERY_KDF_PARAMS,
+    recoveryConfirmed: false,
+  });
+
+  return recoveryCode;
+}
+
+/** Called once the recovery code has been shown AND typed back. */
+export async function markRecoveryConfirmed(): Promise<void> {
+  const vault = await readVault();
+  if (!vault) throw new Error('No vault to confirm.');
+  await writeVault({ ...vault, recoveryConfirmed: true });
+}
+
+// --- account key reconciliation --------------------------------------------
+
+/**
+ * Adopt an account's data key on a device that already had its own.
+ *
+ * Every device mints a data key on first launch, before any account exists.
+ * Sign in to an account that already has notes and those notes are encrypted
+ * under a DIFFERENT key -- the one belonging to the device that created the
+ * account. Without adoption they download and are simply unreadable.
+ *
+ * THE TRAP, and the reason this function is not three lines: the data key is
+ * being replaced, so every wrapping of it has to be rewritten in the same
+ * pass. Leave wrappedByDevice pointing at the old key and the next launch
+ * unlocks silently into a key the account cannot read -- no error, no prompt,
+ * just notes that won't decrypt. Meanwhile dbSeed must NOT change, or the open
+ * database file stops opening.
+ *
+ * Re-encrypting the notes already on this device is the caller's job (see
+ * lib/crypto/reEncrypt.ts) and must happen while BOTH keys are available --
+ * hence the old key is returned rather than discarded.
+ */
+export async function adoptAccountDataKey(
+  accountKey: Uint8Array,
+  accountRecoveryWrapped: string,
+  accountRecoverySalt: string
+): Promise<{ previousKey: Uint8Array }> {
+  const vault = await readVault();
+  if (!vault) throw new Error('No vault on this device.');
+  if (!deviceKey) throw new Error('The vault is locked -- cannot adopt an account key.');
+
+  const previousKey = unwrapWith(vault.wrappedByDevice, deviceKey);
+  const seed = unwrapWith(vault.wrappedDbSeedByDevice, deviceKey);
+
+  await writeVault({
+    ...vault,
+    // Both re-wrapped under the SAME device key: it identifies the device, not
+    // the account, so adopting an account key doesn't change it.
+    wrappedByDevice: wrapWith(accountKey, deviceKey),
+    wrappedDbSeedByDevice: wrapWith(seed, deviceKey),
+    // The account's recovery material replaces this device's, because the
+    // account key is now what needs recovering. This device's original
+    // recovery code becomes meaningless and is discarded.
+    wrappedByRecoveryCode: accountRecoveryWrapped,
+    recoverySalt: accountRecoverySalt,
+    kdfParams: RECOVERY_KDF_PARAMS,
+    backedUp: true, // it came from the server by definition
+    recoveryConfirmed: true,
+  });
+
+  dataKey = accountKey;
+  dbSeed = seed;
+  return { previousKey };
+}
+
+/**
+ * This device's key material, ready to become the account's if the account
+ * doesn't have one yet. Null until a recovery code exists, which is what
+ * gates sign-in on the recovery step.
+ */
+export async function getKeyBackupPayload(): Promise<{
+  wrappedByRecoveryCode: string;
+  recoverySalt: string;
+  kdfParams: KdfParams;
+  fingerprint: string;
+} | null> {
+  const vault = await readVault();
+  if (!vault?.wrappedByRecoveryCode || !vault.recoverySalt || !vault.recoveryConfirmed) {
+    return null;
+  }
+  return {
+    wrappedByRecoveryCode: vault.wrappedByRecoveryCode,
+    recoverySalt: vault.recoverySalt,
+    kdfParams: vault.kdfParams ?? RECOVERY_KDF_PARAMS,
+    fingerprint: keyFingerprint(getDataKey()),
+  };
+}
+
+/** Identifies the key this device currently holds, for comparison against
+ *  the account's. Non-secret -- see keyFingerprint. */
+export function getDataKeyFingerprint(): string {
+  return keyFingerprint(getDataKey());
+}
+
+export async function markKeyBackedUp(): Promise<void> {
+  const vault = await readVault();
+  if (!vault) return;
+  await writeVault({ ...vault, backedUp: true });
+}
+
+// --- SQLCipher -------------------------------------------------------------
+
+const SQLCIPHER_INFO = utf8ToBytes('notes-sqlcipher-v1');
+
+/**
+ * The key SQLCipher opens notes-v2.db with, derived from dbSeed via HKDF.
+ *
+ * Domain separation is what makes one root secret safe to use twice: learning
+ * the database key tells you nothing about the seed, and the seed is not the
+ * data key, so the note-content key is two steps removed from the file key.
+ *
+ * Returned as hex because op-sqlite takes the key as a string.
+ */
+export function getDatabaseKey(): string {
+  if (!dbSeed) {
+    throw new Error('The vault is locked -- no database key available.');
+  }
+  return bytesToHex(hkdf(sha256, dbSeed, undefined, SQLCIPHER_INFO, 32));
+}

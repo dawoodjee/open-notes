@@ -22,11 +22,14 @@ import {
   Menu,
   Trash2,
   MoreVertical,
+  Eye,
+  EyeOff,
 } from 'lucide-react-native';
 
 // Custom Types
 import { Note } from '@/types/note';
 import AvatarMenuTrigger from './AvatarMenuTrigger';
+import { useApiGateOpen } from '@/lib/plaintext/useApiGate';
 
 export interface NoteEditorPaneProps {
   selectedNote: Note | undefined;
@@ -35,6 +38,7 @@ export interface NoteEditorPaneProps {
   onToggleSidebar: () => void;
   onBackToList: () => void;
   onTrashNote: (id: string) => void;
+  onSetHiddenFromApi: (id: string, hidden: boolean) => void;
   onNoteChange: (html: string) => void;
   initialEditorScrollOffset?: number;
   onEditorScrollOffsetChange?: (offset: number) => void;
@@ -47,10 +51,15 @@ export default function NoteEditorPane({
   onToggleSidebar,
   onBackToList,
   onTrashNote,
+  onSetHiddenFromApi,
   onNoteChange,
   initialEditorScrollOffset,
   onEditorScrollOffsetChange,
 }: NoteEditorPaneProps) {
+  // Live, because the gate is toggled in a settings sheet with no component
+  // ancestry to this menu -- see useApiGateOpen.
+  const apiGateOpen = useApiGateOpen();
+
   // Mobile edge-swipe-back, mirroring iOS's native interactive-pop gesture --
   // there's no real navigation stack here to provide that for free (list and
   // editor are conditionally-rendered panes in one screen, not routes).
@@ -112,6 +121,11 @@ export default function NoteEditorPane({
               <UIComponentsMenu
                 placement="bottom right"
                 offset={8}
+                // Disabling lives on the Menu, not the item: this is a
+                // react-aria collection, so `disabledKeys` is what actually
+                // makes a row non-interactive, and the item style already
+                // carries data-[disabled=true]:opacity-40 to match.
+                disabledKeys={apiGateOpen ? [] : ['api-visibility']}
                 trigger={({ ...triggerProps }) => (
                   <Pressable
                     {...triggerProps}
@@ -121,6 +135,34 @@ export default function NoteEditorPane({
                   </Pressable>
                 )}
               >
+                {/* Visible to Apps -- only meaningful while the API gate is
+                    open, so it is inert when it is not. The label stays short
+                    in both states: the greyed, unresponsive row already says
+                    "not available", and a row that grows an explanatory clause
+                    only when disabled reflows the menu and reads as an error.
+                    Kept above Delete because it is the reversible one. */}
+                <MenuItem
+                  key="api-visibility"
+                  textValue="Visible to Apps"
+                  onPress={() => {
+                    if (!apiGateOpen) return;
+                    onSetHiddenFromApi(selectedNote.id, !selectedNote.isHiddenFromApi);
+                  }}
+                  className="p-2.5 flex-row items-center gap-2"
+                >
+                  <Icon
+                    as={selectedNote.isHiddenFromApi ? EyeOff : Eye}
+                    className={`w-4 h-4 ${apiGateOpen ? 'text-gray-600' : 'text-gray-300'}`}
+                  />
+                  <MenuItemLabel
+                    className={`text-sm font-medium ${
+                      apiGateOpen ? 'text-gray-800' : 'text-gray-400'
+                    }`}
+                  >
+                    Visible to Apps
+                  </MenuItemLabel>
+                </MenuItem>
+
                 <MenuItem
                   key="trash"
                   textValue="Delete"

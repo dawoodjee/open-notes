@@ -12,10 +12,11 @@ import { HStack } from '@/components/ui/hstack';
 import { initialNotesState, notesReducer } from '@/types/notesStore';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  powersync,
+  getPowerSync,
   initPowerSync,
   mapRowToNote,
   createNoteInDB,
+  setNoteHiddenFromApi,
   updateNoteInDB,
   trashNoteInDB,
   getUiState,
@@ -78,7 +79,7 @@ export default function NotesLayout() {
         const uiState = await getUiState();
         restoredEditorScrollRef.current = uiState.editorScrollOffset;
         if (uiState.lastOpenedNoteId) {
-          const stillExists = await powersync.getOptional<{ id: string }>(
+          const stillExists = await getPowerSync().getOptional<{ id: string }>(
             'SELECT id FROM notes WHERE id = ?',
             [uiState.lastOpenedNoteId]
           );
@@ -87,7 +88,7 @@ export default function NotesLayout() {
           }
         }
 
-        powersync.watch(
+        getPowerSync().watch(
           'SELECT * FROM notes ORDER BY updated_at DESC',
           [],
           {
@@ -141,6 +142,14 @@ export default function NotesLayout() {
       dispatch({ type: 'SELECT_NOTE', payload: { id: newNote.id } });
     } catch (err) {
       console.error('Failed to create note in local SQLite:', err);
+    }
+  }, []);
+
+  const handleSetHiddenFromApi = useCallback(async (id: string, hidden: boolean) => {
+    try {
+      await setNoteHiddenFromApi(id, hidden);
+    } catch (err) {
+      console.error('Failed to change API visibility in local SQLite:', err);
     }
   }, []);
 
@@ -278,6 +287,7 @@ export default function NotesLayout() {
           onToggleSidebar={() => setIsSidebarTucked(!isSidebarTucked)}
           onBackToList={() => dispatch({ type: 'SELECT_NOTE', payload: { id: null } })}
           onTrashNote={handleTrashNote}
+          onSetHiddenFromApi={handleSetHiddenFromApi}
           onNoteChange={handleNoteChange}
           initialEditorScrollOffset={restoredEditorScrollRef.current}
           onEditorScrollOffsetChange={handleEditorScrollChange}
