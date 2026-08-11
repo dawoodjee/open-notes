@@ -29,7 +29,7 @@ import { SecurityView } from '@/components/SecurityView';
 import { EndpointsView } from '@/components/EndpointsView';
 import { AppearanceView } from '@/components/AppearanceView';
 import { useVault } from '@/contexts/VaultContext';
-import { useTheme, type ThemePreference } from '@/contexts/ThemeContext';
+import { useTheme } from '@/contexts/ThemeContext';
 
 export interface SettingsDialogProps {
   isOpen: boolean;
@@ -66,7 +66,7 @@ function AdvancedView({ onBack }: { onBack: () => void }) {
 
   return (
     <>
-      <SettingsSubHeader title="Advanced" icon={Wrench} onBack={onBack} />
+      <SettingsSubHeader title="Advanced" onBack={onBack} />
 
       <ScrollView className="flex-1 px-5 pt-4 bg-background">
         <SettingsGroup caption="Sync issues">
@@ -96,12 +96,6 @@ function AdvancedView({ onBack }: { onBack: () => void }) {
     </>
   );
 }
-
-const THEME_LABELS: Record<ThemePreference, string> = {
-  system: 'Device',
-  light: 'Light',
-  dark: 'Dark',
-};
 
 export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
   const [view, setView] = useState<
@@ -147,20 +141,16 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
             <ScrollView className="flex-1 px-5 pt-4 bg-background">
               <SettingsGroup>
                 <SettingsRow
+                  icon={Palette}
+                  label="Appearance"
+                  onPress={() => setView('appearance')}
+                />
+                <SettingsRow
                   icon={ShieldCheck}
                   label="Security"
                   onPress={() => setView('security')}
                 />
                 <SettingsRow icon={Wrench} label="Advanced" onPress={() => setView('advanced')} />
-              </SettingsGroup>
-
-              <SettingsGroup caption="Appearance">
-                <SettingsRow
-                  icon={Palette}
-                  label="Theme"
-                  value={THEME_LABELS[preference]}
-                  onPress={() => setView('appearance')}
-                />
               </SettingsGroup>
 
               <View className="h-8" />

@@ -86,7 +86,7 @@ export function SecurityView({
 
   return (
     <>
-      <SettingsSubHeader title="Security" icon={ShieldCheck} onBack={onBack} />
+      <SettingsSubHeader title="Security" onBack={onBack} />
 
       <ScrollView className="flex-1 px-5 pt-4 bg-background">
         <SettingsGroup

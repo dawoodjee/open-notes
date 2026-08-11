@@ -210,30 +210,24 @@ export function SettingsSegmented<T extends string | number>({
 /**
  * Header for a pushed sub-view inside a settings sheet.
  *
- * Paints its own white background rather than inheriting the sheet's. Under
+ * NO ICON, deliberately. The back chevron already says "this is a screen you
+ * came into from somewhere", so a second glyph beside the title is decoration
+ * competing with the one control that matters. Top-level sheet headers
+ * (SettingsHeader) do take an icon -- they have no back control, so the glyph
+ * is the only thing identifying the sheet.
+ *
+ * Paints its own background rather than inheriting the sheet's. Under
  * NativeWind v5-preview the ModalContent's background does not reach a
  * fragment child, so a sub-view rendered this way came out as dark text on
- * black. Every sub-view container below sets bg-white explicitly for the same
- * reason -- don't remove it because it looks redundant.
+ * black. Every sub-view container below sets bg-background explicitly for the
+ * same reason -- don't remove it because it looks redundant.
  */
-export function SettingsSubHeader({
-  title,
-  icon,
-  onBack,
-}: {
-  title: string;
-  /** Should be the same glyph as the row that pushed this view -- the icon is
-   *  what makes the transition read as "this row opened", rather than as an
-   *  unrelated screen that happens to share a word. */
-  icon?: React.ComponentType<any>;
-  onBack: () => void;
-}) {
+export function SettingsSubHeader({ title, onBack }: { title: string; onBack: () => void }) {
   return (
     <View className="flex-row items-center px-5 py-4 border-b border-border bg-background">
       <Pressable onPress={onBack} className="p-1 -ml-1 mr-2 active:opacity-60">
         <Icon as={ChevronRight} className="text-foreground w-5 h-5 rotate-180" />
       </Pressable>
-      {icon ? <Icon as={icon} className="w-5 h-5 mr-2 text-muted-foreground" /> : null}
       <RNText className="text-base font-semibold text-foreground">{title}</RNText>
     </View>
   );

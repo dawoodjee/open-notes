@@ -1,6 +1,6 @@
 import React from 'react';
 import { ScrollView, View } from 'react-native';
-import { Palette, Type } from 'lucide-react-native';
+import { Type } from 'lucide-react-native';
 import {
   SettingsGroup,
   SettingsRow,
@@ -36,15 +36,13 @@ export function AppearanceView({
 }) {
   return (
     <>
-      <SettingsSubHeader title="Appearance" icon={Palette} onBack={onBack} />
+      <SettingsSubHeader title="Appearance" onBack={onBack} />
 
       <ScrollView className="flex-1 px-5 pt-4 bg-background">
-        <SettingsGroup
-          caption="Theme"
-          footnote="Device follows your phone’s own light and dark setting, including its schedule."
-        >
+        {/* No caption: it would read "THEME" directly above a row labelled
+            "Theme". The row label alone is enough. */}
+        <SettingsGroup footnote="Device follows your phone’s own light and dark setting, including its schedule.">
           <SettingsRow
-            icon={Palette}
             label="Theme"
             right={
               <SettingsSegmented

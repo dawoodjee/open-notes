@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text as RNText, TextInput, View } from 'react-native';
-import { Plug, Trash2 } from 'lucide-react-native';
+import { Trash2 } from 'lucide-react-native';
 import { Icon } from '@/components/ui/icon';
 import { SettingsGroup, SettingsSubHeader } from '@/components/ui/settings-group';
 import {
@@ -64,7 +64,7 @@ export function EndpointsView({ onBack }: { onBack: () => void }) {
 
   return (
     <>
-      <SettingsSubHeader title="Endpoints" icon={Plug} onBack={onBack} />
+      <SettingsSubHeader title="Endpoints" onBack={onBack} />
 
       <ScrollView className="flex-1 px-5 pt-4 bg-background">
         <SettingsGroup
