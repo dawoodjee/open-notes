@@ -4,6 +4,7 @@ import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
 import { getPowerSync, connectPowerSync, claimUnownedNotes } from '@/lib/powersync/db';
 import { getCurrentSession, setCurrentSession } from '@/lib/auth/currentUser';
+import { runSerialized } from '@/lib/auth/serializeAuthWork';
 import { setPendingAdoption } from '@/lib/crypto/adoption';
 import { setPendingKeySetup } from '@/lib/crypto/keySetup';
 import { AccountKeyRecord, fetchAccountKey, uploadAccountKey } from '@/lib/crypto/keyBackup';
@@ -37,7 +38,10 @@ export function useAuth() {
 // out only to break an import cycle with lib/powersync/db.ts) rather than in
 // component state: it must be reachable from a single serialized queue
 // regardless of provider remounts, and readable without a render round-trip.
-let inFlight: Promise<void> | null = null;
+//
+// The queue itself is lib/auth/serializeAuthWork.ts. It used to be a bare
+// `inFlight` promise here, which was fine until the work rejected -- see that
+// file for what went wrong and why it now lives somewhere it can be tested.
 
 /**
  * Make this device's data key and the account's agree, or report that it
@@ -226,11 +230,11 @@ async function becomeAuthenticatedLocally(
   // Serialize: two near-simultaneous calls (e.g. an OAuth callback landing
   // right as a stale TOKEN_REFRESHED fires) must not interleave their
   // check/clear/connect steps -- that would defeat the invariant above.
-  if (inFlight) {
-    await inFlight;
-  }
-
-  inFlight = (async () => {
+  //
+  // Errors from the body still propagate to this function's caller unchanged.
+  // What runSerialized guarantees is only that a failure here cannot leave the
+  // queue holding a rejected promise that poisons every later sign-in.
+  return runSerialized(async () => {
     const previousSession = getCurrentSession();
     const isAccountSwitch =
       previousSession !== null && previousSession.user.id !== newSession.user.id;
@@ -268,10 +272,7 @@ async function becomeAuthenticatedLocally(
     // connector reads the session fresh whenever PowerSync needs it, so
     // there's nothing further to do. Reconnecting here would be a
     // disruptive, unnecessary resync for a routine hourly refresh.
-  })();
-
-  await inFlight;
-  inFlight = null;
+  });
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -298,7 +299,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       setTimeout(() => {
         if (!mounted) return;
-        void handleAuthEvent(event, newSession);
+        // The .catch is not defensive padding. This was a bare
+        // `void handleAuthEvent(...)`, so a failed sign-in produced a device
+        // that was signed in, not syncing, showing no key-step prompt -- and
+        // absolutely nothing in the console. Logging doesn't change control
+        // flow; it just means the next occurrence names itself instead of
+        // costing another debugging session (task #65).
+        void handleAuthEvent(event, newSession).catch((err) => {
+          console.error(`[auth] handling ${event} failed:`, err);
+        });
       }, 0);
     });
 
