@@ -52,6 +52,16 @@ const SCROLL_MESSAGE_TYPE = 'notes-editor-scroll';
  */
 const REMOTE_APPLY_IDLE_MS = 1500;
 
+/**
+ * How many of this editor's own document versions to remember.
+ *
+ * Only needs to outlast the writes that can be in flight at once: editor
+ * debounce (200ms) + SQLite debounce (300ms) + watch delivery. Fifty is far
+ * more than that even while typing hard, and the ledger is per-open-note, so
+ * the ceiling is fifty strings for as long as one note is on screen.
+ */
+const MAX_ECHO_HISTORY = 50;
+
 // Walks up from the ProseMirror node to whichever ancestor actually scrolls,
 // rather than assuming it's the document (it isn't — TenTap scrolls a container).
 const FIND_SCROLLER_JS = `
@@ -248,11 +258,42 @@ export default function RichEditor({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- Live remote updates -------------------------------------------------
-  // The last HTML this editor produced. Content coming back in that matches it
-  // is the echo of our own save returning through the watch query, not a
-  // change from another device, and re-applying it would be a pointless
-  // document reset.
-  const lastEmittedRef = useRef<string>(initialContent);
+  /**
+   * Every document version this editor has produced or applied.
+   *
+   * This used to be a single `lastEmittedRef`, and that was a real bug: with
+   * only the most recent value to compare against, an OLD echo of our own
+   * typing is indistinguishable from a genuine edit by another device.
+   *
+   * Saving is not instant -- editor debounce, then SQLite debounce, then the
+   * watch query delivers the new body back. Type quickly and several of those
+   * overlap, and they do not necessarily come back in the order they were
+   * sent. So the watch hands us version A while we have already emitted the
+   * newer version B. A !== B, the old check called that "remote", and
+   * setContent rewound the document. That re-fires onChange, which saves,
+   * which comes back... and A and B trade places forever, replacing the whole
+   * document each time, until the app locks up.
+   *
+   * A ledger fixes the classification at its root: anything we have said
+   * before is our own echo, however stale and whatever order it arrives in.
+   * Only content we have genuinely never produced is a remote edit.
+   *
+   * A Map (not a Set) because Maps keep insertion order, which makes evicting
+   * the oldest entry a one-liner and keeps this bounded.
+   */
+  const echoesRef = useRef<Map<string, true>>(new Map([[initialContent, true]]));
+
+  /** Record a version as ours, refreshing its recency and capping the ledger. */
+  const rememberEcho = useCallback((html: string) => {
+    const ledger = echoesRef.current;
+    // Delete-then-set moves an existing entry to the newest position, so a
+    // version we keep re-emitting never ages out while it is still live.
+    ledger.delete(html);
+    ledger.set(html, true);
+    if (ledger.size > MAX_ECHO_HISTORY) {
+      ledger.delete(ledger.keys().next().value as string);
+    }
+  }, []);
   // When the user last typed. Remote content is never applied on top of active
   // typing -- setContent resets the document and takes the caret with it.
   const lastTypedAtRef = useRef<number>(0);
@@ -293,7 +334,9 @@ export default function RichEditor({
         if (onChangeRef.current && editor) {
           const html = await editor.getHTML();
           const cleanHtml = sanitizeHtmlOutput(html);
-          lastEmittedRef.current = cleanHtml;
+          // Recorded BEFORE the save is handed over, so the echo can never
+          // arrive back before the ledger knows about it.
+          rememberEcho(cleanHtml);
           onChangeRef.current(cleanHtml);
         }
         // Typing has stopped for at least one debounce window, so this is the
@@ -317,10 +360,13 @@ export default function RichEditor({
         clearTimeout(pendingTimerRef.current);
         pendingTimerRef.current = null;
       }
-      lastEmittedRef.current = rawHtml;
+      // Applied content counts as ours too: the save it triggers will come
+      // back through the watch, and without this that echo would read as yet
+      // another remote edit.
+      rememberEcho(rawHtml);
       editor.setContent(formatInitialContent(rawHtml));
     },
-    [editor]
+    [editor, rememberEcho]
   );
 
   /**
@@ -358,13 +404,16 @@ export default function RichEditor({
    * over the merged content.
    */
   useEffect(() => {
-    // Compared RAW, against what this editor last emitted -- because what it
-    // emitted is what got stored, and what got stored is what comes back.
-    // Comparing the *formatted* version instead would produce phantom remote
-    // edits: an emitted `<p></p>` is stored as `<p></p>` but formats to
+    // Compared RAW, against every version this editor has produced -- because
+    // what it emitted is what got stored, and what got stored is what comes
+    // back. Comparing the *formatted* version instead would produce phantom
+    // remote edits: an emitted `<p></p>` is stored as `<p></p>` but formats to
     // `<h1></h1>`, so every empty note would look like a change from another
     // device and reset itself on a loop.
-    if (initialContent === lastEmittedRef.current) return;
+    //
+    // Checking the whole ledger rather than just the newest entry is what
+    // makes this safe under fast typing -- see echoesRef.
+    if (echoesRef.current.has(initialContent)) return;
 
     const sinceTyping = Date.now() - lastTypedAtRef.current;
     if (sinceTyping > REMOTE_APPLY_IDLE_MS) {

@@ -24,6 +24,9 @@ import {
 /** See the note of the same name in RichEditor.native.tsx. */
 const REMOTE_APPLY_IDLE_MS = 1500;
 
+// See RichEditor.native.tsx for why the ledger is bounded, and at what.
+const MAX_ECHO_HISTORY = 50;
+
 export interface RichEditorProps {
   initialContent?: string;
   onChange?: (html: string) => void;
@@ -99,12 +102,29 @@ export default function RichEditor({
     [initialContent]
   );
 
-  // Same three refs, and the same reasoning, as RichEditor.native.tsx: the
-  // editor's content is set once at construction, so a note open on another
-  // device never updated here either.
-  const lastEmittedRef = React.useRef<string>(initialContent);
+  // Same refs, and the same reasoning, as RichEditor.native.tsx: the editor's
+  // content is set once at construction, so a note open on another device
+  // never updated here either.
+  //
+  // The ledger carries the same fix as native, and matters MORE here: onUpdate
+  // below has no debounce at all, so this editor emits on every keystroke and
+  // therefore has more saves in flight at once. Comparing an incoming body
+  // against only the newest emission would misread the older ones as remote
+  // edits and ping-pong the document. See the long note in the native file.
+  const echoesRef = React.useRef<Map<string, true>>(
+    new Map([[initialContent, true]])
+  );
   const lastTypedAtRef = React.useRef<number>(0);
   const pendingRemoteRef = React.useRef<string | null>(null);
+
+  const rememberEcho = React.useCallback((html: string) => {
+    const ledger = echoesRef.current;
+    ledger.delete(html);
+    ledger.set(html, true);
+    if (ledger.size > MAX_ECHO_HISTORY) {
+      ledger.delete(ledger.keys().next().value as string);
+    }
+  }, []);
 
   const editor = useEditor({
     autofocus: autoFocus ? 'start' : false,
@@ -122,18 +142,18 @@ export default function RichEditor({
     onUpdate: ({ editor }) => {
       lastTypedAtRef.current = Date.now();
       const cleanHtml = sanitizeHtmlOutput(editor.getHTML());
-      lastEmittedRef.current = cleanHtml;
+      rememberEcho(cleanHtml);
       if (onChange) onChange(cleanHtml);
     },
   });
 
   React.useEffect(() => {
     if (!editor) return;
-    if (initialContent === lastEmittedRef.current) return;
+    if (echoesRef.current.has(initialContent)) return;
 
     const apply = (raw: string) => {
       pendingRemoteRef.current = null;
-      lastEmittedRef.current = raw;
+      rememberEcho(raw);
       // emitUpdate: false, so applying a remote edit isn't mistaken for a
       // local one and echoed straight back out.
       editor.commands.setContent(formatInitialContent(raw), { emitUpdate: false });
