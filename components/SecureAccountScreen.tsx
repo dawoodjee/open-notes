@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { RecoveryCodeView } from '@/components/RecoveryCodeView';
+import { confirmSignOut } from '@/components/KeyStepScreen';
 import { getPendingKeySetup, subscribePendingKeySetup } from '@/lib/crypto/keySetup';
 import { addRecoveryCode, markRecoveryConfirmed } from '@/lib/crypto/vault';
 
@@ -42,6 +43,22 @@ export function SecureAccountScreen() {
     };
   }, []);
 
+  /**
+   * Leaving here costs the user nothing they can't get back: no note is
+   * touched, and the recovery code generated a moment ago was never usable --
+   * addRecoveryCode leaves recoveryConfirmed false, getKeyBackupPayload
+   * refuses to hand over an unconfirmed payload, and the next attempt
+   * overwrites it. So the wording says what is actually true rather than
+   * manufacturing alarm: nothing is lost, sync just doesn't get switched on.
+   */
+  const onCancel = useCallback(() => {
+    if (!pending) return;
+    confirmSignOut(
+      "Your notes stay on this device. They won't sync until you sign in again and save a recovery code.",
+      () => void pending.cancel()
+    );
+  }, [pending]);
+
   const onConfirmed = useCallback(async () => {
     if (!pending) return;
     // Order matters: the code is only "real" once it's confirmed, and
@@ -76,6 +93,7 @@ export function SecureAccountScreen() {
     <RecoveryCodeView
       code={code}
       onConfirmed={onConfirmed}
+      onCancel={onCancel}
       headline="Save your recovery code"
       blurb="Your notes are encrypted so that only your devices can read them. This code is the only way to open them on a new device — write it down somewhere safe. We can’t show it again, and we can’t recover it for you."
     />

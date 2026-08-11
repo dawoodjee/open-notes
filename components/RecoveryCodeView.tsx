@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
+import { KeyStepScreen } from '@/components/KeyStepScreen';
 
 /**
  * The only moment the recovery code exists in readable form.
@@ -18,11 +19,19 @@ import { Pressable, Text, TextInput, View } from 'react-native';
 export function RecoveryCodeView({
   code,
   onConfirmed,
+  onCancel,
   headline = 'Save your recovery code',
   blurb = 'This is the only way to read your notes on a new device. Write it down somewhere safe. We can’t show it again, and we can’t recover it for you.',
 }: {
   code: string;
   onConfirmed: () => void | Promise<void>;
+  /**
+   * Required, deliberately. This screen blocks the entire app, and it shipped
+   * with no way off it at all -- the only exit was force-quitting. A required
+   * prop is what stops a future caller from reintroducing that: you cannot
+   * mount this component without saying how someone leaves it.
+   */
+  onCancel: () => void;
   headline?: string;
   blurb?: string;
 }) {
@@ -37,7 +46,7 @@ export function RecoveryCodeView({
 
   if (step === 'save') {
     return (
-      <View className="flex-1 justify-center px-8">
+      <KeyStepScreen onCancel={onCancel}>
         <Text className="text-xl font-semibold text-foreground mb-3">{headline}</Text>
         <Text className="text-sm text-muted-foreground mb-6">{blurb}</Text>
 
@@ -51,12 +60,16 @@ export function RecoveryCodeView({
         >
           <Text className="text-white font-semibold">I&apos;ve written it down</Text>
         </Pressable>
-      </View>
+      </KeyStepScreen>
     );
   }
 
   return (
-    <View className="flex-1 justify-center px-8">
+    // cancelDisabled while busy: onConfirmed() is markRecoveryConfirmed()
+    // followed by the upload of this device's key as the account's. Cancelling
+    // concurrently would race a local sign-out against a key upload for the
+    // very account being signed out of.
+    <KeyStepScreen onCancel={onCancel} cancelDisabled={busy}>
       <Text className="text-xl font-semibold text-foreground mb-3">Type it back</Text>
       <Text className="text-sm text-muted-foreground mb-6">
         Just to be sure you have it. Dashes and capitals don&apos;t matter.
@@ -92,7 +105,7 @@ export function RecoveryCodeView({
           {busy ? 'Saving…' : 'Done'}
         </Text>
       </Pressable>
-    </View>
+    </KeyStepScreen>
   );
 }
 

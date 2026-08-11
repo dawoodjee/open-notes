@@ -2,6 +2,7 @@ import React, { useCallback, useState, useSyncExternalStore } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { RecoveryCodeInput } from '@/components/RecoveryCodeView';
+import { KeyStepScreen, confirmSignOut } from '@/components/KeyStepScreen';
 import { getPendingAdoption, subscribePendingAdoption } from '@/lib/crypto/adoption';
 import { WrongRecoveryCodeError, isWellFormedRecoveryCode } from '@/lib/crypto/keys';
 
@@ -47,12 +48,30 @@ export function AdoptKeyScreen() {
     }
   }, [pending, code]);
 
+  /**
+   * Leaving here is not destructive -- no note is touched and no key is
+   * written -- but it does mean this device carries on unable to read the
+   * account's notes, so the wording says exactly that.
+   */
+  const onCancel = useCallback(() => {
+    if (!pending) return;
+    confirmSignOut(
+      "Your notes stay on this device. You won't be able to read this account's notes here until you enter the recovery code.",
+      () => void pending.cancel()
+    );
+  }, [pending]);
+
   if (!pending) return null;
 
   const ready = isWellFormedRecoveryCode(code) && !busy;
 
   return (
-    <View className="flex-1 justify-center px-8">
+    // cancelDisabled while busy is load-bearing here specifically: submit()
+    // unwraps the account key, calls adoptAccountDataKey, and then rewrites
+    // every local note through reEncryptLocalNotes. A sign-out landing
+    // mid-rewrite is the one genuinely damaging thing a stray tap on these
+    // screens could do.
+    <KeyStepScreen onCancel={onCancel} cancelDisabled={busy}>
       <Text className="text-xl font-semibold text-foreground mb-3">Unlock your notes here</Text>
       <Text className="text-sm text-muted-foreground mb-6">
         This account&apos;s notes were encrypted on another device. Enter your recovery code to
@@ -68,7 +87,7 @@ export function AdoptKeyScreen() {
       <Pressable
         onPress={() => void submit()}
         disabled={!ready}
-        className={`rounded-2xl h-12 items-center justify-center mb-3 ${
+        className={`rounded-2xl h-12 items-center justify-center ${
           ready ? 'bg-black active:opacity-70' : 'bg-muted'
         }`}
       >
@@ -77,17 +96,12 @@ export function AdoptKeyScreen() {
         </Text>
       </Pressable>
 
-      <Pressable
-        onPress={() => void pending.cancel()}
-        className="h-12 items-center justify-center active:opacity-60"
-      >
-        <Text className="text-muted-foreground">Sign out instead</Text>
-      </Pressable>
-
+      {/* The "Sign out instead" link that used to sit here is gone -- leaving
+          is now the X in the header, the same control key setup has. */}
       <Text className="text-xs text-muted-foreground mt-4">
         Don&apos;t have it? Any device still signed in to this account can read these notes. Without
         the code and without such a device, they can&apos;t be recovered by anyone.
       </Text>
-    </View>
+    </KeyStepScreen>
   );
 }
