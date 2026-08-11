@@ -91,6 +91,37 @@ async function reconcileAccountKey(
 }
 
 /**
+ * Claim this device's unowned notes, then connect. The only way to connect.
+ *
+ * The claim MUST come before connecting. A note with no user_id belongs to
+ * no sync bucket, so the first checkpoint after connecting would discard it
+ * locally before it ever got an owner.
+ *
+ * It must NOT come before reconciliation, which is where it used to sit, and
+ * that was a real bug. The key steps can end with the user backing out --
+ * beginKeySetup.cancel and beginAdoption.cancel both promise the device is
+ * left "exactly as it was, with its own key and its own notes intact". A
+ * claim that has already run breaks that promise, and irreversibly: the
+ * notes stay stamped with an account the device is no longer signed into,
+ * and the next sign-in cannot fix them because claimUnownedNotes only
+ * matches `user_id IS NULL`.
+ *
+ * The consequence is worse than an orphaned note. Uploading a row owned by
+ * someone else fails the RLS insert check every time, and PowerSync replays
+ * transactions strictly in order -- so that one permanently-rejected op sits
+ * at the head of the queue and blocks every other note behind it. Observed
+ * on the Pixel emulator: signing into the wrong account and backing out left
+ * one note owned by that account and stopped the device syncing entirely.
+ *
+ * Claiming here instead -- at the last moment before connecting, on every
+ * path that connects -- keeps the invariant and closes the window.
+ */
+async function claimAndConnect(userId: string): Promise<void> {
+  await claimUnownedNotes(userId);
+  await connectPowerSync();
+}
+
+/**
  * Pause sign-in until the user has written down a recovery code.
  *
  * Runs once per device, on first sign-in. Sync stays disconnected throughout;
@@ -105,7 +136,7 @@ function beginKeySetup(
     async complete() {
       setPendingKeySetup(null);
       const outcome = await reconcileAccountKey(userId, setSessionState);
-      if (outcome === 'ok') await connectPowerSync();
+      if (outcome === 'ok') await claimAndConnect(userId);
     },
     async cancel() {
       setPendingKeySetup(null);
@@ -146,7 +177,17 @@ function beginAdoption(
       previousKey.fill(0);
 
       setPendingAdoption(null);
-      await connectPowerSync();
+      // The session is already set by the time adoption can start, so this is
+      // the account whose key was just adopted. No fallback to a bare
+      // connect: connecting without claiming first is precisely what
+      // discards unowned notes at the first checkpoint, so if the session
+      // has somehow gone, fail loudly and leave sync off rather than risk
+      // deleting the user's notes to keep going.
+      const userId = getCurrentSession()?.user.id;
+      if (!userId) {
+        throw new Error('Adoption completed without a current session; refusing to connect.');
+      }
+      await claimAndConnect(userId);
     },
     async cancel() {
       setPendingAdoption(null);
@@ -167,7 +208,9 @@ function beginAdoption(
  * hourly TOKEN_REFRESHED event -- funnels through this via onAuthStateChange
  * below. No other file calls getPowerSync().connect() or writes session state
  * directly (grep for `.connect(` to confirm -- lib/powersync/db.ts's
- * connectPowerSync() has exactly one caller: this function).
+ * connectPowerSync() is called only by claimAndConnect above, which is in
+ * turn called only from this file: here, and from the two key-step
+ * completions that this function hands off to).
  *
  * Why: local SQLite has no per-row access control the way Postgres RLS
  * does. If a session ever moved from account A to account B without a clear
@@ -201,16 +244,10 @@ async function becomeAuthenticatedLocally(
     setSessionState(newSession);
 
     if (isFirstConnect || isAccountSwitch) {
-      // Claim before connecting, never after. Notes written before sign-in
-      // have no user_id, which means no sync bucket can contain them -- so
-      // the first checkpoint after connecting would discard them locally
-      // before they ever got an owner. See claimUnownedNotes' own comment.
+      // The claim used to be here, before reconciliation. It now happens
+      // inside claimAndConnect, at the point of connecting -- see the note
+      // there for why claiming this early was destructive.
       //
-      // Safe to run on an account switch too, but only because the clear
-      // above has already emptied local storage by this point: there is
-      // nothing of the previous account's left for this to claim.
-      await claimUnownedNotes(newSession.user.id);
-
       // Reconcile this device's data key against the account's BEFORE
       // connecting. Every device mints its own key at PIN setup, before any
       // account exists, so signing into an account that already has notes
@@ -221,11 +258,11 @@ async function becomeAuthenticatedLocally(
       if (reconciliation === 'blocked') {
         // Sync stays disconnected until the user either writes down a new
         // recovery code or supplies the account's existing one. Whichever
-        // screen is showing calls connectPowerSync() when it's done.
+        // screen is showing calls claimAndConnect() when it's done.
         return;
       }
 
-      await connectPowerSync();
+      await claimAndConnect(newSession.user.id);
     }
     // Otherwise this is a same-user token refresh: fetchCredentials() on the
     // connector reads the session fresh whenever PowerSync needs it, so
