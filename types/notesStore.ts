@@ -4,7 +4,6 @@ export const initialNotesState: NotesState = {
   notes: [],
   selectedNoteId: null,
   searchQuery: '',
-  isLoading: true,
   hasAutoSelected: false,
 };
 
@@ -45,7 +44,6 @@ export function notesReducer(state: NotesState, action: NotesAction): NotesState
         notes: newNotes,
         selectedNoteId: nextSelectedId,
         hasAutoSelected,
-        isLoading: false,
       };
     }
 
@@ -64,13 +62,6 @@ export function notesReducer(state: NotesState, action: NotesAction): NotesState
       return {
         ...state,
         searchQuery: action.payload.query,
-      };
-    }
-
-    case 'SET_LOADING': {
-      return {
-        ...state,
-        isLoading: action.payload.isLoading,
       };
     }
 
