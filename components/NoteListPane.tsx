@@ -14,6 +14,7 @@ import { Search, SquarePen } from 'lucide-react-native';
 // Custom Types & Helpers
 import { Note, parseNoteContent, formatNoteDate } from '@/types/note';
 import AvatarMenuTrigger from './AvatarMenuTrigger';
+import { useTheme } from '@/contexts/ThemeContext';
 
 export interface NoteListPaneProps {
   notes: Note[];
@@ -36,6 +37,13 @@ export default function NoteListPane({
   onCreateNote,
   onSearchChange,
 }: NoteListPaneProps) {
+  // The bottom bar is one of the few places styled with inline `style` rather
+  // than classes (it predates the settings primitives), so its colours can't
+  // come from a token and have to be picked here.
+  const { scheme } = useTheme();
+  const barBackground = scheme === 'dark' ? '#171717' : '#F9FAFB';
+  const barBorder = scheme === 'dark' ? '#2e2e2e' : '#E5E7EB';
+
   // Filter Active Notes (Excludes Trashed Notes)
   const activeNotes = notes.filter((n) => !n.isTrashed);
 
@@ -70,7 +78,7 @@ export default function NoteListPane({
           : undefined
       }
       className={`
-        border-r border-gray-200 bg-gray-50 shrink-0
+        border-r border-border bg-secondary shrink-0
         ${selectedNoteId ? 'hidden md:flex' : 'w-full flex-1'}
         ${isSidebarTucked ? 'md:hidden' : 'md:w-80'}
       `}
@@ -78,8 +86,8 @@ export default function NoteListPane({
       {/* Header with Top-Right Avatar for Mobile/List view */}
       <HStack className="justify-between items-start p-4 pb-2">
         <VStack>
-          <RNText className="text-3xl font-bold text-gray-900">All Notes</RNText>
-          <RNText className="text-xs text-gray-500 font-medium mt-0.5">
+          <RNText className="text-3xl font-bold text-foreground">All Notes</RNText>
+          <RNText className="text-xs text-muted-foreground font-medium mt-0.5">
             {filteredNotes.length} {filteredNotes.length === 1 ? 'Note' : 'Notes'}
           </RNText>
         </VStack>
@@ -113,10 +121,12 @@ export default function NoteListPane({
             <Pressable
               onPress={() => onSelectNote(note.id)}
               className={`p-3 mb-2 rounded-xl transition-colors ${
-                isSelected ? 'bg-lime-100/80' : 'bg-white border border-gray-100'
+                isSelected
+                  ? 'bg-lime-100/80 dark:bg-lime-900/40'
+                  : 'bg-card border border-border'
               }`}
             >
-              <RNText className="font-semibold text-base text-gray-900" numberOfLines={1}>
+              <RNText className="font-semibold text-base text-foreground" numberOfLines={1}>
                 {title}
               </RNText>
 
@@ -130,7 +140,7 @@ export default function NoteListPane({
                 }}
               >
                 <RNText
-                  className="text-xs text-gray-500 font-medium"
+                  className="text-xs text-muted-foreground font-medium"
                   style={{ flexShrink: 0 }}
                 >
                   {formatNoteDate(new Date(note.updatedAt))}
@@ -138,7 +148,7 @@ export default function NoteListPane({
                 </RNText>
 
                 <RNText
-                  className="text-xs text-gray-500"
+                  className="text-xs text-muted-foreground"
                   style={{ flex: 1, minWidth: 0 }}
                   numberOfLines={1}
                   ellipsizeMode="tail"
@@ -158,21 +168,21 @@ export default function NoteListPane({
           alignItems: 'center',
           padding: 12,
           gap: 12,
-          backgroundColor: '#F9FAFB',
+          backgroundColor: barBackground,
           borderTopWidth: 1,
-          borderTopColor: '#E5E7EB',
+          borderTopColor: barBorder,
           width: '100%',
         }}
       >
-        <Input className="flex-1 rounded-full bg-white border-gray-300 h-10 px-3">
+        <Input className="flex-1 rounded-full bg-background border-border h-10 px-3">
           <InputSlot>
-            <InputIcon as={Search} className="text-gray-400 ml-1 shrink-0" />
+            <InputIcon as={Search} className="text-muted-foreground ml-1 shrink-0" />
           </InputSlot>
           <InputField
             placeholder="Search"
             value={searchQuery}
             onChangeText={onSearchChange}
-            className="text-sm text-gray-800 flex-1 min-w-0"
+            className="text-sm text-foreground flex-1 min-w-0"
           />
         </Input>
 

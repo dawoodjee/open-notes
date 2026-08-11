@@ -1,4 +1,4 @@
-import { LogBox, View } from 'react-native';
+import { ActivityIndicator, LogBox, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import { AuthProvider } from '@/contexts/AuthContext';
@@ -7,6 +7,9 @@ import { LockScreen } from '@/components/LockScreen';
 import { AdoptKeyScreen, usePendingAdoption } from '@/components/AdoptKeyScreen';
 import { SecureAccountScreen, usePendingKeySetup } from '@/components/SecureAccountScreen';
 import { PlaintextConsentDialog } from '@/components/PlaintextConsentDialog';
+import { BootFailureScreen } from '@/components/BootFailureScreen';
+import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
+import { StatusBar } from 'expo-status-bar';
 
 import '@/global.css';
 
@@ -35,15 +38,32 @@ function KeyStepOverlay() {
   if (!adoption && !keySetup) return null;
 
   return (
-    <View className="absolute inset-0 bg-white">
+    <View className="absolute inset-0 bg-background">
       {adoption ? <AdoptKeyScreen /> : <SecureAccountScreen />}
     </View>
   );
 }
 
 export default function RootLayout() {
+  // ThemeProvider sits outermost: the appearance has to be settled before
+  // anything paints, including the boot spinner and the failure screen, both
+  // of which render before the database exists.
   return (
-    <GluestackUIProvider mode="light">
+    <ThemeProvider>
+      <ThemedRoot />
+    </ThemeProvider>
+  );
+}
+
+function ThemedRoot() {
+  const { scheme } = useTheme();
+  // No `mode` prop: ThemeProvider owns Appearance, and passing the resolved
+  // scheme here is what previously pinned the app so that the device switching
+  // between light and dark never reached it. See the note in
+  // components/ui/gluestack-ui-provider.
+  return (
+    <GluestackUIProvider>
+      <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
       <VaultProvider>
         <VaultGate />
       </VaultProvider>
@@ -68,10 +88,21 @@ export default function RootLayout() {
  * this collapses to "show the app".
  */
 function VaultGate() {
-  const { status, hasBooted } = useVault();
+  const { status, hasBooted, bootError, resetLocalData } = useVault();
 
   if (status === 'loading') {
-    return <View className="flex-1 bg-white" />;
+    // The spinner is not decoration. An empty View here is what made a hung
+    // boot look identical to a dead one -- there was no way to tell "still
+    // working" from "gave up" without attaching a debugger.
+    return (
+      <View className="flex-1 bg-background items-center justify-center">
+        <ActivityIndicator color="#84CC16" />
+      </View>
+    );
+  }
+
+  if (status === 'failed') {
+    return <BootFailureScreen error={bootError} onReset={resetLocalData} />;
   }
 
   return (
@@ -88,7 +119,7 @@ function VaultGate() {
       {status === 'locked' ? (
         // Opaque and absolutely positioned rather than conditional, so the
         // note UI underneath is never briefly visible behind it.
-        <View className="absolute inset-0 bg-white">
+        <View className="absolute inset-0 bg-background">
           <LockScreen />
         </View>
       ) : (

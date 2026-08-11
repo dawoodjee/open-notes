@@ -1,6 +1,6 @@
 import React, { useReducer, useState, useRef, useEffect, useCallback } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Platform, BackHandler } from 'react-native';
+import { Platform, AppState, BackHandler } from 'react-native';
 import NoteListPane from './NoteListPane';
 import NoteEditorPane from './NoteEditorPane';
 import DesktopResizeHandle from './DesktopResizeHandle';
@@ -16,12 +16,15 @@ import {
   initPowerSync,
   mapRowToNote,
   createNoteInDB,
+  permanentDeleteNoteInDB,
   setNoteHiddenFromApi,
   updateNoteInDB,
   trashNoteInDB,
   getUiState,
   saveUiState,
 } from '@/lib/powersync/db';
+import { isBlankNote } from '@/types/note';
+import { BACKGROUND, useTheme } from '@/contexts/ThemeContext';
 
 // =============================================================================
 // MAIN COMPONENT
@@ -29,6 +32,7 @@ import {
 
 export default function NotesLayout() {
   const { session } = useAuth();
+  const { scheme } = useTheme();
   const [state, dispatch] = useReducer(notesReducer, initialNotesState);
   const { notes, selectedNoteId, searchQuery } = state;
 
@@ -59,6 +63,25 @@ export default function NotesLayout() {
   // Restored editor scroll offset, read once at startup. Held in a ref (not
   // state) so later scrolling doesn't re-render or re-trigger the restore.
   const restoredEditorScrollRef = useRef<number>(0);
+
+  // Whether the empty-database fallback has already fired this launch.
+  const hasAutoCreatedRef = useRef<boolean>(false);
+
+  const handleCreateNote = useCallback(async () => {
+    try {
+      const newNote = await createNoteInDB();
+      dispatch({ type: 'SELECT_NOTE', payload: { id: newNote.id } });
+      return newNote;
+    } catch (err) {
+      console.error('Failed to create note in local SQLite:', err);
+      return null;
+    }
+  }, []);
+
+  // Read by the watch callback, which is registered once and would otherwise
+  // capture the very first handleCreateNote forever.
+  const createNoteRef = useRef(handleCreateNote);
+  createNoteRef.current = handleCreateNote;
 
   // PowerSync local SQLite init + live watch query.
   // The watch callback is the *only* place notes state gets set — the reducer
@@ -93,7 +116,23 @@ export default function NotesLayout() {
           [],
           {
             onResult: (result) => {
-              dispatch({ type: 'SET_NOTES', payload: { notes: result.array.map(mapRowToNote) } });
+              const notes = result.array.map(mapRowToNote);
+              dispatch({ type: 'SET_NOTES', payload: { notes } });
+
+              // Landing on an empty database means landing on a blank list
+              // with nothing to read and nothing to do. Open a note instead,
+              // the way Apple Notes does.
+              //
+              // Guarded by a ref that never resets, and that guard is not
+              // optional: discardIfEmpty deletes the note you leave, so
+              // without it every return to the list would delete this note,
+              // observe an empty database, and create another one -- forever.
+              // Firing once per launch means the user can genuinely get to an
+              // empty list if they trash their last note by hand.
+              if (notes.filter((n) => !n.isTrashed).length === 0 && !hasAutoCreatedRef.current) {
+                hasAutoCreatedRef.current = true;
+                void createNoteRef.current();
+              }
             },
             onError: (err) => {
               console.error('PowerSync watch error:', err);
@@ -113,8 +152,37 @@ export default function NotesLayout() {
     };
   }, []);
 
-  // Timer ref to hold pending SQLite writes
+  // Timer ref to hold pending SQLite writes, alongside the write it would
+  // have performed. Keeping the payload lets a blur flush it immediately
+  // instead of racing it -- see flushPendingWrite.
   const updateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingWriteRef = useRef<{ id: string; html: string } | null>(null);
+
+  /**
+   * Commit whatever the debounce is still holding, right now.
+   *
+   * Load-bearing for discardIfEmpty below. Leaving a note fires the discard
+   * check within milliseconds, while the last 300ms of typing may not have
+   * reached SQLite yet -- so the note in the database would still look empty
+   * when it isn't, and it would be deleted out from under the text just
+   * typed. Flushing first removes the race rather than widening a timeout and
+   * hoping.
+   */
+  const flushPendingWrite = useCallback(async () => {
+    if (updateTimeoutRef.current) {
+      clearTimeout(updateTimeoutRef.current);
+      updateTimeoutRef.current = null;
+    }
+    const pending = pendingWriteRef.current;
+    pendingWriteRef.current = null;
+    if (!pending) return;
+
+    try {
+      await updateNoteInDB(pending.id, pending.html);
+    } catch (err) {
+      console.error('Failed to update note in local SQLite:', err);
+    }
+  }, []);
 
   // Debounced SQLite write to avoid disk thrashing on every keystroke
   const handleNoteChange = useCallback(
@@ -124,26 +192,92 @@ export default function NotesLayout() {
       if (updateTimeoutRef.current) {
         clearTimeout(updateTimeoutRef.current);
       }
+      pendingWriteRef.current = { id: selectedNote.id, html };
 
-      updateTimeoutRef.current = setTimeout(async () => {
-        try {
-          await updateNoteInDB(selectedNote.id, html);
-        } catch (err) {
-          console.error('Failed to update note in local SQLite:', err);
-        }
+      updateTimeoutRef.current = setTimeout(() => {
+        void flushPendingWrite();
       }, 300);
     },
-    [selectedNote]
+    [selectedNote, flushPendingWrite]
   );
 
-  const handleCreateNote = useCallback(async () => {
-    try {
-      const newNote = await createNoteInDB();
-      dispatch({ type: 'SELECT_NOTE', payload: { id: newNote.id } });
-    } catch (err) {
-      console.error('Failed to create note in local SQLite:', err);
-    }
-  }, []);
+  /**
+   * Delete the note being left behind, if there is nothing in it.
+   *
+   * Apple Notes' behaviour, with a deliberately narrow blast radius: this only
+   * ever looks at the ONE note you are navigating away from. It is not a sweep
+   * of every empty note in the database, so it cannot cascade.
+   *
+   * Four guards, each preventing a distinct way this could destroy real data:
+   *
+   *   decryptFailed  An unreadable note reads as empty. Deleting it would turn
+   *                  a temporary key problem into permanent data loss -- the
+   *                  same reasoning updateNoteInDB uses to refuse writes.
+   *   isTrashed      Already handled by the trash flow; nothing to do.
+   *   last note      Never leave the database empty. Otherwise this and the
+   *                  auto-create below ping-pong forever: create, leave,
+   *                  delete, create.
+   *   re-read from   React state is a snapshot from the last watch tick. The
+   *   the database   authority on whether the note is empty is SQLite, after
+   *                  the flush above.
+   *
+   * NOTE this is the app's first and only caller of permanentDeleteNoteInDB,
+   * which becomes an UpdateType.DELETE on the server. The dev log below exists
+   * so that if a note ever disappears unexpectedly again, this path can be
+   * ruled in or out immediately instead of by inference.
+   */
+  const discardIfEmpty = useCallback(
+    async (noteId: string) => {
+      await flushPendingWrite();
+
+      try {
+        const row = await getPowerSync().getOptional<any>(
+          'SELECT * FROM notes WHERE id = ?',
+          [noteId]
+        );
+        if (!row) return;
+
+        const note = mapRowToNote(row);
+        if (note.decryptFailed || note.isTrashed) return;
+        if (!isBlankNote(note.body)) return;
+
+        const remaining = await getPowerSync().get<{ count: number }>(
+          'SELECT count(*) as count FROM notes WHERE is_trashed = 0 AND id != ?',
+          [noteId]
+        );
+        if (remaining.count === 0) return;
+
+        if (__DEV__) {
+          console.warn(`[notes] discarding empty note ${noteId} on blur`);
+        }
+        await permanentDeleteNoteInDB(noteId);
+      } catch (err) {
+        console.error('Failed to discard empty note:', err);
+      }
+    },
+    [flushPendingWrite]
+  );
+
+  /** Leave the current note, discarding it if it was never written in. */
+  const leaveNote = useCallback(
+    (nextId: string | null) => {
+      const leaving = selectedNoteId;
+      dispatch({ type: 'SELECT_NOTE', payload: { id: nextId } });
+      if (leaving && leaving !== nextId) void discardIfEmpty(leaving);
+    },
+    [selectedNoteId, discardIfEmpty]
+  );
+
+  /**
+   * The "+" button. Distinct from handleCreateNote because tapping it is also
+   * a way of leaving the note you were in -- without this, "+" from an
+   * untouched new note leaves that one behind and starts another.
+   */
+  const handleCreateNotePressed = useCallback(async () => {
+    const leaving = selectedNoteId;
+    const created = await handleCreateNote();
+    if (leaving && created && leaving !== created.id) void discardIfEmpty(leaving);
+  }, [selectedNoteId, handleCreateNote, discardIfEmpty]);
 
   const handleSetHiddenFromApi = useCallback(async (id: string, hidden: boolean) => {
     try {
@@ -203,13 +337,27 @@ export default function NotesLayout() {
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (selectedNoteId) {
-        dispatch({ type: 'SELECT_NOTE', payload: { id: null } });
+        leaveNote(null);
         return true;
       }
       return false;
     });
     return () => subscription.remove();
-  }, [selectedNoteId]);
+  }, [selectedNoteId, leaveNote]);
+
+  // Sending the app to the background is leaving the note too -- otherwise an
+  // untouched new note survives simply because you switched apps instead of
+  // tapping back, and comes back as clutter at the top of the list.
+  //
+  // Deliberately does NOT clear the selection: you should return to what you
+  // had open. Only the discard runs, and only if the note is genuinely blank.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next !== 'background' && next !== 'inactive') return;
+      if (selectedNoteId) void discardIfEmpty(selectedNoteId);
+    });
+    return () => subscription.remove();
+  }, [selectedNoteId, discardIfEmpty]);
 
   const scrollSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -242,9 +390,9 @@ export default function NotesLayout() {
   }, [selectedNote?.id]);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#ffffff' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND[scheme] }}>
       <HStack
-        className="flex-1 w-full bg-white select-none"
+        className="flex-1 w-full bg-background select-none"
         {...(Platform.OS === 'web'
           ? {
               onMouseMove: (e: any) => resize(e),
@@ -261,8 +409,8 @@ export default function NotesLayout() {
           searchQuery={searchQuery}
           isSidebarTucked={isSidebarTucked}
           sidebarWidth={sidebarWidth}
-          onSelectNote={(id) => dispatch({ type: 'SELECT_NOTE', payload: { id } })}
-          onCreateNote={handleCreateNote}
+          onSelectNote={(id) => leaveNote(id)}
+          onCreateNote={handleCreateNotePressed}
           onSearchChange={(query) =>
             dispatch({ type: 'SET_SEARCH_QUERY', payload: { query } })
           }
@@ -285,7 +433,7 @@ export default function NotesLayout() {
           selectedNoteId={selectedNoteId}
           isSidebarTucked={isSidebarTucked}
           onToggleSidebar={() => setIsSidebarTucked(!isSidebarTucked)}
-          onBackToList={() => dispatch({ type: 'SELECT_NOTE', payload: { id: null } })}
+          onBackToList={() => leaveNote(null)}
           onTrashNote={handleTrashNote}
           onSetHiddenFromApi={handleSetHiddenFromApi}
           onNoteChange={handleNoteChange}

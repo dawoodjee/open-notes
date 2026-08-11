@@ -49,16 +49,16 @@ export function LockScreen() {
   }, [attempt]);
 
   return (
-    <View className="flex-1 items-center justify-center px-8 bg-white">
-      <View className="w-16 h-16 rounded-full bg-gray-100 items-center justify-center mb-6">
-        <Icon as={Lock} className="w-7 h-7 text-gray-500" />
+    <View className="flex-1 items-center justify-center px-8 bg-background">
+      <View className="w-16 h-16 rounded-full bg-muted items-center justify-center mb-6">
+        <Icon as={Lock} className="w-7 h-7 text-muted-foreground" />
       </View>
 
-      <Text className="text-xl font-semibold text-gray-900 mb-2">Notes are locked</Text>
+      <Text className="text-xl font-semibold text-foreground mb-2">Notes are locked</Text>
       {/* Empty until the device has been asked what it offers. Rendering a
           guess first and correcting it a frame later is worse than a beat of
           nothing, because the guess is wrong on one platform or the other. */}
-      <Text className="text-sm text-gray-500 text-center mb-8 min-h-[20px]">
+      <Text className="text-sm text-muted-foreground text-center mb-8 min-h-[20px]">
         {phrase ? `Unlock with ${phrase}.` : ''}
       </Text>
 
@@ -66,10 +66,10 @@ export function LockScreen() {
         onPress={() => void attempt()}
         disabled={busy}
         className={`rounded-2xl h-12 px-8 items-center justify-center ${
-          busy ? 'bg-gray-200' : 'bg-black active:opacity-70'
+          busy ? 'bg-muted' : 'bg-black active:opacity-70'
         }`}
       >
-        <Text className={`font-semibold ${busy ? 'text-gray-400' : 'text-white'}`}>
+        <Text className={`font-semibold ${busy ? 'text-muted-foreground' : 'text-white'}`}>
           {busy ? 'Waiting…' : 'Unlock'}
         </Text>
       </Pressable>

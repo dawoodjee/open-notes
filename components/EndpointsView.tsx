@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, Text as RNText, TextInput, View } from 'react-native';
-import { Plug, Trash2 } from 'lucide-react-native';
+import { Trash2 } from 'lucide-react-native';
 import { Icon } from '@/components/ui/icon';
 import { SettingsGroup, SettingsSubHeader } from '@/components/ui/settings-group';
 import {
@@ -64,16 +64,16 @@ export function EndpointsView({ onBack }: { onBack: () => void }) {
 
   return (
     <>
-      <SettingsSubHeader title="Endpoints" icon={Plug} onBack={onBack} />
+      <SettingsSubHeader title="Endpoints" onBack={onBack} />
 
-      <ScrollView className="flex-1 px-5 pt-4 bg-white">
+      <ScrollView className="flex-1 px-5 pt-4 bg-background">
         <SettingsGroup
           caption="Destinations"
           footnote="Decrypted note text is sent only to endpoints listed here, and only for the request that asks for it. Changing a URL asks for your approval again."
         >
           {endpoints.length === 0 ? (
             <View className="px-4 py-3">
-              <RNText className="text-sm text-gray-400">No endpoints yet.</RNText>
+              <RNText className="text-sm text-muted-foreground">No endpoints yet.</RNText>
             </View>
           ) : (
             endpoints.map((endpoint) => (
@@ -100,9 +100,9 @@ function AddButton({ label, onPress }: { label: string; onPress: () => void }) {
   return (
     <Pressable
       onPress={onPress}
-      className="py-3 rounded-2xl bg-gray-100 items-center active:bg-gray-200"
+      className="py-3 rounded-2xl bg-muted items-center active:bg-muted"
     >
-      <RNText className="text-sm font-medium text-gray-700">{label}</RNText>
+      <RNText className="text-sm font-medium text-foreground">{label}</RNText>
     </Pressable>
   );
 }
@@ -160,12 +160,12 @@ function EndpointRow({
       <View className="flex-row items-center justify-end mb-2">
         <View className="flex-row items-center gap-3">
           {endpoint.confirmedAt ? (
-            <RNText className="text-[10px] text-gray-400 uppercase">Approved</RNText>
+            <RNText className="text-[10px] text-muted-foreground uppercase">Approved</RNText>
           ) : (
             <RNText className="text-[10px] text-amber-500 uppercase">Not approved</RNText>
           )}
           <Pressable onPress={onDelete} className="p-1 active:opacity-60">
-            <Icon as={Trash2} className="w-4 h-4 text-red-400" />
+            <Icon as={Trash2} className="w-4 h-4 text-destructive/70" />
           </Pressable>
         </View>
       </View>
@@ -207,7 +207,7 @@ function Field({
       autoCorrect={false}
       spellCheck={false}
       placeholderTextColor="#9CA3AF"
-      className={`border border-gray-200 rounded-xl h-10 px-3 text-sm text-gray-900 bg-white ${
+      className={`border border-border rounded-xl h-10 px-3 text-sm text-foreground bg-background ${
         last ? '' : 'mb-2'
       }`}
     />

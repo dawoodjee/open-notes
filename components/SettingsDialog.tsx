@@ -27,7 +27,9 @@ import {
 } from '@/components/ui/settings-group';
 import { SecurityView } from '@/components/SecurityView';
 import { EndpointsView } from '@/components/EndpointsView';
+import { AppearanceView } from '@/components/AppearanceView';
 import { useVault } from '@/contexts/VaultContext';
+import { useTheme } from '@/contexts/ThemeContext';
 
 export interface SettingsDialogProps {
   isOpen: boolean;
@@ -64,9 +66,9 @@ function AdvancedView({ onBack }: { onBack: () => void }) {
 
   return (
     <>
-      <SettingsSubHeader title="Advanced" icon={Wrench} onBack={onBack} />
+      <SettingsSubHeader title="Advanced" onBack={onBack} />
 
-      <ScrollView className="flex-1 px-5 pt-4 bg-white">
+      <ScrollView className="flex-1 px-5 pt-4 bg-background">
         <SettingsGroup caption="Sync issues">
           {issues.length === 0 ? (
             <SettingsRow label="Everything looks good" />
@@ -74,7 +76,7 @@ function AdvancedView({ onBack }: { onBack: () => void }) {
             issues.map((issue) => (
               <HStack key={issue.id} className="items-start gap-2 px-4 py-3">
                 <Icon as={AlertTriangle} className="text-amber-500 w-4 h-4 mt-0.5" />
-                <RNText className="text-sm text-gray-700 flex-1">{issue.message}</RNText>
+                <RNText className="text-sm text-foreground flex-1">{issue.message}</RNText>
               </HStack>
             ))
           )}
@@ -83,9 +85,9 @@ function AdvancedView({ onBack }: { onBack: () => void }) {
         {issues.length > 0 && (
           <Pressable
             onPress={handleClear}
-            className="py-3.5 rounded-2xl bg-gray-100 items-center active:bg-gray-200"
+            className="py-3.5 rounded-2xl bg-muted items-center active:bg-muted"
           >
-            <RNText className="text-sm font-medium text-gray-700">Clear</RNText>
+            <RNText className="text-sm font-medium text-foreground">Clear</RNText>
           </Pressable>
         )}
 
@@ -96,11 +98,14 @@ function AdvancedView({ onBack }: { onBack: () => void }) {
 }
 
 export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
-  const [view, setView] = useState<'root' | 'advanced' | 'security' | 'endpoints'>('root');
+  const [view, setView] = useState<
+    'root' | 'advanced' | 'security' | 'endpoints' | 'appearance'
+  >('root');
   // Read here, in the normal tree, and handed down as props. Everything below
-  // <Modal> is hoisted to an overlay root above <VaultProvider>, where this
-  // hook would throw -- see the note on SecurityView.
+  // <Modal> is hoisted to an overlay root above the providers, where these
+  // hooks would throw -- see the note on SecurityView.
   const { lockSettings, updateLockSettings } = useVault();
+  const { preference, setPreference } = useTheme();
 
   const handleClose = () => {
     setView('root');
@@ -113,11 +118,11 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
       {/* Full-bleed sheet, matching ManageAccountDialog: full width, anchored
           to the bottom, 4/5 tall, square bottom corners so it reads as
           attached to the screen rather than floating. */}
-      {/* bg-white is explicit rather than inherited: gluestack's ModalContent
+      {/* bg-background is explicit rather than inherited: gluestack's ModalContent
           styles its background from a theme token that doesn't resolve under
           NativeWind v5-preview, so the sheet rendered black behind its
           children. */}
-      <ModalContent className="w-full max-w-full h-4/5 mt-auto mb-0 mx-0 rounded-t-2xl rounded-b-none border-0 pb-8 bg-white">
+      <ModalContent className="w-full max-w-full h-4/5 mt-auto mb-0 mx-0 rounded-t-2xl rounded-b-none border-0 pb-8 bg-background">
         {view === 'root' ? (
           <>
             <SettingsHeader
@@ -125,7 +130,7 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
               icon={SettingsIcon}
               right={
                 <ModalCloseButton>
-                  <Icon as={X} className="text-gray-400 w-5 h-5" />
+                  <Icon as={X} className="text-muted-foreground w-5 h-5" />
                 </ModalCloseButton>
               }
             />
@@ -133,21 +138,19 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
             {/* A plain ScrollView rather than ModalBody: ModalBody is itself a
                 ScrollView whose className maps to its own style, so its
                 padding and gaps never reach the content container. */}
-            <ScrollView className="flex-1 px-5 pt-4 bg-white">
+            <ScrollView className="flex-1 px-5 pt-4 bg-background">
               <SettingsGroup>
+                <SettingsRow
+                  icon={Palette}
+                  label="Appearance"
+                  onPress={() => setView('appearance')}
+                />
                 <SettingsRow
                   icon={ShieldCheck}
                   label="Security"
                   onPress={() => setView('security')}
                 />
                 <SettingsRow icon={Wrench} label="Advanced" onPress={() => setView('advanced')} />
-              </SettingsGroup>
-
-              {/* Inert placeholders establishing the grouped-list pattern;
-                  not implemented yet. */}
-              <SettingsGroup caption="Appearance">
-                <SettingsRow icon={Palette} label="Theme" disabled />
-                <SettingsRow icon={Type} label="Fonts" disabled />
               </SettingsGroup>
 
               <View className="h-8" />
@@ -162,6 +165,12 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
           />
         ) : view === 'endpoints' ? (
           <EndpointsView onBack={() => setView('security')} />
+        ) : view === 'appearance' ? (
+          <AppearanceView
+            onBack={() => setView('root')}
+            preference={preference}
+            setPreference={setPreference}
+          />
         ) : (
           <AdvancedView onBack={() => setView('root')} />
         )}

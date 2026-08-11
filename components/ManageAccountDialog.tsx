@@ -474,14 +474,14 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
       <ModalContent className="w-full max-w-full h-4/5 mt-auto mb-0 mx-0 rounded-t-2xl rounded-b-none border-0 px-5 pb-13">
         <ModalHeader>
           <HStack className="items-center">
-            <Icon as={UserRound} className="w-5 h-5 mr-2 text-gray-600" />
-            <RNText className="text-base font-semibold text-gray-900">Manage Account</RNText>
+            <Icon as={UserRound} className="w-5 h-5 mr-2 text-muted-foreground" />
+            <RNText className="text-base font-semibold text-foreground">Manage Account</RNText>
           </HStack>
           {/* A plain Pressable, not ModalCloseButton: that one closes through
               the modal's own context and would bypass the required-field
               check, so the X and the backdrop would disagree. */}
           <Pressable onPress={handleAttemptClose} className="p-1 -mr-1">
-            <Icon as={X} className="text-gray-400 w-5 h-5" />
+            <Icon as={X} className="text-muted-foreground w-5 h-5" />
           </Pressable>
         </ModalHeader>
 
@@ -497,11 +497,11 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
         <ModalBody className="flex-1 gap-3 pt-4 pb-6">
           {profileError && (
             <HStack className="items-center justify-between bg-red-50 rounded-2xl px-4 py-3">
-              <RNText className="text-xs text-red-500 flex-1 pr-2">
+              <RNText className="text-xs text-destructive flex-1 pr-2">
                 Couldn't load your profile: {profileError}
               </RNText>
               <Pressable onPress={refetch} className="py-1.5 px-3 rounded-xl bg-red-100">
-                <RNText className="text-xs font-medium text-red-500">Retry</RNText>
+                <RNText className="text-xs font-medium text-destructive">Retry</RNText>
               </Pressable>
             </HStack>
           )}
@@ -557,29 +557,29 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
           <VStack className="gap-1.5 pt-3">
             <HStack className="items-center justify-between py-1">
               <VStack className="flex-1">
-                <RNText className="text-base text-gray-800">Google</RNText>
+                <RNText className="text-base text-foreground">Google</RNText>
                 {googleIdentity?.email && (
-                  <RNText className="text-xs text-gray-400">{googleIdentity.email}</RNText>
+                  <RNText className="text-xs text-muted-foreground">{googleIdentity.email}</RNText>
                 )}
               </VStack>
 
               {identities === null ? (
-                <RNText className="text-xs text-gray-400">…</RNText>
+                <RNText className="text-xs text-muted-foreground">…</RNText>
               ) : googleIdentity ? (
                 <Pressable
                   onPress={handleRemoveGoogle}
                   disabled={identityBusy || !canUnlink(identities)}
-                  className="px-4 py-2 rounded-xl active:bg-gray-100 disabled:opacity-40"
+                  className="px-4 py-2 rounded-xl active:bg-muted disabled:opacity-40"
                 >
-                  <RNText className="text-sm font-medium text-red-500">Remove</RNText>
+                  <RNText className="text-sm font-medium text-destructive">Remove</RNText>
                 </Pressable>
               ) : (
                 <Pressable
                   onPress={handleLinkGoogle}
                   disabled={identityBusy}
-                  className="px-4 py-2 rounded-xl border border-gray-300 active:bg-gray-50 disabled:opacity-40"
+                  className="px-4 py-2 rounded-xl border border-border active:bg-secondary disabled:opacity-40"
                 >
-                  <RNText className="text-sm font-medium text-gray-800">Link</RNText>
+                  <RNText className="text-sm font-medium text-foreground">Link</RNText>
                 </Pressable>
               )}
             </HStack>
@@ -599,18 +599,18 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
                 many times you use email. Saying "only sign-in method" would
                 tell the user something false about their own account. */}
             {googleIdentity && identities !== null && !canUnlink(identities) && (
-              <RNText className="text-xs text-gray-400 px-1">
+              <RNText className="text-xs text-muted-foreground px-1">
                 This is your only linked account. Link another before removing it.
               </RNText>
             )}
 
             <HStack className="items-center justify-between py-1">
-              <RNText className="text-base text-gray-400">Apple</RNText>
-              <RNText className="text-xs text-gray-400">Not available</RNText>
+              <RNText className="text-base text-muted-foreground">Apple</RNText>
+              <RNText className="text-xs text-muted-foreground">Not available</RNText>
             </HStack>
 
             {identityError && (
-              <RNText className="text-xs text-red-500">{identityError}</RNText>
+              <RNText className="text-xs text-destructive">{identityError}</RNText>
             )}
           </VStack>
 

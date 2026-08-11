@@ -33,6 +33,12 @@ export interface NotesState {
   selectedNoteId: string | null;
   searchQuery: string;
   isLoading: boolean;
+
+  // Whether the "open something on launch" rule has already had its turn.
+  // Without this the rule re-fires on every watch tick, so going back to the
+  // list instantly re-opens a note and the list is unreachable. See the
+  // reducer.
+  hasAutoSelected: boolean;
 }
 
 export type NotesAction =
@@ -44,22 +50,44 @@ export type NotesAction =
 // =============================================================================
 // HELPER FUNCTIONS
 // =============================================================================
-export function parseNoteContent(body: string, titleLimit: number = 120) {
-  // 1. Strip HTML tags, decode non-breaking spaces, and convert block tags to newlines
-  const plainText = body
+/**
+ * Strip a note's HTML down to the non-empty lines a reader would actually see.
+ *
+ * Shared by parseNoteContent and isBlankNote so the two can never disagree
+ * about what "empty" means -- which matters a lot more than it sounds, since
+ * one of them is used to decide whether a note may be deleted.
+ */
+function toVisibleLines(body: string): string[] {
+  return body
     .replace(/&nbsp;/gi, ' ')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/p>/gi, '\n')
     .replace(/<\/div>/gi, '\n')
     .replace(/<\/h[1-6]>/gi, '\n')
     .replace(/<[^>]+>/g, '')
-    .trim();
-
-  // Split text into distinct non-empty paragraphs
-  const paragraphs = plainText
+    .trim()
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
+}
+
+/**
+ * Does this note contain nothing a person would call content?
+ *
+ * Not `body === ''`. An "empty" note in a rich-text editor is almost never an
+ * empty string: TenTap seeds every document with `<h1></h1>` (see
+ * formatInitialContent), typing and deleting leaves `<p></p>`, and both look
+ * blank on screen. Comparing raw HTML would treat all of those as content.
+ *
+ * Anything that decides to DELETE a note must ALSO check `decryptFailed`
+ * separately -- an unreadable note reads as empty here, and it is not.
+ */
+export function isBlankNote(body: string): boolean {
+  return toVisibleLines(body).length === 0;
+}
+
+export function parseNoteContent(body: string, titleLimit: number = 120) {
+  const paragraphs = toVisibleLines(body);
 
   // --- Rule 1: Body is empty ---
   if (paragraphs.length === 0) {
