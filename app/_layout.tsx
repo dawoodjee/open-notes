@@ -57,8 +57,12 @@ export default function RootLayout() {
 
 function ThemedRoot() {
   const { scheme } = useTheme();
+  // No `mode` prop: ThemeProvider owns Appearance, and passing the resolved
+  // scheme here is what previously pinned the app so that the device switching
+  // between light and dark never reached it. See the note in
+  // components/ui/gluestack-ui-provider.
   return (
-    <GluestackUIProvider mode={scheme}>
+    <GluestackUIProvider>
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
       <VaultProvider>
         <VaultGate />

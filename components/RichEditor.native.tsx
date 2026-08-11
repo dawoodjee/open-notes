@@ -143,9 +143,15 @@ function editorColorVars(scheme: 'light' | 'dark'): string {
 // later by resetting the variables (see applyEditorTheme) rather than
 // rebuilding the stylesheet -- which would mean recreating the bridge, and
 // with it losing the caret and re-running the scroll restore every time.
-const editorThemeCSS = `
+//
+// TAKES THE SCHEME rather than baking in light and correcting after load.
+// Injection only lands once the page is up, so a stylesheet that always
+// started light meant opening a note in dark mode flashed white for as long
+// as the WebView took to load. Baking the right values in means there is no
+// wrong frame to correct.
+const editorThemeCSS = (scheme: 'light' | 'dark') => `
   :root {
-    ${editorColorVars('light')}
+    ${editorColorVars(scheme)}
   }
   * {
     box-sizing: border-box;
@@ -258,12 +264,21 @@ export default function RichEditor({
     onChangeRef.current = onChange;
   }, [onChange]);
 
+  const { scheme } = useTheme();
+
+  // Read once, deliberately. useEditorBridge builds the bridge on first render
+  // and ignores later changes to this argument, so this is the scheme the
+  // document STARTS in; applyEditorTheme below handles every change after.
+  // NoteEditorPane keys this component on the note id, so opening any note
+  // rebuilds the bridge with the scheme current at that moment.
+  const initialSchemeRef = useRef(scheme);
+
   const editor = useEditorBridge({
     initialContent: formattedContent,
     autofocus: autoFocus,
     bridgeExtensions: [
       ...TenTapStartKit,
-      CoreBridge.configureCSS(editorThemeCSS),
+      CoreBridge.configureCSS(editorThemeCSS(initialSchemeRef.current)),
       ImageBridge,
     ],
     avoidIosKeyboard: true,
@@ -381,10 +396,10 @@ export default function RichEditor({
 
   const editorState = useBridgeState(editor);
 
-  // Repaint the WebView when the theme changes, and again on every load --
-  // the stylesheet ships with the light values baked in, so a WebView that
-  // mounts while dark is active would otherwise start white and stay white.
-  const { scheme } = useTheme();
+  // Repaint the WebView when the theme changes. The document already STARTS in
+  // the right scheme (see initialSchemeRef above), so this covers the theme
+  // being switched while a note is open -- including the OS crossing sunset
+  // while the app sits in Device mode.
   const applyEditorTheme = useCallback(() => {
     // webviewRef.injectJavaScript, not TenTap's editor.injectJS. The latter
     // wraps the string in its own envelope, which changes the script's
@@ -487,7 +502,11 @@ export default function RichEditor({
       <Box className="flex-1">
         <RichText
           editor={editor}
-          style={{ flex: 1 }}
+          // The WebView's own surface, which exists before any HTML or CSS
+          // does. WKWebView defaults to opaque white, so without this the
+          // native view itself is the white flash -- the stylesheet above
+          // cannot help, because there is no document yet to style.
+          style={{ flex: 1, backgroundColor: EDITOR_COLORS[scheme].bg }}
           onLoadEnd={() => {
             applyEditorTheme();
             installScrollListener();
