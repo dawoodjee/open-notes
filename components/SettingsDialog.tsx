@@ -105,7 +105,7 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
   // <Modal> is hoisted to an overlay root above the providers, where these
   // hooks would throw -- see the note on SecurityView.
   const { lockSettings, updateLockSettings } = useVault();
-  const { preference, setPreference } = useTheme();
+  const { preference, setPreference, bulletStyle, setBulletStyle } = useTheme();
 
   const handleClose = () => {
     setView('root');
@@ -170,6 +170,8 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
             onBack={() => setView('root')}
             preference={preference}
             setPreference={setPreference}
+            bulletStyle={bulletStyle}
+            setBulletStyle={setBulletStyle}
           />
         ) : (
           <AdvancedView onBack={() => setView('root')} />

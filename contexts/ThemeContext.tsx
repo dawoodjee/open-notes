@@ -27,6 +27,21 @@ import * as SystemUI from 'expo-system-ui';
 export type ThemePreference = 'system' | 'light' | 'dark';
 
 /**
+ * How an unordered list draws its markers.
+ *
+ * There is only ONE bullet-list node in the editor -- typing `- `, `+ ` or `* `
+ * all produce the same `bulletList`, and so does the toolbar button. So this is
+ * necessarily a document-wide choice rather than a per-list one. Storing the
+ * marker per list would mean a new attribute on every <ul> in every note, and
+ * TenTap can only hand JSON across the bridge to its prebuilt editor bundle --
+ * a custom Tiptap extension would mean building and shipping our own bundle.
+ *
+ * Nothing about the note changes either way: the stored HTML stays plain
+ * <ul><li>, and this only decides what gets painted beside it.
+ */
+export type BulletStyle = 'dash' | 'dot';
+
+/**
  * SecureStore, NOT the ui_state table, and not for secrecy.
  *
  * The theme has to be readable BEFORE the encrypted database opens: the boot
@@ -36,6 +51,17 @@ export type ThemePreference = 'system' | 'light' | 'dark';
  * already made lock settings mirror into the SecureStore vault blob.
  */
 const THEME_KEY = 'notes.appearance.v1';
+
+/**
+ * Beside the theme, and for a weaker reason than the theme's.
+ *
+ * This one has no need to beat the database open -- nothing paints a bullet
+ * before the editor exists. It lives here because RichEditor already calls
+ * useTheme() and SettingsDialog already threads this context's values through
+ * the modal hoist, so putting it anywhere else would mean a second store and a
+ * second prop thread to carry one string.
+ */
+const BULLET_KEY = 'notes.bulletStyle.v1';
 
 /**
  * The one place a literal background colour is allowed.
@@ -55,6 +81,8 @@ interface ThemeContextValue {
    *  unavoidable -- the WebView stylesheet, a status bar style. */
   scheme: 'light' | 'dark';
   setPreference: (next: ThemePreference) => Promise<void>;
+  bulletStyle: BulletStyle;
+  setBulletStyle: (next: BulletStyle) => Promise<void>;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -74,6 +102,7 @@ function toColorScheme(preference: ThemePreference): ColorSchemeName {
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [preference, setPreferenceState] = useState<ThemePreference>('system');
+  const [bulletStyle, setBulletStyleState] = useState<BulletStyle>('dash');
   const deviceScheme = useColorScheme();
 
   useEffect(() => {
@@ -86,6 +115,14 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // A missing or unreadable preference is not worth failing a launch
         // over -- 'system' is a perfectly good answer.
+      }
+      try {
+        const stored = await SecureStore.getItemAsync(BULLET_KEY);
+        if (stored === 'dash' || stored === 'dot') {
+          setBulletStyleState(stored);
+        }
+      } catch {
+        // Same reasoning: 'dash' is a perfectly good answer.
       }
     })();
   }, []);
@@ -113,8 +150,19 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const setBulletStyle = useCallback(async (next: BulletStyle) => {
+    setBulletStyleState(next);
+    try {
+      await SecureStore.setItemAsync(BULLET_KEY, next);
+    } catch {
+      // The choice still applies for this launch; only persistence failed.
+    }
+  }, []);
+
   return (
-    <ThemeContext.Provider value={{ preference, scheme, setPreference }}>
+    <ThemeContext.Provider
+      value={{ preference, scheme, setPreference, bulletStyle, setBulletStyle }}
+    >
       {children}
     </ThemeContext.Provider>
   );
