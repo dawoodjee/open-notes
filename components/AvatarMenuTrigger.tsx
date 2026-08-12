@@ -72,7 +72,7 @@ export default function AvatarMenuTrigger({ className }: AvatarMenuTriggerProps)
 
         <MenuItem
           key="identity"
-          textValue={isLoggedIn ? 'Manage Account' : 'Manage Sync'}
+          textValue={isLoggedIn ? 'Manage Account' : 'Sync'}
           onPress={() => {
             if (isLoggedIn) {
               setIsManageAccountOpen(true);
@@ -89,7 +89,7 @@ export default function AvatarMenuTrigger({ className }: AvatarMenuTriggerProps)
           <MenuItemLabel
             className={`text-base ${isLoggedIn ? "text-foreground" : "text-pink-600"}`}
           >
-            {isLoggedIn ? 'Manage Account' : 'Manage Sync'}
+            {isLoggedIn ? 'Manage Account' : 'Sync'}
           </MenuItemLabel>
         </MenuItem>
       </Menu>

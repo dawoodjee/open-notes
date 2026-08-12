@@ -64,7 +64,7 @@ function IdentityAction({
     <Pressable
       onPress={onPress}
       disabled={disabled}
-      className="px-3.5 py-1.5 rounded-full bg-secondary min-w-[84px] items-center active:opacity-60 disabled:opacity-40"
+      className="px-3.5 py-1.5 rounded-full bg-secondary min-w-21 items-center active:opacity-60 disabled:opacity-40"
     >
       <RNText
         className={`text-sm font-medium ${destructive ? 'text-destructive' : 'text-foreground'}`}
@@ -540,7 +540,7 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
           {profileError && (
             <HStack className="items-center justify-between bg-red-50 rounded-2xl px-4 py-3">
               <RNText className="text-xs text-destructive flex-1 pr-2">
-                Couldn't load your profile: {profileError}
+                Could not load your profile: {profileError}
               </RNText>
               <Pressable onPress={refetch} className="py-1.5 px-3 rounded-xl bg-red-100">
                 <RNText className="text-xs font-medium text-destructive">Retry</RNText>
@@ -557,7 +557,7 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
             <AccountField
               value={fullName}
               onChangeText={handleFullNameChange}
-              placeholder="Full name"
+              placeholder="Jane Doe"
               flash={missingFullName ? flash : 0}
             />
 

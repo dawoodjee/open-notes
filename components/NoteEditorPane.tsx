@@ -223,7 +223,7 @@ export default function NoteEditorPane({
                 // the default padding insets the rows so their press
                 // highlight stops short of the card edge, which is the tell of
                 // a menu that is not native. See components/ui/settings-group.
-                className="rounded-2xl p-0 overflow-hidden min-w-[220px]"
+                className="rounded-2xl p-0 overflow-hidden min-w-55"
                 // Disabling lives on the Menu, not the item: this is a
                 // react-aria collection, so `disabledKeys` is what actually
                 // makes a row non-interactive, and the item style already
@@ -263,7 +263,7 @@ export default function NoteEditorPane({
                 >
                   <Icon
                     as={selectedNote.isHiddenFromApi ? EyeOff : Eye}
-                    className={`w-[18px] h-[18px] ${
+                    className={`w-4.5 h-4.5 ${
                       apiGateOpen ? 'text-muted-foreground' : 'text-muted-foreground/50'
                     }`}
                   />
@@ -284,7 +284,7 @@ export default function NoteEditorPane({
                   onPress={() => onTrashNote(selectedNote.id)}
                   className="px-4 py-3 flex-row items-center gap-3"
                 >
-                  <Icon as={Trash2} className="text-destructive w-[18px] h-[18px]" />
+                  <Icon as={Trash2} className="text-destructive w-4.5 h-4.5" />
                   <MenuItemLabel className="text-base text-destructive">
                     Delete
                   </MenuItemLabel>

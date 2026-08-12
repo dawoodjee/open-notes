@@ -132,7 +132,7 @@ export default function EnableSyncScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND[scheme] }}>
       <HStack className="justify-between items-center px-4 py-3">
-        <RNText className="text-lg font-semibold text-foreground">Manage Sync</RNText>
+        <RNText className="text-lg font-semibold text-foreground">Sync</RNText>
         <Pressable onPress={dismiss} className="p-1.5 rounded-full active:bg-muted">
           <Icon as={X} className="text-muted-foreground w-5 h-5" />
         </Pressable>
@@ -142,13 +142,13 @@ export default function EnableSyncScreen() {
         {step === 'email' && (
           <>
             <RNText className="text-sm text-muted-foreground">
-              Enter your email and we’ll send you a one-time code — no password needed.
+              Enter your email to get your one-time code.
             </RNText>
             <Input className="rounded-lg h-11 px-3">
               <InputField
                 value={email}
                 onChangeText={setEmail}
-                placeholder="you@example.com"
+                placeholder="janedoe@email.com"
                 autoCapitalize="none"
                 keyboardType="email-address"
                 className="text-sm"
