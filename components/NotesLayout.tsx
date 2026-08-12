@@ -1,6 +1,5 @@
 import React, { useReducer, useState, useRef, useEffect, useCallback } from 'react';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Platform, AppState, BackHandler } from 'react-native';
+import { Platform, AppState, BackHandler, View } from 'react-native';
 import NoteListPane from './NoteListPane';
 import NoteEditorPane from './NoteEditorPane';
 import DesktopResizeHandle from './DesktopResizeHandle';
@@ -442,7 +441,22 @@ export default function NotesLayout() {
   if (!launchSettled) return <BootSpinner />;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND[scheme] }}>
+    // Full-bleed, NOT a SafeAreaView, and that is the whole fix for the bands
+    // at the top and bottom of the screen.
+    //
+    // SafeAreaView insets its children and paints the inset strips ITSELF, with
+    // whatever colour it was given -- here the app background. But the content
+    // inside is a different colour: the list pane is bg-secondary and the
+    // bottom bar is its own near-white. So the notch got a white strip above a
+    // grey list, and the home indicator a white strip below an off-white bar.
+    // Two near-misses, which is why it read as an unfinished gap rather than an
+    // obvious border.
+    //
+    // Instead the panes now run edge to edge and each piece of chrome pads
+    // ITSELF by the inset (see NoteListPane and NoteEditorPane). Each
+    // background therefore reaches the screen edge and there is nothing left to
+    // mismatch -- which is also how iOS's own apps do it.
+    <View style={{ flex: 1, backgroundColor: BACKGROUND[scheme] }}>
       <HStack
         className="flex-1 w-full bg-background select-none"
         {...(Platform.OS === 'web'
@@ -493,6 +507,6 @@ export default function NotesLayout() {
           onEditorScrollOffsetChange={handleEditorScrollChange}
         />
       </HStack>
-    </SafeAreaView>
+    </View>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
-import { Text as RNText, PanResponder } from 'react-native';
+import { Text as RNText, PanResponder, Keyboard, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import RichEditor from './RichEditor';
 
 // Gluestack UI Primitives
@@ -44,6 +45,32 @@ export interface NoteEditorPaneProps {
   onEditorScrollOffsetChange?: (offset: number) => void;
 }
 
+/**
+ * Whether a software keyboard is currently on screen.
+ *
+ * The two platforms fire different events and only one pair is reliable on
+ * each: iOS gets `keyboardWillShow`/`keyboardWillHide`, which fire with the
+ * animation and so keep the layout in step with it, while Android only has the
+ * `did` variants.
+ */
+function useKeyboardShown() {
+  const [shown, setShown] = React.useState(false);
+
+  React.useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const subs = [
+      Keyboard.addListener(showEvent, () => setShown(true)),
+      Keyboard.addListener(hideEvent, () => setShown(false)),
+    ];
+
+    return () => subs.forEach((s) => s.remove());
+  }, []);
+
+  return shown;
+}
+
 export default function NoteEditorPane({
   selectedNote,
   selectedNoteId,
@@ -59,6 +86,18 @@ export default function NoteEditorPane({
   // Live, because the gate is toggled in a settings sheet with no component
   // ancestry to this menu -- see useApiGateOpen.
   const apiGateOpen = useApiGateOpen();
+
+  // This pane runs edge to edge, so it pads its own chrome past the notch and
+  // the home indicator. See the comment on NotesLayout's root view.
+  const insets = useSafeAreaInsets();
+
+  // The bottom inset is dropped while the keyboard is up, and that is not a
+  // detail. The home indicator is only there to avoid when nothing else is:
+  // once the keyboard covers that part of the screen, reserving space for the
+  // indicator as well leaves a dead band sitting between the text and the keys.
+  // iOS itself makes exactly this swap.
+  const keyboardShown = useKeyboardShown();
+  const editorBottomInset = keyboardShown ? 0 : insets.bottom;
 
   // Mobile edge-swipe-back, mirroring iOS's native interactive-pop gesture --
   // there's no real navigation stack here to provide that for free (list and
@@ -91,7 +130,10 @@ export default function NoteEditorPane({
       {selectedNote ? (
         <>
           {/* Top Navigation Row */}
-          <HStack className="justify-between items-center px-4 py-3 border-b border-border">
+          <HStack
+            className="justify-between items-center px-4 py-3 border-b border-border"
+            style={{ paddingTop: insets.top + 12 }}
+          >
             <HStack className="items-center space-x-1">
               {/* Mobile Back Button */}
               <Pressable
@@ -182,7 +224,11 @@ export default function NoteEditorPane({
           </HStack>
 
           {/* Editor Detail Pane */}
-          <Box className="flex-1" {...panResponder.panHandlers}>
+          <Box
+            className="flex-1"
+            style={{ paddingBottom: editorBottomInset }}
+            {...panResponder.panHandlers}
+          >
             <RichEditor
               key={selectedNote.id}
               initialContent={selectedNote.body}
@@ -194,7 +240,10 @@ export default function NoteEditorPane({
           </Box>
         </>
       ) : (
-        <VStack className="flex-1 items-center justify-center p-4 bg-secondary">
+        <VStack
+          className="flex-1 items-center justify-center p-4 bg-secondary"
+          style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}
+        >
           <RNText className="text-muted-foreground text-base font-medium">
             Select a note or create a new one.
           </RNText>

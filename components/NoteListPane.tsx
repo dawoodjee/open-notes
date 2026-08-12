@@ -1,5 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { FlatList, Text as RNText, View, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Gluestack UI Primitives
 import { HStack } from '@/components/ui/hstack';
@@ -44,6 +45,13 @@ export default function NoteListPane({
   const barBackground = scheme === 'dark' ? '#171717' : '#F9FAFB';
   const barBorder = scheme === 'dark' ? '#2e2e2e' : '#E5E7EB';
 
+  // The pane runs edge to edge (NotesLayout no longer insets anything), so the
+  // safe area is this pane's own responsibility: the header pads itself past
+  // the notch and the bottom bar past the home indicator. The payoff is that
+  // this pane's bg-secondary and the bar's own colour now reach the physical
+  // edge of the screen instead of stopping at a differently-coloured strip.
+  const insets = useSafeAreaInsets();
+
   // Filter Active Notes (Excludes Trashed Notes)
   const activeNotes = notes.filter((n) => !n.isTrashed);
 
@@ -84,7 +92,10 @@ export default function NoteListPane({
       `}
     >
       {/* Header with Top-Right Avatar for Mobile/List view */}
-      <HStack className="justify-between items-start p-4 pb-2">
+      <HStack
+        className="justify-between items-start p-4 pb-2"
+        style={{ paddingTop: insets.top + 16 }}
+      >
         <VStack>
           <RNText className="text-3xl font-bold text-foreground">All Notes</RNText>
           <RNText className="text-xs text-muted-foreground font-medium mt-0.5">
@@ -167,6 +178,7 @@ export default function NoteListPane({
           flexDirection: 'row',
           alignItems: 'center',
           padding: 12,
+          paddingBottom: 12 + insets.bottom,
           gap: 12,
           backgroundColor: barBackground,
           borderTopWidth: 1,

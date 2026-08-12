@@ -1,5 +1,7 @@
+import { useEffect } from 'react';
 import { LogBox, View } from 'react-native';
 import { Stack } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { VaultProvider, useVault } from '@/contexts/VaultContext';
@@ -23,6 +25,26 @@ import '@/global.css';
 // "Sync error" logs, which were useful for diagnosis and are still there,
 // just not painted over the UI.
 LogBox.ignoreAllLogs(true);
+
+/**
+ * Hold the native splash until we control what replaces it.
+ *
+ * By default expo-router drops the splash the instant the first route mounts,
+ * and the first thing to mount is a React tree that has not yet read the stored
+ * appearance -- so a dark-mode launch got one light frame before the preference
+ * arrived. Holding here means the splash covers that read.
+ *
+ * Module scope, not an effect: by the time an effect runs the first frame has
+ * already been committed and the splash is already gone. The rejection is
+ * swallowed because "too late to prevent" is the only way this fails, and it is
+ * not worth crashing a launch over.
+ */
+void SplashScreen.preventAutoHideAsync().catch(() => {});
+
+/** A launch that never settles must not sit on the splash forever. If the
+ *  keychain read hangs, fall through and let BootSpinner -- which at least
+ *  shows something is still happening -- take over. */
+const SPLASH_MAX_HOLD_MS = 4000;
 
 /**
  * The two blocking key steps that can follow a sign-in, in priority order.
@@ -57,7 +79,22 @@ export default function RootLayout() {
 }
 
 function ThemedRoot() {
-  const { scheme } = useTheme();
+  const { scheme, isReady } = useTheme();
+
+  // Hand the splash over only once the appearance is settled, so that whatever
+  // paints next is already the right colour. BootSpinner is drawn to match the
+  // splash exactly, which is what makes this swap invisible rather than merely
+  // fast.
+  useEffect(() => {
+    const hide = () => void SplashScreen.hideAsync().catch(() => {});
+    if (isReady) {
+      hide();
+      return;
+    }
+    const timer = setTimeout(hide, SPLASH_MAX_HOLD_MS);
+    return () => clearTimeout(timer);
+  }, [isReady]);
+
   // No `mode` prop: ThemeProvider owns Appearance, and passing the resolved
   // scheme here is what previously pinned the app so that the device switching
   // between light and dark never reached it. See the note in
