@@ -97,6 +97,51 @@ export function isBlankNote(body: string): boolean {
 }
 
 /**
+ * A note's body as plain text, for handing to something outside the app.
+ *
+ * Reuses toVisibleLines rather than stripping tags again, so what gets shared
+ * is the same reading of the note the list already shows -- one source of
+ * truth for "what does this note actually say". Lines are rejoined with a
+ * blank line between them because the shared text lands in Messages, Mail or
+ * another notes app, where paragraph breaks are the only structure that
+ * survives; single newlines get reflowed away by some of them.
+ *
+ * Entities ARE decoded, and only here. toVisibleLines leaves them alone
+ * because it also feeds the title that gets written to the database, and
+ * changing that would move stored data for no visible gain. Text leaving the
+ * app is the one place it genuinely matters: "Eggs &amp; bread" arriving
+ * literally in somebody's Messages thread is the app's mistake, not theirs.
+ */
+const ENTITIES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+  '#39': "'",
+  nbsp: ' ',
+};
+
+function decodeEntities(text: string): string {
+  return text.replace(/&(#?\w+);/g, (whole, name: string) => {
+    const named = ENTITIES[name.toLowerCase()];
+    if (named !== undefined) return named;
+
+    const numeric = /^#(\d+)$/.exec(name);
+    if (numeric) return String.fromCodePoint(Number(numeric[1]));
+
+    // Unknown entity: leave it exactly as written rather than guessing. A
+    // stray "&foo;" in the text is someone's literal typing far more often
+    // than it is markup.
+    return whole;
+  });
+}
+
+export function noteToPlainText(body: string): string {
+  return decodeEntities(toVisibleLines(body).join('\n\n'));
+}
+
+/**
  * Where the first sentence of a line ends, or -1.
  *
  * Returns the index the NEXT sentence starts at, so callers can slice.
