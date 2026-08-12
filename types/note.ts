@@ -67,6 +67,13 @@ function toVisibleLines(body: string): string[] {
     .replace(/<\/p>/gi, '\n')
     .replace(/<\/div>/gi, '\n')
     .replace(/<\/h[1-6]>/gi, '\n')
+    // List items, so bullets are separate lines rather than one run of text.
+    // Today they usually separate anyway -- TenTap emits <li><p>...</p></li>
+    // and the inner </p> above does the work -- but that is luck, not design:
+    // a list item without an inner paragraph concatenates with the next one
+    // and no space at all ("MilkEggsBread"). Harmless where it already works
+    // (two newlines collapse and the blank line is filtered below).
+    .replace(/<\/li>/gi, '\n')
     .replace(/<[^>]+>/g, '')
     .trim()
     .split('\n')
@@ -87,6 +94,56 @@ function toVisibleLines(body: string): string[] {
  */
 export function isBlankNote(body: string): boolean {
   return toVisibleLines(body).length === 0;
+}
+
+/**
+ * Where the first sentence of a line ends, or -1.
+ *
+ * Returns the index the NEXT sentence starts at, so callers can slice.
+ *
+ * This replaces `indexOf('.')`, which is wrong in a way that only shows up on
+ * real notes: it splits inside "v1.2", "e.g.", "Dr." and every URL, so the
+ * preview would begin mid-abbreviation. It also missed "?" and "!" entirely,
+ * so a note that opened with a question never got a preview at all.
+ *
+ * The rule that does the work is requiring WHITESPACE after the terminator --
+ * that alone rules out decimals and domain names, because nobody writes
+ * "v1. 2". The abbreviation list handles what survives that: a single capital
+ * ("J. Smith") and a short closed set of honorifics and Latin tags. Kept
+ * short on purpose. This is a preview line, not a parser; the cost of missing
+ * a case is a slightly odd second line, so an exhaustive list would be effort
+ * spent where nothing is riding on it.
+ */
+const ABBREVIATIONS = new Set([
+  'mr', 'mrs', 'ms', 'dr', 'prof', 'sr', 'jr', 'st',
+  'eg', 'ie', 'etc', 'vs', 'approx', 'no', 'fig', 'al',
+]);
+
+function findSentenceEnd(line: string): number {
+  const terminator = /[.?!]+\s+/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = terminator.exec(line)) !== null) {
+    const end = match.index + match[0].length;
+    // Nothing after it -- not a boundary, just trailing punctuation.
+    if (end >= line.length) return -1;
+
+    // The word before the terminator, which does NOT include it -- the slice
+    // stops at match.index. So "Email J. Smith" gives "J", and "for Q3." gives
+    // "Q3".
+    const word = line.slice(0, match.index).split(/[\s(]+/).pop() ?? '';
+
+    // "J. Smith" -- a lone capital is an initial, not the end of a thought.
+    // Anchored on the WHOLE word rather than "contains a capital": "Q3" also
+    // reduces to one letter once digits are stripped, and treating that as an
+    // initial swallowed the boundary in "...for Q3. We discussed...".
+    if (/^[A-Z]$/.test(word)) continue;
+    if (ABBREVIATIONS.has(word.replace(/[^A-Za-z]/g, '').toLowerCase())) continue;
+
+    return end;
+  }
+
+  return -1;
 }
 
 export function parseNoteContent(body: string, titleLimit: number = 120) {
@@ -112,31 +169,34 @@ export function parseNoteContent(body: string, titleLimit: number = 120) {
   let preview = '';
 
   // --- Preview Logic ---
+  //
+  // One unit of text, never a concatenation. The rule is "whatever comes
+  // immediately after the title", tried in three widths: the next paragraph,
+  // else the next sentence of this one, else the part after the next comma.
   if (paragraphs.length > 1) {
-    // If more than one paragraph -> Start from second paragraph
-    preview = paragraphs.slice(1).join(' ').trim();
+    // The SECOND paragraph alone -- not slice(1).join(' '). Joining every
+    // remaining paragraph is what turned a bulleted note into one run-on
+    // strip ("Milk Eggs Bread Coffee beans") that kept going until the line
+    // ran out of room. The row shows one clamped line either way, so the join
+    // never bought more information, only a worse-looking version of it.
+    preview = paragraphs[1];
   } else {
-    // Only one paragraph
-    const dotIndex = firstLine.indexOf('.');
+    // Only one paragraph, so the preview has to come out of the title's own
+    // line -- "the rest of the title", in effect.
+    const sentenceEnd = findSentenceEnd(firstLine);
     const commaIndex = firstLine.indexOf(',');
 
-    // 1. Check for full stop and extract second sentence
-    if (dotIndex !== -1 && dotIndex < firstLine.length - 1) {
-      const secondSentence = firstLine.slice(dotIndex + 1).trim();
-      if (secondSentence.length > 0) {
-        preview = secondSentence;
-      }
+    // 1. After the first sentence.
+    if (sentenceEnd !== -1) {
+      preview = firstLine.slice(sentenceEnd).trim();
     }
 
-    // 2. Else if has comma -> Extract portion after comma
+    // 2. Else after the first comma.
     if (!preview && commaIndex !== -1 && commaIndex < firstLine.length - 1) {
-      const secondPortion = firstLine.slice(commaIndex + 1).trim();
-      if (secondPortion.length > 0) {
-        preview = secondPortion;
-      }
+      preview = firstLine.slice(commaIndex + 1).trim();
     }
 
-    // 3. Else -> Start from title's truncation point
+    // 3. Else whatever spilled past the title's truncation point.
     if (!preview && firstLine.length > titleLimit) {
       preview = firstLine.slice(titleLimit).trim();
     }
