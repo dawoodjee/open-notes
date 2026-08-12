@@ -1,4 +1,4 @@
-import { ActivityIndicator, LogBox, View } from 'react-native';
+import { LogBox, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import { AuthProvider } from '@/contexts/AuthContext';
@@ -8,6 +8,7 @@ import { AdoptKeyScreen, usePendingAdoption } from '@/components/AdoptKeyScreen'
 import { SecureAccountScreen, usePendingKeySetup } from '@/components/SecureAccountScreen';
 import { PlaintextConsentDialog } from '@/components/PlaintextConsentDialog';
 import { BootFailureScreen } from '@/components/BootFailureScreen';
+import { BootSpinner } from '@/components/BootSpinner';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { StatusBar } from 'expo-status-bar';
 
@@ -91,14 +92,9 @@ function VaultGate() {
   const { status, hasBooted, bootError, resetLocalData } = useVault();
 
   if (status === 'loading') {
-    // The spinner is not decoration. An empty View here is what made a hung
-    // boot look identical to a dead one -- there was no way to tell "still
-    // working" from "gave up" without attaching a debugger.
-    return (
-      <View className="flex-1 bg-background items-center justify-center">
-        <ActivityIndicator color="#84CC16" />
-      </View>
-    );
+    // NotesLayout renders this same component while it settles on which note
+    // to open, so the two holds read as one continuous load. See BootSpinner.
+    return <BootSpinner />;
   }
 
   if (status === 'failed') {

@@ -24,7 +24,14 @@ import {
   saveUiState,
 } from '@/lib/powersync/db';
 import { isBlankNote } from '@/types/note';
+import { BootSpinner } from '@/components/BootSpinner';
 import { BACKGROUND, useTheme } from '@/contexts/ThemeContext';
+
+// How long the launch gate below will wait before giving up and painting
+// whatever it has. Deliberately generous -- it is a failsafe for a path that
+// should never be taken, not a budget for the normal one, which finishes in a
+// couple of local SQLite reads.
+const LAUNCH_GATE_TIMEOUT_MS = 3000;
 
 // =============================================================================
 // MAIN COMPONENT
@@ -66,6 +73,23 @@ export default function NotesLayout() {
 
   // Whether the empty-database fallback has already fired this launch.
   const hasAutoCreatedRef = useRef<boolean>(false);
+
+  /**
+   * False until this launch has decided what to show, which is not the same as
+   * "the database has answered".
+   *
+   * Restoring the last-opened note takes two awaits (read ui_state, then check
+   * the note still exists) and the watch query only starts after them, so the
+   * panes used to paint twice before landing: once as an empty list reading
+   * "0 Notes", and once as "Select a note or create a new one." -- the window
+   * where selectedNoteId is set but no note has arrived to match it. Both are
+   * artefacts of that ordering, not states the user has any use for.
+   *
+   * Local state rather than reducer state on purpose: the reducer's contract
+   * is to mirror whatever SQLite reports (see types/notesStore.ts), and this is
+   * a question about the launch, not about the notes.
+   */
+  const [launchSettled, setLaunchSettled] = useState(false);
 
   const handleCreateNote = useCallback(async () => {
     try {
@@ -129,25 +153,48 @@ export default function NotesLayout() {
               // observe an empty database, and create another one -- forever.
               // Firing once per launch means the user can genuinely get to an
               // empty list if they trash their last note by hand.
-              if (notes.filter((n) => !n.isTrashed).length === 0 && !hasAutoCreatedRef.current) {
+              const activeCount = notes.filter((n) => !n.isTrashed).length;
+
+              if (activeCount === 0 && !hasAutoCreatedRef.current) {
                 hasAutoCreatedRef.current = true;
-                void createNoteRef.current();
+                // Stay gated across the insert: the note this creates is what
+                // the user is meant to land in, and it only reaches `notes` on
+                // a later tick. Releasing here would paint the empty list for
+                // exactly one INSERT round-trip. If the insert fails there is
+                // nothing left to wait for, so release and show the list.
+                void createNoteRef.current().then((created) => {
+                  if (!created) setLaunchSettled(true);
+                });
+              } else {
+                // Either a note is on screen, or the database is genuinely
+                // empty and the one auto-create this launch gets has already
+                // been spent -- nothing further is coming either way.
+                setLaunchSettled(true);
               }
             },
             onError: (err) => {
               console.error('PowerSync watch error:', err);
+              setLaunchSettled(true);
             },
           },
           { signal: abortController.signal }
         );
       } catch (err) {
         console.error('Failed to initialize PowerSync local database:', err);
+        setLaunchSettled(true);
       }
     }
 
     setupDatabase();
 
+    // Last resort. Everything above releases the gate on both its success and
+    // its failure paths, but the gate sits in front of the entire app, so a
+    // path nobody anticipated must not be able to leave the user staring at a
+    // spinner forever. Better to show an empty list than nothing at all.
+    const failsafe = setTimeout(() => setLaunchSettled(true), LAUNCH_GATE_TIMEOUT_MS);
+
     return () => {
+      clearTimeout(failsafe);
       abortController.abort();
     };
   }, []);
@@ -388,6 +435,11 @@ export default function NotesLayout() {
       }
     };
   }, [selectedNote?.id]);
+
+  // Every hook is above this line, and must stay there: the watch query, the
+  // ui_state writes and the AppState handlers all have to keep running while
+  // the gate is up. It is the panes that wait, not the work.
+  if (!launchSettled) return <BootSpinner />;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND[scheme] }}>

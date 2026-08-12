@@ -32,7 +32,11 @@ export interface NotesState {
   notes: Note[];
   selectedNoteId: string | null;
   searchQuery: string;
-  isLoading: boolean;
+
+  // No loading flag here on purpose. There used to be one, dispatched by
+  // nobody and read by nobody. Whether the app is still settling on what to
+  // show at launch is NotesLayout's `launchSettled`, because it depends on
+  // more than this state -- see the comment there.
 
   // Whether the "open something on launch" rule has already had its turn.
   // Without this the rule re-fires on every watch tick, so going back to the
@@ -44,8 +48,7 @@ export interface NotesState {
 export type NotesAction =
   | { type: 'SET_NOTES'; payload: { notes: Note[] } }
   | { type: 'SELECT_NOTE'; payload: { id: string | null } }
-  | { type: 'SET_SEARCH_QUERY'; payload: { query: string } }
-  | { type: 'SET_LOADING'; payload: { isLoading: boolean } };
+  | { type: 'SET_SEARCH_QUERY'; payload: { query: string } };
 
 // =============================================================================
 // HELPER FUNCTIONS
