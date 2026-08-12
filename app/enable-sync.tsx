@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Text as RNText, ActivityIndicator } from 'react-native';
+import { Text as RNText, ActivityIndicator, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { OtpInput } from 'react-native-otp-entry';
 import { useRouter } from 'expo-router';
@@ -147,21 +147,37 @@ export default function EnableSyncScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND[scheme] }}>
-      {/* SettingsHeader rather than a hand-rolled row, so this sheet's title
-          sits at the same left edge and weight as Settings and Manage
-          Account. The header was the last thing on this screen still drawing
-          its own chrome. */}
-      <SettingsHeader
-        title="Sync Account"
-        icon={UserRound}
-        right={
-          <Pressable onPress={dismiss} className="p-1.5 rounded-full active:bg-muted">
-            <Icon as={X} className="text-muted-foreground w-5 h-5" />
-          </Pressable>
-        }
-      />
+      {/* px-6 pt-6 mirrors the p-6 that gluestack's ModalContent applies to
+          Settings and Manage Account. This screen is a ROUTE, not a modal, so
+          it never got that inset for free -- which is the whole reason its
+          content sat 24pt further left than the two sheets it sits beside,
+          even though all three ask for px-5 internally. The real inset on a
+          sheet is 24 + 20 = 44, so this screen has to say the 24 out loud.
 
-      <VStack className="flex-1 px-6 pt-4 gap-4">
+          Kept as a wrapper rather than folded into one px-11 so the number
+          keeps its meaning: 24 is "what the modal chrome would have added",
+          20 is "the settings inset", and if gluestack's padding ever changes
+          it is obvious which half to follow. */}
+      <View className="flex-1 px-6 pt-6">
+        {/* SettingsHeader rather than a hand-rolled row, so this sheet's title
+            sits at the same left edge and weight as Settings and Manage
+            Account. The header was the last thing on this screen still
+            drawing its own chrome. */}
+        <SettingsHeader
+          title="Sync Account"
+          icon={UserRound}
+          right={
+            <Pressable onPress={dismiss} className="p-1.5 rounded-full active:bg-muted">
+              <Icon as={X} className="text-muted-foreground w-5 h-5" />
+            </Pressable>
+          }
+        />
+
+        {/* px-5 pt-4, the same inset Settings' scroll area uses. This was
+            px-6, which is only 4pt out -- but it was 4pt against a header
+            sitting at px-5, so the title and the field below it started at
+            different left edges on the one screen. */}
+        <VStack className="flex-1 px-5 pt-4 gap-4">
         {step === 'email' && (
           <>
             <RNText className="text-sm text-muted-foreground">
@@ -266,7 +282,8 @@ export default function EnableSyncScreen() {
         )}
 
         {error && <RNText className="text-xs text-destructive">{error}</RNText>}
-      </VStack>
+        </VStack>
+      </View>
     </SafeAreaView>
   );
 }
