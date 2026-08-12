@@ -1,6 +1,7 @@
 import { getPowerSync } from '@/lib/powersync/db';
 import { supabase } from '@/lib/supabase/client';
 import { clearNoteCryptoCache, tryDecryptField } from '@/lib/crypto/noteCrypto';
+import { clearRecoveryState } from '@/lib/crypto/vault';
 
 export interface PendingWrite {
   noteId: string;
@@ -84,17 +85,43 @@ export async function logout(): Promise<void> {
   // exists to prevent.
   clearNoteCryptoCache();
 
-  // A global sign-out revokes the refresh token server-side, which is the
-  // stronger guarantee and the default. But it needs the network, and
-  // logging out offline is a completely reasonable thing to do -- observed
-  // live: the local database was already cleared, then signOut() threw on
-  // the network call, leaving the app showing a signed-in avatar with no
-  // data behind it. Falling back to a local-scope sign-out keeps the UI
-  // honest about what already happened. The session on this device is gone
-  // either way; only the server-side revocation is deferred, and the token
-  // it leaves behind is one this device has already discarded.
-  const { error } = await supabase.auth.signOut();
-  if (error) {
-    await supabase.auth.signOut({ scope: 'local' });
-  }
+  // The recovery code is the third thing that outlives the account if nobody
+  // clears it -- and the one whose survival did real damage. It lives in the
+  // keychain, which disconnectAndClear() has no reach into, so it sat there
+  // after sign-out and made the NEXT account's sign-in skip issuing a code of
+  // its own. See clearRecoveryState for what is deliberately left behind: the
+  // device key and the database seed, without which this device's remaining
+  // local notes would be unreadable.
+  await clearRecoveryState();
+
+  // scope: 'local' -- sign out THIS device, explicitly, rather than taking
+  // supabase-js's default.
+  //
+  // That default is 'global', which revokes the account's refresh token
+  // server-side, on every device. Observed live: logging out on the phone
+  // silently signed out the tablet. Not immediately, which is what made it
+  // confusing to place -- the other device's access token stays valid until
+  // it next refreshes, so it carried on working and then dropped out the
+  // moment something made a network call (opening Manage Account reads the
+  // profile, which is enough). And its notes survived, because that device
+  // never ran this function; it only saw a SIGNED_OUT event, which mirrors
+  // state and never clears local data. "Signed out but my notes are still
+  // here" is exactly the fingerprint of a revocation that came from
+  // somewhere else.
+  //
+  // Little is given up by scoping this locally. The refresh token stops
+  // being revoked, but it only ever existed in this device's storage, which
+  // signOut deletes as part of this same call -- so there is no surviving
+  // copy for the revocation to protect against. Signing out every device at
+  // once is a different feature (for a lost phone) and belongs behind its
+  // own deliberate action, not attached to the ordinary logout button.
+  //
+  // It also removes a failure mode rather than adding one: a global sign-out
+  // needs the network, and logging out offline is completely reasonable.
+  // This used to be a global call with a local-scope retry in its error
+  // path, because the network call threw after the local database had
+  // already been cleared and left the app showing a signed-in avatar with no
+  // data behind it. A local sign-out has nothing to fail at, so the fallback
+  // ladder is gone.
+  await supabase.auth.signOut({ scope: 'local' });
 }
