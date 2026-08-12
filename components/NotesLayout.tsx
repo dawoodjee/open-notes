@@ -21,6 +21,7 @@ import {
   trashNoteInDB,
   getUiState,
   saveUiState,
+  isPowerSyncReady,
 } from '@/lib/powersync/db';
 import { isBlankNote } from '@/types/note';
 import { BootSpinner } from '@/components/BootSpinner';
@@ -37,7 +38,7 @@ const LAUNCH_GATE_TIMEOUT_MS = 3000;
 // =============================================================================
 
 export default function NotesLayout() {
-  const { session } = useAuth();
+  const { session, isLoading: authLoading } = useAuth();
   const { scheme } = useTheme();
   const [state, dispatch] = useReducer(notesReducer, initialNotesState);
   const { notes, selectedNoteId, searchQuery } = state;
@@ -73,6 +74,12 @@ export default function NotesLayout() {
   // Whether the empty-database fallback has already fired this launch.
   const hasAutoCreatedRef = useRef<boolean>(false);
 
+  // The auth state, mirrored where a callback can read it. The watch callback
+  // is registered once and would otherwise capture the first render's values
+  // forever -- the same reason createNoteRef exists below.
+  const authRef = useRef({ isLoading: true, signedIn: false });
+  authRef.current = { isLoading: authLoading, signedIn: session !== null };
+
   /**
    * False until this launch has decided what to show, which is not the same as
    * "the database has answered".
@@ -90,6 +97,11 @@ export default function NotesLayout() {
    */
   const [launchSettled, setLaunchSettled] = useState(false);
 
+  // Whether initPowerSync() has finished. State, not a ref, because the
+  // auto-create effect below has to re-run the moment it flips -- getPowerSync()
+  // throws until then, and the effect can otherwise land on either side of it.
+  const [dbReady, setDbReady] = useState(false);
+
   const handleCreateNote = useCallback(async () => {
     try {
       const newNote = await createNoteInDB();
@@ -106,6 +118,101 @@ export default function NotesLayout() {
   const createNoteRef = useRef(handleCreateNote);
   createNoteRef.current = handleCreateNote;
 
+  /**
+   * Does an empty notes table actually mean "this user has no notes"?
+   *
+   * It very often does not, and assuming otherwise is what manufactured blank
+   * notes. initPowerSync() only opens the local file; connect() happens later
+   * and elsewhere (AuthContext's claimAndConnect). So on any launch where local
+   * storage starts empty -- a fresh install, or the first launch after a
+   * sign-out cleared it -- the watch below necessarily fires on an empty table
+   * BEFORE a single row has come down from the server. Treating that as "no
+   * notes" created a note, and sync then uploaded it: one permanent blank note
+   * per such launch, on every device the account touches.
+   *
+   * Three states, and only the last two can be trusted:
+   *   auth still resolving -> answer nothing yet. Session restore is async, so
+   *                           a signed-in user looks signed out for a moment.
+   *   signed out           -> local SQLite IS the whole truth. Nothing is
+   *                           coming, so an empty table is real.
+   *   signed in            -> wait for the first sync to complete. hasSynced
+   *                           is PowerSync's own "I have caught up" flag.
+   */
+  const emptyDatabaseIsTrustworthy = useCallback((): boolean => {
+    if (!isPowerSyncReady()) return false;
+    if (authRef.current.isLoading) return false;
+    if (!authRef.current.signedIn) return true;
+    return getPowerSync().currentStatus.hasSynced === true;
+  }, []);
+
+  /**
+   * Land the user in a note when there is genuinely nothing to show.
+   *
+   * Called from three places, because the question "is the database really
+   * empty?" can become answerable at three different moments: when notes
+   * arrive (the watch), when auth resolves, and when the first sync completes.
+   * Whichever gets there first wins; hasAutoCreatedRef makes the other two
+   * no-ops.
+   *
+   * That ref never resets, and it is not optional: discardIfEmpty deletes the
+   * note you leave, so without it every return to the list would delete this
+   * note, observe an empty database, and create another one -- forever. Once
+   * per launch means the user can still genuinely reach an empty list by
+   * trashing their last note by hand.
+   */
+  const autoCreateIfTrulyEmpty = useCallback(async () => {
+    if (hasAutoCreatedRef.current) return;
+    if (!emptyDatabaseIsTrustworthy()) return;
+
+    // Re-read from SQLite rather than trusting a count passed in from a
+    // caller: the two async callers can arrive long after their snapshot was
+    // taken, and the whole point of this function is not to act on a stale
+    // reading of "empty".
+    const row = await getPowerSync().get<{ count: number }>(
+      'SELECT count(*) as count FROM notes WHERE is_trashed = 0'
+    );
+    if (row.count > 0) {
+      setLaunchSettled(true);
+      return;
+    }
+
+    hasAutoCreatedRef.current = true;
+    // Stay gated across the insert: the note this creates is what the user is
+    // meant to land in, and it only reaches `notes` on a later tick. Releasing
+    // here would paint the empty list for exactly one INSERT round-trip. If the
+    // insert fails there is nothing left to wait for, so release.
+    const created = await createNoteRef.current();
+    if (!created) setLaunchSettled(true);
+  }, [emptyDatabaseIsTrustworthy]);
+
+  // Re-ask once auth has resolved, and again once the first sync lands. Both
+  // are moments the watch cannot observe on its own: an account that genuinely
+  // has no notes produces no rows, so no further watch tick ever arrives, and
+  // without this the launch would sit on the gate until the failsafe fires.
+  useEffect(() => {
+    // dbReady rather than isPowerSyncReady() alone: this effect has to RE-RUN
+    // when the database finishes opening, and only a state value does that.
+    if (!dbReady || authLoading) return;
+    void autoCreateIfTrulyEmpty().catch((err) =>
+      console.error('Auto-create check failed:', err)
+    );
+
+    if (!session) return;
+    const ac = new AbortController();
+    void getPowerSync()
+      .waitForFirstSync(ac.signal)
+      .then(() => {
+        if (ac.signal.aborted) return;
+        return autoCreateIfTrulyEmpty();
+      })
+      .catch(() => {
+        // A sync that never completes -- offline, or blocked -- must not hold
+        // the launch gate. Showing an honest empty list beats inventing a note.
+        setLaunchSettled(true);
+      });
+    return () => ac.abort();
+  }, [dbReady, authLoading, session, autoCreateIfTrulyEmpty]);
+
   // PowerSync local SQLite init + live watch query.
   // The watch callback is the *only* place notes state gets set — the reducer
   // just mirrors whatever SQLite currently reports, it doesn't own the data.
@@ -115,6 +222,7 @@ export default function NotesLayout() {
     async function setupDatabase() {
       try {
         await initPowerSync();
+        setDbReady(true);
 
         // Restore last session's open note before notes arrive -- but only
         // after confirming it still exists. A logout (or any
@@ -144,32 +252,25 @@ export default function NotesLayout() {
 
               // Landing on an empty database means landing on a blank list
               // with nothing to read and nothing to do. Open a note instead,
-              // the way Apple Notes does.
-              //
-              // Guarded by a ref that never resets, and that guard is not
-              // optional: discardIfEmpty deletes the note you leave, so
-              // without it every return to the list would delete this note,
-              // observe an empty database, and create another one -- forever.
-              // Firing once per launch means the user can genuinely get to an
-              // empty list if they trash their last note by hand.
+              // the way Apple Notes does -- but only once it is clear the
+              // database really is empty. See autoCreateIfTrulyEmpty.
               const activeCount = notes.filter((n) => !n.isTrashed).length;
 
-              if (activeCount === 0 && !hasAutoCreatedRef.current) {
-                hasAutoCreatedRef.current = true;
-                // Stay gated across the insert: the note this creates is what
-                // the user is meant to land in, and it only reaches `notes` on
-                // a later tick. Releasing here would paint the empty list for
-                // exactly one INSERT round-trip. If the insert fails there is
-                // nothing left to wait for, so release and show the list.
-                void createNoteRef.current().then((created) => {
-                  if (!created) setLaunchSettled(true);
-                });
-              } else {
-                // Either a note is on screen, or the database is genuinely
-                // empty and the one auto-create this launch gets has already
-                // been spent -- nothing further is coming either way.
+              if (activeCount > 0 || hasAutoCreatedRef.current) {
+                // Either a note is on screen, or the one auto-create this
+                // launch gets has already been spent -- nothing further is
+                // coming either way.
                 setLaunchSettled(true);
+                return;
               }
+
+              // Empty, and nothing created yet. This either creates the
+              // landing note or declines because the server hasn't been heard
+              // from; declining deliberately leaves the gate held, and the
+              // failsafe below covers a sync that never lands.
+              void autoCreateIfTrulyEmpty().catch((err) =>
+                console.error('Auto-create check failed:', err)
+              );
             },
             onError: (err) => {
               console.error('PowerSync watch error:', err);
@@ -196,7 +297,7 @@ export default function NotesLayout() {
       clearTimeout(failsafe);
       abortController.abort();
     };
-  }, []);
+  }, [autoCreateIfTrulyEmpty]);
 
   // Timer ref to hold pending SQLite writes, alongside the write it would
   // have performed. Keeping the payload lets a blur flush it immediately
