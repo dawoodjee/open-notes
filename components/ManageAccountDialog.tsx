@@ -1,12 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Text as RNText } from 'react-native';
-import {
-  Modal,
-  ModalBackdrop,
-  ModalContent,
-  ModalHeader,
-  ModalBody,
-} from '@/components/ui/modal';
+import { Alert, ScrollView, Text as RNText, View } from 'react-native';
+import { Modal, ModalBackdrop, ModalContent } from '@/components/ui/modal';
 import { Pressable } from '@/components/ui/pressable';
 import { VStack } from '@/components/ui/vstack';
 import { HStack } from '@/components/ui/hstack';
@@ -14,7 +8,7 @@ import { Icon } from '@/components/ui/icon';
 import { X, LogOut, UserRound } from 'lucide-react-native';
 
 import AccountField, { FieldTone } from '@/components/AccountField';
-import { SettingsGroup, SettingsRow } from '@/components/ui/settings-group';
+import { SettingsGroup, SettingsHeader, SettingsRow } from '@/components/ui/settings-group';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/lib/auth/useProfile';
@@ -510,37 +504,39 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
     // Full-bleed sheet: full width, anchored to the bottom edge, 4/5 of the
     // screen tall, square bottom corners so it reads as attached to the
     // screen rather than floating. mt-auto is what pushes it down inside the
-    // modal's centering container. ROUNDED_LG is shared with every button
-    // below so the sheet and its controls agree on one radius.
-    // The pb-* below is the gap under the Log Out button -- the sheet's bottom
-    // padding is what sits beneath the pinned button, so that one value is the
-    // button's height off the bottom edge.
+    // modal's centering container.
+    //
+    // The shell carries NO horizontal padding, exactly as SettingsDialog's
+    // does not. Padding lives on the header and the scroll area instead, and
+    // that is the whole reason the three sheets now line up: when the shell
+    // pads, the header inherits one inset and the scroll content another, and
+    // the two drift apart the moment either is touched. One owner per edge.
     <Modal isOpen={isOpen} onClose={handleAttemptClose} size="full">
       <ModalBackdrop />
-      <ModalContent className="w-full max-w-full h-4/5 mt-auto mb-0 mx-0 rounded-t-2xl rounded-b-none border-0 px-5 pb-13">
-        <ModalHeader>
-          <HStack className="items-center">
-            <Icon as={UserRound} className="w-5 h-5 mr-2 text-muted-foreground" />
-            <RNText className="text-base font-semibold text-foreground">Manage Account</RNText>
-          </HStack>
-          {/* A plain Pressable, not ModalCloseButton: that one closes through
-              the modal's own context and would bypass the required-field
-              check, so the X and the backdrop would disagree. */}
-          <Pressable onPress={handleAttemptClose} className="p-1 -mr-1">
-            <Icon as={X} className="text-muted-foreground w-5 h-5" />
-          </Pressable>
-        </ModalHeader>
+      <ModalContent className="w-full max-w-full h-4/5 mt-auto mb-0 mx-0 rounded-t-2xl rounded-b-none border-0 pb-8 bg-background">
+        {/* The same primitive Settings uses, rather than a hand-rolled
+            ModalHeader: gluestack's ModalHeader brings its own padding, which
+            is what made this title sit at a different inset and size from the
+            one next door. */}
+        <SettingsHeader
+          title="Manage Account"
+          icon={UserRound}
+          right={
+            // A plain Pressable, not ModalCloseButton: that one closes through
+            // the modal's own context and would bypass the required-field
+            // check, so the X and the backdrop would disagree.
+            <Pressable onPress={handleAttemptClose} className="p-1.5 rounded-full active:bg-muted">
+              <Icon as={X} className="text-muted-foreground w-5 h-5" />
+            </Pressable>
+          }
+        />
 
-        {/* flex-1 is what lets the Log Out button's mt-auto push it to the
-            bottom of the sheet instead of sitting directly under the last
-            row with dead space beneath it. */}
-        {/* Note that gap-3 here does NOT space these children apart, however
-            much it looks like it should: ModalBody is a ScrollView, NativeWind
+        {/* A plain ScrollView rather than ModalBody, for the reason spelled
+            out in SettingsDialog: ModalBody is itself a ScrollView, NativeWind
             maps className to the component's own style, and a ScrollView lays
-            its children out in an internal content container rather than in
-            itself. The spacing you see comes from the VStacks below. Left in
-            place only because pt/pb do apply. */}
-        <ModalBody className="flex-1 gap-3 pt-4 pb-6">
+            its children out in an internal content container -- so gap and
+            padding set there never reach the content. */}
+        <ScrollView className="flex-1 px-5 pt-4 bg-background">
           {profileError && (
             <HStack className="items-center justify-between bg-red-50 rounded-2xl px-4 py-3">
               <RNText className="text-xs text-destructive flex-1 pr-2">
@@ -667,24 +663,34 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
             <RNText className="text-xs text-destructive px-1 -mt-4 mb-4">{identityError}</RNText>
           )}
 
-        </ModalBody>
+          {/* Now a child of the scroll content, directly below the sign-in
+              methods, rather than pinned to the bottom of the sheet as a
+              sibling of the scroll area. Pinned, it sat at a distance that
+              changed with the sheet's height and read as belonging to the
+              sheet rather than to the account; here it belongs to the list it
+              follows and scrolls with it.
 
-        {/* Deliberately outside ModalBody. ModalBody is a ScrollView, and a
-            child's mt-auto can't stretch inside one -- the button ended up
-            floating directly under the last row with dead space beneath it.
-            Sitting here instead, as a sibling of the scroll area, pins it to
-            the bottom of the sheet whatever the content height.
+              mt-32 is the requested ~2.5x its own height: py-3.5 is 14pt top
+              and bottom around a text-base line box of 24, so the button is
+              ~52 tall and 2.5x lands at 130 -- mt-32 (128) is the nearest step
+              on the scale. Written as a scale step rather than an arbitrary
+              value so it stays on the same rhythm as everything else.
 
-            Primary button shape (solid fill, same radius as the sheet and
-            every other control) in a warning colour -- it reads as the main
-            action without pretending to be a safe one. */}
-        <Pressable
-          onPress={handleSignOut}
-          className="w-4/5 self-center py-3.5 rounded-2xl bg-red-500 flex-row items-center justify-center gap-2 active:bg-red-700"
-        >
-          <Icon as={LogOut} className="text-white w-4 h-4" />
-          <RNText className="text-base font-semibold text-white">Log Out</RNText>
-        </Pressable>
+              Primary button shape (solid fill, same radius as the sheet and
+              every other control) in a warning colour -- it reads as the main
+              action without pretending to be a safe one. */}
+          <Pressable
+            onPress={handleSignOut}
+            className="w-4/5 self-center mt-32 py-3.5 rounded-2xl bg-red-500 flex-row items-center justify-center gap-2 active:bg-red-700"
+          >
+            <Icon as={LogOut} className="text-white w-4 h-4" />
+            <RNText className="text-base font-semibold text-white">Log Out</RNText>
+          </Pressable>
+
+          {/* Matches the spacer Settings ends on, so the last control clears
+              the sheet's bottom edge when scrolled all the way down. */}
+          <View className="h-8" />
+        </ScrollView>
       </ModalContent>
     </Modal>
   );
