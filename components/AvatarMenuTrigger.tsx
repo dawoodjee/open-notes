@@ -40,6 +40,9 @@ export default function AvatarMenuTrigger({ className }: AvatarMenuTriggerProps)
       <Menu
         placement="bottom right"
         offset={8}
+        // Same grouped-card shape as the note menu and the settings sheet --
+        // see the note on UIComponentsMenu in NoteEditorPane.
+        className="rounded-2xl p-0 overflow-hidden min-w-[220px]"
         trigger={({ ...triggerProps }) => (
           <Pressable
             {...triggerProps}
@@ -59,17 +62,17 @@ export default function AvatarMenuTrigger({ className }: AvatarMenuTriggerProps)
           key="settings"
           textValue="Settings"
           onPress={() => setIsSettingsOpen(true)}
-          className="p-2.5 flex-row items-center gap-2"
+          className="px-4 py-3 flex-row items-center gap-3"
         >
-          <Icon as={Settings} className="text-muted-foreground w-4 h-4" />
-          <MenuItemLabel className="text-sm font-medium text-foreground">Settings</MenuItemLabel>
+          <Icon as={Settings} className="text-muted-foreground w-[18px] h-[18px]" />
+          <MenuItemLabel className="text-base text-foreground">Settings</MenuItemLabel>
         </MenuItem>
 
         <MenuSeparator />
 
         <MenuItem
           key="identity"
-          textValue={isLoggedIn ? 'Manage Account' : 'Enable Sync'}
+          textValue={isLoggedIn ? 'Manage Account' : 'Manage Sync'}
           onPress={() => {
             if (isLoggedIn) {
               setIsManageAccountOpen(true);
@@ -77,16 +80,16 @@ export default function AvatarMenuTrigger({ className }: AvatarMenuTriggerProps)
               router.push('/enable-sync');
             }
           }}
-          className="p-2.5 flex-row items-center gap-2"
+          className="px-4 py-3 flex-row items-center gap-3"
         >
           <Icon
             as={CircleUserRound}
-            className={`w-4 h-4 ${isLoggedIn ? 'text-muted-foreground' : 'text-pink-600'}`}
+            className={`w-[18px] h-[18px] ${isLoggedIn ? "text-muted-foreground" : "text-pink-600"}`}
           />
           <MenuItemLabel
-            className={`text-sm font-medium ${isLoggedIn ? 'text-foreground' : 'text-pink-600'}`}
+            className={`text-base ${isLoggedIn ? "text-foreground" : "text-pink-600"}`}
           >
-            {isLoggedIn ? 'Manage Account' : 'Enable Sync'}
+            {isLoggedIn ? 'Manage Account' : 'Manage Sync'}
           </MenuItemLabel>
         </MenuItem>
       </Menu>

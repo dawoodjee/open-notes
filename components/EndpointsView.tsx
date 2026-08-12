@@ -157,17 +157,20 @@ function EndpointRow({
 
   return (
     <View className="px-4 py-3">
-      <View className="flex-row items-center justify-end mb-2">
-        <View className="flex-row items-center gap-3">
-          {endpoint.confirmedAt ? (
-            <RNText className="text-[10px] text-muted-foreground uppercase">Approved</RNText>
-          ) : (
-            <RNText className="text-[10px] text-amber-500 uppercase">Not approved</RNText>
-          )}
-          <Pressable onPress={onDelete} className="p-1 active:opacity-60">
-            <Icon as={Trash2} className="w-4 h-4 text-destructive/70" />
-          </Pressable>
-        </View>
+      {/* justify-between, not justify-end. This row used to push everything to
+          the right against an empty left half, which left it as the one header
+          in the sheet with no left edge to line up with -- the status now
+          starts where every row label does, and only the destructive control
+          sits opposite it. */}
+      <View className="flex-row items-center justify-between mb-2">
+        {endpoint.confirmedAt ? (
+          <RNText className="text-[10px] text-muted-foreground uppercase">Approved</RNText>
+        ) : (
+          <RNText className="text-[10px] text-amber-500 uppercase">Not approved</RNText>
+        )}
+        <Pressable onPress={onDelete} className="p-1 -mr-1 active:opacity-60">
+          <Icon as={Trash2} className="w-4 h-4 text-destructive/70" />
+        </Pressable>
       </View>
 
       <Field value={name} onChangeText={setName} onBlur={commit} placeholder="Untitled" />

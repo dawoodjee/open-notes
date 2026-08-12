@@ -17,7 +17,7 @@ import { BACKGROUND, useTheme } from '@/contexts/ThemeContext';
 
 type Step = 'email' | 'code';
 
-// Reached only by tapping "Enable Sync" in the avatar menu -- never shown
+// Reached only by tapping "Manage Sync" in the avatar menu -- never shown
 // automatically on launch. Email OTP entry (two steps: request code, verify
 // code) plus Google. Apple omitted for now -- no real credentials yet
 // (Stage 4 left it disabled), and a dead button would be untested UI debt.
@@ -114,7 +114,7 @@ export default function EnableSyncScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND[scheme] }}>
       <HStack className="justify-between items-center px-4 py-3">
-        <RNText className="text-lg font-semibold text-foreground">Enable Sync</RNText>
+        <RNText className="text-lg font-semibold text-foreground">Manage Sync</RNText>
         <Pressable onPress={dismiss} className="p-1.5 rounded-full active:bg-muted">
           <Icon as={X} className="text-muted-foreground w-5 h-5" />
         </Pressable>

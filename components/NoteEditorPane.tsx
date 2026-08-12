@@ -14,6 +14,7 @@ import {
   Menu as UIComponentsMenu,
   MenuItem,
   MenuItemLabel,
+  MenuSeparator,
 } from '@/components/ui/menu';
 
 // Lucide Icons
@@ -99,6 +100,13 @@ export default function NoteEditorPane({
   const keyboardShown = useKeyboardShown();
   const editorBottomInset = keyboardShown ? 0 : insets.bottom;
 
+  // Named here rather than inlined twice, because `textValue` (what a screen
+  // reader and react-aria's typeahead use) and the visible label must not be
+  // able to drift apart.
+  const visibilityLabel = selectedNote?.isHiddenFromApi
+    ? 'Invisible to Apps'
+    : 'Visible to Apps';
+
   // Mobile edge-swipe-back, mirroring iOS's native interactive-pop gesture --
   // there's no real navigation stack here to provide that for free (list and
   // editor are conditionally-rendered panes in one screen, not routes).
@@ -163,6 +171,13 @@ export default function NoteEditorPane({
               <UIComponentsMenu
                 placement="bottom right"
                 offset={8}
+                // Shaped like a settings group rather than a generic dropdown:
+                // one rounded card, rows running its full width, hairlines
+                // between them and nothing after the last. `p-0` matters --
+                // the default padding insets the rows so their press
+                // highlight stops short of the card edge, which is the tell of
+                // a menu that is not native. See components/ui/settings-group.
+                className="rounded-2xl p-0 overflow-hidden min-w-[220px]"
                 // Disabling lives on the Menu, not the item: this is a
                 // react-aria collection, so `disabledKeys` is what actually
                 // makes a row non-interactive, and the item style already
@@ -177,42 +192,54 @@ export default function NoteEditorPane({
                   </Pressable>
                 )}
               >
-                {/* Visible to Apps -- only meaningful while the API gate is
-                    open, so it is inert when it is not. The label stays short
-                    in both states: the greyed, unresponsive row already says
-                    "not available", and a row that grows an explanatory clause
-                    only when disabled reflows the menu and reads as an error.
+                {/* The label states what the note IS, not what tapping will
+                    do, and flips with the note: "Visible to Apps" when it is,
+                    "Invisible to Apps" when it is not. The Eye/EyeOff icon
+                    already worked that way, so a fixed label was the odd one
+                    out -- it left the icon as the only thing carrying the
+                    state, on a row people read rather than decode.
+
+                    It deliberately does NOT flip on the gate being shut. That
+                    is a different fact -- "nothing can read any note right
+                    now" -- and it already has its own treatment: the row is
+                    greyed and inert. Restating it in the label would reflow
+                    the menu on a change that is not about this note.
+
                     Kept above Delete because it is the reversible one. */}
                 <MenuItem
                   key="api-visibility"
-                  textValue="Visible to Apps"
+                  textValue={visibilityLabel}
                   onPress={() => {
                     if (!apiGateOpen) return;
                     onSetHiddenFromApi(selectedNote.id, !selectedNote.isHiddenFromApi);
                   }}
-                  className="p-2.5 flex-row items-center gap-2"
+                  className="px-4 py-3 flex-row items-center gap-3"
                 >
                   <Icon
                     as={selectedNote.isHiddenFromApi ? EyeOff : Eye}
-                    className={`w-4 h-4 ${apiGateOpen ? 'text-muted-foreground' : 'text-muted-foreground/60'}`}
+                    className={`w-[18px] h-[18px] ${
+                      apiGateOpen ? 'text-muted-foreground' : 'text-muted-foreground/50'
+                    }`}
                   />
                   <MenuItemLabel
-                    className={`text-sm font-medium ${
+                    className={`text-base ${
                       apiGateOpen ? 'text-foreground' : 'text-muted-foreground'
                     }`}
                   >
-                    Visible to Apps
+                    {visibilityLabel}
                   </MenuItemLabel>
                 </MenuItem>
+
+                <MenuSeparator />
 
                 <MenuItem
                   key="trash"
                   textValue="Delete"
                   onPress={() => onTrashNote(selectedNote.id)}
-                  className="p-2.5 flex-row items-center gap-2"
+                  className="px-4 py-3 flex-row items-center gap-3"
                 >
-                  <Icon as={Trash2} className="text-destructive w-4 h-4" />
-                  <MenuItemLabel className="text-sm font-medium text-destructive">
+                  <Icon as={Trash2} className="text-destructive w-[18px] h-[18px]" />
+                  <MenuItemLabel className="text-base text-destructive">
                     Delete
                   </MenuItemLabel>
                 </MenuItem>
