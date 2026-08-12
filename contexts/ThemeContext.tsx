@@ -1,7 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { Appearance, ColorSchemeName, useColorScheme } from 'react-native';
+import { Appearance, ColorSchemeName, Platform, useColorScheme } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as SystemUI from 'expo-system-ui';
+import * as NavigationBar from 'expo-navigation-bar';
 
 /**
  * Which appearance the user picked, and what that resolves to right now.
@@ -74,6 +75,24 @@ const BULLET_KEY = 'notes.bulletStyle.v1';
  */
 export const BACKGROUND = { light: '#ffffff', dark: '#0a0a0a' } as const;
 
+/**
+ * The launch screen's background, which is NOT the app's.
+ *
+ * These two values are owned by the expo-splash-screen plugin block in
+ * app.json and baked into the native projects at prebuild time -- iOS gets a
+ * SplashScreenBackground.colorset, Android gets values/colors.xml and
+ * values-night/colors.xml. Nothing reads app.json at runtime, so the only way
+ * for JavaScript to paint the same colour is to repeat it here.
+ *
+ * Duplicated by necessity, therefore, and the duplication has to be maintained
+ * by hand: change one and the boot screen stops matching the frame before it,
+ * which is the exact seam this constant exists to hide.
+ *
+ * Light is deliberately the brand cream rather than the app's white -- the step
+ * to white happens later, when the note list arrives.
+ */
+export const SPLASH_BACKGROUND = { light: '#f5ede4', dark: '#0a0a0a' } as const;
+
 interface ThemeContextValue {
   preference: ThemePreference;
   /** What the preference actually resolves to right now. 'system' follows the
@@ -83,6 +102,10 @@ interface ThemeContextValue {
   setPreference: (next: ThemePreference) => Promise<void>;
   bulletStyle: BulletStyle;
   setBulletStyle: (next: BulletStyle) => Promise<void>;
+  /** Has the stored preference been read yet? Only the native splash cares:
+   *  it stays up until this flips, so a dark launch never paints a light frame
+   *  while SecureStore is still being read. See app/_layout.tsx. */
+  isReady: boolean;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -103,6 +126,7 @@ function toColorScheme(preference: ThemePreference): ColorSchemeName {
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [preference, setPreferenceState] = useState<ThemePreference>('system');
   const [bulletStyle, setBulletStyleState] = useState<BulletStyle>('dash');
+  const [isReady, setIsReady] = useState(false);
   const deviceScheme = useColorScheme();
 
   useEffect(() => {
@@ -124,6 +148,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // Same reasoning: 'dash' is a perfectly good answer.
       }
+      // Outside both catches on purpose: "ready" means the read has been
+      // ATTEMPTED, not that it succeeded. A failed read still settles the
+      // appearance -- on the default -- and leaving the splash up over a
+      // decision that has already been made would hang the launch.
+      setIsReady(true);
     })();
   }, []);
 
@@ -139,6 +168,21 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // amount of styling inside the app can reach.
   useEffect(() => {
     void SystemUI.setBackgroundColorAsync(BACKGROUND[scheme]);
+  }, [scheme]);
+
+  // Android's navigation bar buttons, which are a SEPARATE system flag from
+  // everything above and were the one piece never being updated -- switching
+  // theme left the old icon colour behind while other apps flipped correctly.
+  //
+  // Only the button style is set, and that is not an omission. With
+  // edgeToEdgeEnabled the platform owns the bar itself: it is transparent, our
+  // content draws behind it, and setBackgroundColorAsync/setPositionAsync are
+  // inert there. What is left to control is whether the icons are drawn light
+  // or dark -- and note the value is the opposite of the scheme's name, because
+  // it describes the BUTTONS, not the background they sit on.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    void NavigationBar.setButtonStyleAsync(scheme === 'dark' ? 'light' : 'dark');
   }, [scheme]);
 
   const setPreference = useCallback(async (next: ThemePreference) => {
@@ -161,7 +205,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeContext.Provider
-      value={{ preference, scheme, setPreference, bulletStyle, setBulletStyle }}
+      value={{ preference, scheme, setPreference, bulletStyle, setBulletStyle, isReady }}
     >
       {children}
     </ThemeContext.Provider>

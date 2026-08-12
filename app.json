@@ -10,7 +10,8 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.adawoodjee.notes"
+      "bundleIdentifier": "com.adawoodjee.notes",
+      "appleTeamId": "CSQF3NV289"
     },
     "android": {
       "adaptiveIcon": {
@@ -32,7 +33,7 @@
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-light.png",
-          "imageWidth": 360,
+          "imageWidth": 288,
           "resizeMode": "contain",
           "backgroundColor": "#f5ede4",
           "dark": {
