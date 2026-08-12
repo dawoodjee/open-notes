@@ -166,10 +166,10 @@ console.log('\n--- recovery code (HKDF) ---');
   const code = generateRecoveryCode();
 
   check('formatted as twelve dashed words', /^[a-z]+(-[a-z]+){11}$/.test(code), code);
-  check('recognised as well-formed', isWellFormedRecoveryCode(code));
+  check('recognised as well-formed', isWellFormedRecoveryCode(code, 'words12'));
   check(
     '132 bits of entropy',
-    normalizeRecoveryCode(code).split('-').length * BITS_PER_WORD === 132
+    normalizeRecoveryCode(code, 'words12').split('-').length * BITS_PER_WORD === 132
   );
   check('every word comes from the list', code.split('-').every((w) => WORD_INDEX.has(w)));
 

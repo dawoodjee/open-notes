@@ -293,11 +293,15 @@ export function generateLegacyRecoveryCode(): string {
  *                capitals and a trailing separator all land on one string.
  * crockford25 -- upper case, non-alphanumerics dropped, and the classic
  *                confusions folded back (I and L are 1, O is zero).
+ *
+ * `format` is REQUIRED, for the same reason it is required on wrap and unwrap
+ * above: a default here can only be right for one of the two formats, and
+ * being wrong is silent. Normalising a legacy code as words12 does not throw
+ * -- it returns a plausible-looking string that derives the wrong key, or
+ * fails a well-formedness check on a code the user copied out perfectly.
+ * Naming the format at every call site turns that into a compile error.
  */
-export function normalizeRecoveryCode(
-  code: string,
-  format: RecoveryFormat = 'words12'
-): string {
+export function normalizeRecoveryCode(code: string, format: RecoveryFormat): string {
   if (format === 'words12') {
     return code
       .toLowerCase()
@@ -313,11 +317,9 @@ export function normalizeRecoveryCode(
     .replace(/O/g, '0');
 }
 
-/** Whether this could be a code at all, before spending a decryption on it. */
-export function isWellFormedRecoveryCode(
-  code: string,
-  format: RecoveryFormat = 'words12'
-): boolean {
+/** Whether this could be a code at all, before spending a decryption on it.
+ *  `format` is required -- see normalizeRecoveryCode. */
+export function isWellFormedRecoveryCode(code: string, format: RecoveryFormat): boolean {
   const normalized = normalizeRecoveryCode(code, format);
 
   if (format === 'words12') {

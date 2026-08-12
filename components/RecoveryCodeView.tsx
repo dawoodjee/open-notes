@@ -4,8 +4,8 @@ import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { KeyStepScreen } from '@/components/KeyStepScreen';
 import {
+  CURRENT_RECOVERY_FORMAT,
   RECOVERY_WORDS,
-  RecoveryFormat,
   isRecoveryWord,
   normalizeRecoveryCode,
   suggestRecoveryWords,
@@ -56,8 +56,14 @@ export function RecoveryCodeView({
   // format's own folding rules, so this screen could reject a transcription
   // that the restore screen would have accepted -- the two disagreed about
   // what "the same code" means, which is the one thing they must not.
+  // CURRENT_RECOVERY_FORMAT, named rather than defaulted: this screen only
+  // ever shows a code that was just issued, and issuing is the one place the
+  // format is not a lookup. Both sides must normalise the same way or the
+  // comparison is meaningless, so they read the one constant.
   const matches = useMemo(
-    () => normalizeRecoveryCode(typed.join(' ')) === normalizeRecoveryCode(code),
+    () =>
+      normalizeRecoveryCode(typed.join(' '), CURRENT_RECOVERY_FORMAT) ===
+      normalizeRecoveryCode(code, CURRENT_RECOVERY_FORMAT),
     [typed, code]
   );
 
@@ -184,11 +190,9 @@ export function RecoveryCodeView({
 export function RecoveryCodeInput({
   value,
   onChange,
-  format = 'words12',
 }: {
   value: string[];
   onChange: (next: string[]) => void;
-  format?: RecoveryFormat;
 }) {
   const inputs = useRef<(TextInput | null)[]>([]);
   const [focused, setFocused] = useState<number | null>(null);
@@ -279,7 +283,6 @@ export function RecoveryCodeInput({
           onChange(next);
           inputs.current[focused + 1]?.focus();
         }}
-        format={format}
       />
     </View>
   );
@@ -320,15 +323,13 @@ export function LegacyRecoveryCodeInput({
 function SlotSuggestions({
   prefix,
   onPick,
-  format,
 }: {
   prefix: string;
   onPick: (word: string) => void;
-  format: RecoveryFormat;
 }) {
   const words = useMemo(
-    () => (format === 'words12' && prefix.length >= 2 ? suggestRecoveryWords(prefix) : []),
-    [prefix, format]
+    () => (prefix.length >= 2 ? suggestRecoveryWords(prefix) : []),
+    [prefix]
   );
 
   // Fixed height whether or not anything is showing, so the button below does
