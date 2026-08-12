@@ -1,5 +1,13 @@
 import React, { useRef } from 'react';
-import { Text as RNText, PanResponder, Keyboard, Platform } from 'react-native';
+import {
+  Text as RNText,
+  PanResponder,
+  Keyboard,
+  Platform,
+  // The API, not the lucide glyph of the same name imported below. Built into
+  // React Native, so sharing needs no new dependency.
+  Share as RNShare,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import RichEditor from './RichEditor';
 
@@ -29,7 +37,7 @@ import {
 } from 'lucide-react-native';
 
 // Custom Types
-import { Note } from '@/types/note';
+import { Note, noteToPlainText } from '@/types/note';
 import AvatarMenuTrigger from './AvatarMenuTrigger';
 import { useApiGateOpen } from '@/lib/plaintext/useApiGate';
 
@@ -107,6 +115,39 @@ export default function NoteEditorPane({
     ? 'Invisible to Apps'
     : 'Visible to Apps';
 
+  /**
+   * Hand the note to the system share sheet as plain text.
+   *
+   * NOT routed through the plaintext broker or the API gate in lib/plaintext.
+   * Those govern OTHER SOFTWARE reading notes on its own -- a background
+   * request the user is not present for. This is the user exporting their own
+   * note by hand, choosing the recipient in a system sheet they raised, which
+   * is the same category as reading it on screen. Gating it would ask
+   * permission for something already being done deliberately.
+   *
+   * Plain text rather than the stored HTML: the destination is Messages, Mail
+   * or another notes app, and tags would arrive as literal angle brackets.
+   *
+   * Nothing is reported back. A share that fails is almost always the user
+   * dismissing the sheet, and React Native does not reliably distinguish that
+   * from a real error across platforms -- so an alert here would mostly fire
+   * on "changed my mind", which is the one case that must stay silent.
+   */
+  async function handleShare() {
+    if (!selectedNote) return;
+    const body = noteToPlainText(selectedNote.body);
+    if (!body) return;
+
+    try {
+      // `title` is Android-only (it names the chooser) and is ignored on iOS.
+      // The text itself already opens with the note's first line, so nothing
+      // is lost where it does not apply.
+      await RNShare.share({ message: body }, { dialogTitle: 'Share note' });
+    } catch {
+      // See above.
+    }
+  }
+
   // Mobile edge-swipe-back, mirroring iOS's native interactive-pop gesture --
   // there's no real navigation stack here to provide that for free (list and
   // editor are conditionally-rendered panes in one screen, not routes).
@@ -163,7 +204,12 @@ export default function NoteEditorPane({
             {/* Header Actions */}
             <HStack className="items-center space-x-3">
               {/* Share Action */}
-              <Pressable className="p-1.5 rounded-full hover:bg-muted">
+              <Pressable
+                onPress={handleShare}
+                className="p-1.5 rounded-full hover:bg-muted"
+                accessibilityRole="button"
+                accessibilityLabel="Share this note"
+              >
                 <Icon as={Share} className="text-muted-foreground w-5 h-5" />
               </Pressable>
 
