@@ -14,6 +14,8 @@ import { Icon } from '@/components/ui/icon';
 import { X, LogOut, UserRound } from 'lucide-react-native';
 
 import AccountField, { FieldTone } from '@/components/AccountField';
+import { SettingsGroup, SettingsRow } from '@/components/ui/settings-group';
+
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/lib/auth/useProfile';
 import { supabase } from '@/lib/supabase/client';
@@ -32,6 +34,46 @@ import {
   listIdentities,
   unlinkIdentity,
 } from '@/lib/auth/identities';
+
+
+/**
+ * The trailing control on a sign-in-method row.
+ *
+ * One component for both states on purpose. They used to be two separately
+ * written Pressables -- Link carried `border border-border` and Remove did
+ * not -- so the same slot changed width and optical weight depending on
+ * whether the account happened to be linked, and the right edge moved with it.
+ * Since exactly one of them is ever on screen, that difference was invisible
+ * in review and obvious in use.
+ *
+ * min-w is what actually holds the edge still: "Link" is four characters and
+ * "Remove" is six, so equal padding alone would still give two widths.
+ */
+function IdentityAction({
+  label,
+  onPress,
+  disabled,
+  destructive,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  destructive?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      className="px-3.5 py-1.5 rounded-full bg-secondary min-w-[84px] items-center active:opacity-60 disabled:opacity-40"
+    >
+      <RNText
+        className={`text-sm font-medium ${destructive ? 'text-destructive' : 'text-foreground'}`}
+      >
+        {label}
+      </RNText>
+    </Pressable>
+  );
+}
 
 export interface ManageAccountDialogProps {
   isOpen: boolean;
@@ -554,65 +596,72 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
           {/* Email sign-in isn't listed. It's always available and can't be
               turned off, so a row for it would be inert -- and the address it
               applies to is already shown directly above. */}
-          <VStack className="gap-1.5 pt-3">
-            <HStack className="items-center justify-between py-1">
-              <VStack className="flex-1">
-                <RNText className="text-base text-foreground">Google</RNText>
-                {googleIdentity?.email && (
-                  <RNText className="text-xs text-muted-foreground">{googleIdentity.email}</RNText>
-                )}
-              </VStack>
+          {/* Built on the settings primitives rather than hand-rolled rows,
+              which is what fixes the alignment: every label sits in the same
+              flex-1 column at the card's px-4, so it lands at the same left
+              edge as the field text above (both are 16px inside a full-width
+              container). Before this, the labels sat at the sheet's own edge
+              and the field text 16px further in -- two left edges stacked
+              vertically, with the footnote making a third.
 
-              {identities === null ? (
-                <RNText className="text-xs text-muted-foreground">…</RNText>
-              ) : googleIdentity ? (
-                <Pressable
-                  onPress={handleRemoveGoogle}
-                  disabled={identityBusy || !canUnlink(identities)}
-                  className="px-4 py-2 rounded-xl active:bg-muted disabled:opacity-40"
-                >
-                  <RNText className="text-sm font-medium text-destructive">Remove</RNText>
-                </Pressable>
-              ) : (
-                <Pressable
-                  onPress={handleLinkGoogle}
-                  disabled={identityBusy}
-                  className="px-4 py-2 rounded-xl border border-border active:bg-secondary disabled:opacity-40"
-                >
-                  <RNText className="text-sm font-medium text-foreground">Link</RNText>
-                </Pressable>
-              )}
-            </HStack>
+              Secondary text stays at px-1, deliberately NOT aligned to the row
+              labels. That inset is the iOS grouped-list convention and it is
+              what settings-group already does everywhere else; matching it is
+              the point of moving here. */}
+          <SettingsGroup
+            caption="Sign-in methods"
+            footnote={
+              /* Explains a disabled Remove rather than leaving it inert and
+                 unexplained -- a greyed-out button with no reason is worse
+                 than the rejection it's preventing.
 
-            {/* Explains a disabled Remove rather than leaving it inert and
-                unexplained -- a greyed-out button with no reason is worse
-                than the rejection it's preventing.
+                 Careful with the wording: this is NOT "your only way to sign
+                 in". An account created through Google has its email set, and
+                 email OTP works on it immediately -- verified against the
+                 local stack. The limit is narrower than that and belongs to
+                 Supabase: it counts rows in auth.identities and refuses to
+                 drop the last one ("User must have at least 1 identity after
+                 unlinking", 422). Signing in by OTP doesn't add an email
+                 identity, so an OAuth-only account stays at exactly one however
+                 many times you use email. Saying "only sign-in method" would
+                 tell the user something false about their own account. */
+              googleIdentity && identities !== null && !canUnlink(identities)
+                ? 'This is your only linked account. Link another before removing it.'
+                : undefined
+            }
+          >
+            <SettingsRow
+              label="Google"
+              sublabel={googleIdentity?.email ?? undefined}
+              right={
+                identities === null ? (
+                  <RNText className="text-sm text-muted-foreground">…</RNText>
+                ) : googleIdentity ? (
+                  <IdentityAction
+                    label="Remove"
+                    destructive
+                    onPress={handleRemoveGoogle}
+                    disabled={identityBusy || !canUnlink(identities)}
+                  />
+                ) : (
+                  <IdentityAction
+                    label="Link"
+                    onPress={handleLinkGoogle}
+                    disabled={identityBusy}
+                  />
+                )
+              }
+            />
 
-                Careful with the wording: this is NOT "your only way to sign
-                in". An account created through Google has its email set, and
-                email OTP works on it immediately -- verified against the
-                local stack. The limit is narrower than that and belongs to
-                Supabase: it counts rows in auth.identities and refuses to
-                drop the last one ("User must have at least 1 identity after
-                unlinking", 422). Signing in by OTP doesn't add an email
-                identity, so an OAuth-only account stays at exactly one however
-                many times you use email. Saying "only sign-in method" would
-                tell the user something false about their own account. */}
-            {googleIdentity && identities !== null && !canUnlink(identities) && (
-              <RNText className="text-xs text-muted-foreground px-1">
-                This is your only linked account. Link another before removing it.
-              </RNText>
-            )}
+            {/* Email sign-in isn't listed. It's always available and can't be
+                turned off, so a row for it would be inert -- and the address it
+                applies to is already shown directly above. */}
+            <SettingsRow label="Apple" value="Not available" disabled />
+          </SettingsGroup>
 
-            <HStack className="items-center justify-between py-1">
-              <RNText className="text-base text-muted-foreground">Apple</RNText>
-              <RNText className="text-xs text-muted-foreground">Not available</RNText>
-            </HStack>
-
-            {identityError && (
-              <RNText className="text-xs text-destructive">{identityError}</RNText>
-            )}
-          </VStack>
+          {identityError && (
+            <RNText className="text-xs text-destructive px-1 -mt-4 mb-4">{identityError}</RNText>
+          )}
 
         </ModalBody>
 
