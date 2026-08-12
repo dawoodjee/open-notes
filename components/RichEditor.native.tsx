@@ -29,7 +29,7 @@ import {
   IndentIncrease,
   IndentDecrease,
 } from 'lucide-react-native';
-import { useTheme } from '@/contexts/ThemeContext';
+import { useTheme, type BulletStyle } from '@/contexts/ThemeContext';
 
 export interface RichEditorProps {
   initialContent?: string;
@@ -147,6 +147,25 @@ function editorColorVars(scheme: 'light' | 'dark'): string {
     .join('\n    ');
 }
 
+/**
+ * What a bullet is drawn as, per style.
+ *
+ * These are CSS `content` values, which is why the quotes are part of the
+ * string: without them `-` would be read as a keyword and the marker would
+ * simply not render. They ride in the same variable channel as the colours, so
+ * switching styles is a one-property write rather than a new stylesheet.
+ *
+ * The bullet is the literal character, NOT the CSS escape `\2022`. This string
+ * gets interpolated into a JS template literal on its way into the WebView
+ * (see the warning in editorThemeCSS), and a backslash-digit sequence is an
+ * illegal escape inside one -- the whole stylesheet fails to parse and the
+ * editor silently falls back to unstyled serif.
+ */
+const BULLET_MARKERS: Record<BulletStyle, string> = {
+  dash: '"-"',
+  dot: '"•"',
+};
+
 // Authentic Apple Notes typography forced across all WebView nodes.
 //
 // Written entirely against custom properties so the theme can be changed
@@ -154,14 +173,23 @@ function editorColorVars(scheme: 'light' | 'dark'): string {
 // rebuilding the stylesheet -- which would mean recreating the bridge, and
 // with it losing the caret and re-running the scroll restore every time.
 //
-// TAKES THE SCHEME rather than baking in light and correcting after load.
-// Injection only lands once the page is up, so a stylesheet that always
-// started light meant opening a note in dark mode flashed white for as long
-// as the WebView took to load. Baking the right values in means there is no
-// wrong frame to correct.
-const editorThemeCSS = (scheme: 'light' | 'dark') => `
+// TAKES THE SCHEME AND MARKER rather than baking in light-with-dots and
+// correcting after load. Injection only lands once the page is up, so a
+// stylesheet that always started light meant opening a note in dark mode
+// flashed white for as long as the WebView took to load. Baking the right
+// values in means there is no wrong frame to correct.
+//
+// NOTHING IN THIS STRING MAY CONTAIN A BACKTICK OR A BACKSLASH. TenTap ships
+// the stylesheet by interpolating it into a JS template literal of its own
+// (getStyleSheetCSS in RichText/utils), so a backtick ends that literal early
+// and a backslash-digit sequence is an illegal escape inside one. Either way
+// the injected script fails to parse, no stylesheet is installed at all, and
+// the editor renders as unstyled serif -- with no error anywhere saying why.
+// Write CSS escapes as literal characters instead.
+const editorThemeCSS = (scheme: 'light' | 'dark', bulletStyle: BulletStyle) => `
   :root {
     ${editorColorVars(scheme)}
+    --editor-bullet-marker: ${BULLET_MARKERS[bulletStyle]};
   }
   * {
     box-sizing: border-box;
@@ -217,9 +245,51 @@ const editorThemeCSS = (scheme: 'light' | 'dark') => `
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
     font-size: 0.9em;
   }
-  ul, ol {
+  /* LISTS.
+     Tiptap wraps every item's text in a paragraph -- <li><p>text</p></li> --
+     so the .ProseMirror p rule above was silently putting 0.75rem under every
+     single bullet. A gap sized for the space between paragraphs, applied
+     between items, is what made one list read as several. The list's own
+     margin-top was never reset either, so the browser's default 1em sat on top
+     of that. */
+  .ProseMirror ul, .ProseMirror ol {
     padding-left: 1.25rem;
+    margin-top: 0;
     margin-bottom: 0.75rem;
+  }
+  .ProseMirror li > p {
+    margin-bottom: 0;
+  }
+  .ProseMirror li {
+    margin-bottom: 0.125rem;
+  }
+  /* A nested list is a continuation of its item, not the end of one, so it
+     gets none of the gap that closes a list off. */
+  .ProseMirror li > ul, .ProseMirror li > ol {
+    margin-top: 0.125rem;
+    margin-bottom: 0;
+  }
+
+  /* BULLET MARKERS, drawn by hand rather than by list-style.
+     There is only one bulletList node -- a typed dash, a typed asterisk and
+     the toolbar button all produce it -- so the marker is a global preference,
+     and a pseudo element is the way to control it everywhere. list-style-type
+     accepts a string these days, but only from Safari 17, and ::before works
+     on every WebView this app can run in. Ordered lists keep their numbers.
+
+     Task lists are excluded: their marker is a checkbox, and TenTap already
+     styles them. Without the :not() every checkbox would grow a dash. */
+  .ProseMirror ul:not([data-type="taskList"]) {
+    list-style: none;
+  }
+  .ProseMirror ul:not([data-type="taskList"]) > li {
+    position: relative;
+  }
+  .ProseMirror ul:not([data-type="taskList"]) > li::before {
+    content: var(--editor-bullet-marker);
+    position: absolute;
+    left: -1.05rem;
+    color: var(--editor-body);
   }
   ::selection {
     background-color: var(--editor-selectionBg);
@@ -227,16 +297,28 @@ const editorThemeCSS = (scheme: 'light' | 'dark') => `
   }
 `;
 
-/** JS that repaints the document for a scheme, for injection over the bridge. */
-function applyEditorThemeJS(scheme: 'light' | 'dark'): string {
+/**
+ * JS that repaints the document for a scheme and bullet style, for injection
+ * over the bridge.
+ *
+ * Every appearance choice is a variable precisely so this can exist: setting
+ * properties on :root restyles the live document, where rebuilding the
+ * stylesheet would mean rebuilding the bridge -- losing the caret, the
+ * selection and the scroll position every time the theme or the marker moved.
+ */
+function applyEditorThemeJS(scheme: 'light' | 'dark', bulletStyle: BulletStyle): string {
   const c = EDITOR_COLORS[scheme];
   const assignments = Object.entries(c)
     .map(([name, value]) => `r.style.setProperty('--editor-${name}', '${value}');`)
     .join('\n      ');
+  // JSON.stringify, because the marker carries its own quotes -- see
+  // BULLET_MARKERS -- and pasting it in raw would close the JS string early.
+  const marker = JSON.stringify(BULLET_MARKERS[bulletStyle]);
   return `
     (function() {
       var r = document.documentElement;
       ${assignments}
+      r.style.setProperty('--editor-bullet-marker', ${marker});
     })();
     true;
   `;
@@ -305,21 +387,28 @@ export default function RichEditor({
     onChangeRef.current = onChange;
   }, [onChange]);
 
-  const { scheme } = useTheme();
+  const { scheme, bulletStyle } = useTheme();
 
   // Read once, deliberately. useEditorBridge builds the bridge on first render
-  // and ignores later changes to this argument, so this is the scheme the
-  // document STARTS in; applyEditorTheme below handles every change after.
-  // NoteEditorPane keys this component on the note id, so opening any note
-  // rebuilds the bridge with the scheme current at that moment.
+  // and ignores later changes to these arguments, so these are the scheme and
+  // marker the document STARTS in; applyEditorTheme below handles every change
+  // after. NoteEditorPane keys this component on the note id, so opening any
+  // note rebuilds the bridge with whatever is current at that moment.
+  //
+  // Baking both in is what keeps the first painted frame correct: the
+  // stylesheet only lands once the page is up, so a document that always
+  // started light-with-dots would visibly correct itself on every open.
   const initialSchemeRef = useRef(scheme);
+  const initialBulletStyleRef = useRef(bulletStyle);
 
   const editor = useEditorBridge({
     initialContent: formattedContent,
     autofocus: autoFocus,
     bridgeExtensions: [
       ...TenTapStartKit,
-      CoreBridge.configureCSS(editorThemeCSS(initialSchemeRef.current)),
+      CoreBridge.configureCSS(
+        editorThemeCSS(initialSchemeRef.current, initialBulletStyleRef.current)
+      ),
       ImageBridge,
     ],
     avoidIosKeyboard: true,
@@ -445,18 +534,21 @@ export default function RichEditor({
 
   const editorState = useBridgeState(editor);
 
-  // Repaint the WebView when the theme changes. The document already STARTS in
-  // the right scheme (see initialSchemeRef above), so this covers the theme
-  // being switched while a note is open -- including the OS crossing sunset
-  // while the app sits in Device mode.
+  // Repaint the WebView when the theme or the bullet marker changes. The
+  // document already STARTS with the right values (see initialSchemeRef
+  // above), so this covers them being changed while a note is open --
+  // switching Appearance -> Bullets from the settings sheet, or the OS
+  // crossing sunset while the app sits in Device mode.
   const applyEditorTheme = useCallback(() => {
     // webviewRef.injectJavaScript, not TenTap's editor.injectJS. The latter
     // wraps the string in its own envelope, which changes the script's
     // completion value and makes WKWebView log "Error evaluating
     // injectedJavaScript ... unsupported return type" on every call. The
     // scroll plumbing below already uses this same route for the same reason.
-    editor.webviewRef?.current?.injectJavaScript(applyEditorThemeJS(scheme));
-  }, [editor, scheme]);
+    editor.webviewRef?.current?.injectJavaScript(
+      applyEditorThemeJS(scheme, bulletStyle)
+    );
+  }, [editor, scheme, bulletStyle]);
 
   useEffect(() => {
     applyEditorTheme();
@@ -547,29 +639,13 @@ export default function RichEditor({
 
   return (
     <Box className="flex-1 bg-background flex flex-col">
-      {/* Editor Canvas */}
-      <Box className="flex-1">
-        <RichText
-          editor={editor}
-          // The WebView's own surface, which exists before any HTML or CSS
-          // does. WKWebView defaults to opaque white, so without this the
-          // native view itself is the white flash -- the stylesheet above
-          // cannot help, because there is no document yet to style.
-          style={{ flex: 1, backgroundColor: EDITOR_COLORS[scheme].bg }}
-          onLoadEnd={() => {
-            applyEditorTheme();
-            installScrollListener();
-            restoreScroll();
-          }}
-          // Must stay false, otherwise TenTap skips its own message handling
-          // and the editor bridge stops working.
-          exclusivelyUseCustomOnMessage={false}
-          onMessage={handleWebViewMessage}
-        />
-      </Box>
-
-      {/* Toolbar built with Gluestack UI components */}
-      <Box className="border-t border-border bg-background px-3 py-1.5">
+      {/* Toolbar built with Gluestack UI components.
+          ABOVE the canvas, not below it. This is a plain flex column and
+          nothing here avoids the keyboard, so a toolbar underneath the text
+          was covered by the software keyboard the moment you started typing --
+          unreachable exactly when it was wanted. At the top it sits under the
+          note's header and stays put. */}
+      <Box className="border-b border-border bg-background px-3 py-1.5">
         <HStack className="items-center space-x-1 flex-wrap">
           {/* Bold */}
           <Pressable
@@ -738,6 +814,27 @@ export default function RichEditor({
             />
           </Pressable>
         </HStack>
+      </Box>
+
+      {/* Editor Canvas */}
+      <Box className="flex-1">
+        <RichText
+          editor={editor}
+          // The WebView's own surface, which exists before any HTML or CSS
+          // does. WKWebView defaults to opaque white, so without this the
+          // native view itself is the white flash -- the stylesheet above
+          // cannot help, because there is no document yet to style.
+          style={{ flex: 1, backgroundColor: EDITOR_COLORS[scheme].bg }}
+          onLoadEnd={() => {
+            applyEditorTheme();
+            installScrollListener();
+            restoreScroll();
+          }}
+          // Must stay false, otherwise TenTap skips its own message handling
+          // and the editor bridge stops working.
+          exclusivelyUseCustomOnMessage={false}
+          onMessage={handleWebViewMessage}
+        />
       </Box>
     </Box>
   );

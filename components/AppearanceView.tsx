@@ -1,18 +1,23 @@
 import React from 'react';
 import { ScrollView, View } from 'react-native';
-import { Type } from 'lucide-react-native';
+import { List, Type } from 'lucide-react-native';
 import {
   SettingsGroup,
   SettingsRow,
   SettingsSegmented,
   SettingsSubHeader,
 } from '@/components/ui/settings-group';
-import type { ThemePreference } from '@/contexts/ThemeContext';
+import type { BulletStyle, ThemePreference } from '@/contexts/ThemeContext';
 
 const THEME_OPTIONS: { label: string; value: ThemePreference }[] = [
   { label: 'Device', value: 'system' },
   { label: 'Light', value: 'light' },
   { label: 'Dark', value: 'dark' },
+];
+
+const BULLET_OPTIONS: { label: string; value: BulletStyle }[] = [
+  { label: 'Dash', value: 'dash' },
+  { label: 'Dot', value: 'dot' },
 ];
 
 /**
@@ -29,10 +34,14 @@ export function AppearanceView({
   onBack,
   preference,
   setPreference,
+  bulletStyle,
+  setBulletStyle,
 }: {
   onBack: () => void;
   preference: ThemePreference;
   setPreference: (next: ThemePreference) => Promise<void>;
+  bulletStyle: BulletStyle;
+  setBulletStyle: (next: BulletStyle) => Promise<void>;
 }) {
   return (
     <>
@@ -49,6 +58,27 @@ export function AppearanceView({
                 options={THEME_OPTIONS}
                 value={preference}
                 onChange={(next) => void setPreference(next)}
+              />
+            }
+          />
+        </SettingsGroup>
+
+        {/* Applies to every list in every note, because the editor only has
+            one kind of bullet -- see BulletStyle. Notes themselves are
+            untouched by this; it changes what gets drawn, not what is
+            stored. */}
+        <SettingsGroup
+          caption="Editor"
+          footnote="Applies to all bulleted lists, however they were made."
+        >
+          <SettingsRow
+            icon={List}
+            label="Bullets"
+            right={
+              <SettingsSegmented
+                options={BULLET_OPTIONS}
+                value={bulletStyle}
+                onChange={(next) => void setBulletStyle(next)}
               />
             }
           />
