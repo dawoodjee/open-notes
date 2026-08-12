@@ -86,16 +86,25 @@ if [[ ! -d ios ]]; then
   npx expo prebuild --platform ios
 fi
 
+# Discovered, not hardcoded: a project rename (the app went from "notes" to
+# "Notes") silently broke a version of this script that assumed the lowercase
+# name, with xcodebuild's error pointing at a scheme name rather than at the
+# rename itself. `expo prebuild` names the workspace/scheme after app.json's
+# "name" field, so whatever that says today is what gets built.
+WORKSPACE=$(ls -d ios/*.xcworkspace 2>/dev/null | head -1)
+[[ -n "$WORKSPACE" ]] || { echo "error: no .xcworkspace under ios/" >&2; exit 1; }
+SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+
 xcodebuild \
-  -workspace ios/notes.xcworkspace \
-  -scheme notes \
+  -workspace "$WORKSPACE" \
+  -scheme "$SCHEME" \
   -configuration Release \
   -destination "id=$UDID" \
   -derivedDataPath ios/build \
   -allowProvisioningUpdates \
   build
 
-APP="ios/build/Build/Products/Release-iphoneos/notes.app"
+APP="ios/build/Build/Products/Release-iphoneos/$SCHEME.app"
 [[ -d "$APP" ]] || { echo "error: no app bundle at $APP" >&2; exit 1; }
 
 xcrun devicectl device install app --device "$UDID" "$APP"
