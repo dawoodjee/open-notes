@@ -20,6 +20,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/lib/auth/useProfile';
 import { supabase } from '@/lib/supabase/client';
 import { withTimeout } from '@/lib/auth/withTimeout';
+import { isValidEmail, normalizeEmail } from '@/lib/validation/email';
 import {
   checkUsernameAvailable,
   formatRateLimitRemaining,
@@ -276,8 +277,11 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
     setEmailNotice(null);
   }, [session?.user.email, isOpen]);
 
-  const emailDirty = email.trim() !== (session?.user.email ?? '');
-  const emailLooksValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const emailDirty = normalizeEmail(email) !== normalizeEmail(session?.user.email ?? '');
+  // Shared with the sign-in screen. This used to be a local regex, so the two
+  // screens could disagree about the same address -- and the looser of the two
+  // was the one standing in front of account creation.
+  const emailLooksValid = isValidEmail(email);
 
   const emailStatus = emailNotice ?? (emailDirty && !emailLooksValid ? 'Enter a valid email address.' : '');
   const emailStatusTone: FieldTone = emailNotice || (emailDirty && !emailLooksValid) ? 'error' : 'neutral';
