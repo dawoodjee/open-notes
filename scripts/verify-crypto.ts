@@ -23,7 +23,11 @@ import {
   WrongRecoveryCodeError,
   generateDataKey,
   generateDeviceKey,
+  CURRENT_RECOVERY_FORMAT,
   generateRecoveryCode,
+  generateLegacyRecoveryCode,
+  resolveRecoveryFormat,
+  type KdfParams,
   generateSalt,
   isWellFormedRecoveryCode,
   normalizeRecoveryCode,
@@ -32,6 +36,7 @@ import {
   wrapDataKeyWithRecoveryCode,
   wrapWith,
 } from '../lib/crypto/keys';
+import { BITS_PER_WORD, WORDLIST, WORD_INDEX } from '../lib/crypto/wordlist';
 
 const sameBytes = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((byte, i) => b[i] === byte);
@@ -160,31 +165,49 @@ console.log('\n--- recovery code (HKDF) ---');
   const salt = generateSalt();
   const code = generateRecoveryCode();
 
-  check('formatted as five groups of five', /^[0-9A-Z]{5}(-[0-9A-Z]{5}){4}$/.test(code), code);
+  check('formatted as twelve dashed words', /^[a-z]+(-[a-z]+){11}$/.test(code), code);
   check('recognised as well-formed', isWellFormedRecoveryCode(code));
-  check('125 bits of entropy', normalizeRecoveryCode(code).length * 5 === 125);
+  check(
+    '132 bits of entropy',
+    normalizeRecoveryCode(code).split('-').length * BITS_PER_WORD === 132
+  );
+  check('every word comes from the list', code.split('-').every((w) => WORD_INDEX.has(w)));
 
   const codes = new Set<string>();
   for (let i = 0; i < 1000; i++) codes.add(generateRecoveryCode());
   check('1000 generated codes are all distinct', codes.size === 1000);
 
-  const wrapped = wrapDataKeyWithRecoveryCode(dataKey, code, salt);
-  const unwrapped = unwrapDataKeyWithRecoveryCode(wrapped, code, salt);
+  // Sampling has to be uniform: a `% 2048` over a byte pair would quietly
+  // favour low indices, and the bias would sit in the first words of every
+  // code. 12000 draws over 2048 words averages ~5.9 each, so a list position
+  // that is never reachable at all is what this is really looking for.
+  const seen = new Set<string>();
+  for (const c of codes) for (const w of c.split('-')) seen.add(w);
+  check(`sampling reaches most of the list (${seen.size}/2048 words in 12000 draws)`, seen.size > 1900);
+
+  const wrapped = wrapDataKeyWithRecoveryCode(dataKey, code, salt, 'words12');
+  const unwrapped = unwrapDataKeyWithRecoveryCode(wrapped, code, salt, 'words12');
   check(
     'unwraps to the identical data key',
     unwrapped.length === dataKey.length && dataKey.every((b, i) => unwrapped[i] === b)
   );
 
-  // What someone actually types off a piece of paper.
-  const mangled = code.toLowerCase().replace(/-/g, ' ');
-  const viaMangled = unwrapDataKeyWithRecoveryCode(wrapped, mangled, salt);
-  check('accepts lowercase with spaces instead of dashes', dataKey.every((b, i) => viaMangled[i] === b));
+  // What someone actually types off a piece of paper -- and what the Copy
+  // button puts on the clipboard, which is space-separated rather than dashed.
+  const spaced = unwrapDataKeyWithRecoveryCode(wrapped, code.replace(/-/g, ' '), salt, 'words12');
+  check('accepts spaces instead of dashes', dataKey.every((b, i) => spaced[i] === b));
 
-  check('folds I and L to 1, O to 0', normalizeRecoveryCode('ILO12') === '11012');
+  const shouty = unwrapDataKeyWithRecoveryCode(
+    wrapped,
+    '  ' + code.toUpperCase().replace(/-/g, '\n') + '  ',
+    salt,
+    'words12'
+  );
+  check('accepts capitals, newlines and stray padding', dataKey.every((b, i) => shouty[i] === b));
 
   throws(
     'wrong recovery code is rejected',
-    () => unwrapDataKeyWithRecoveryCode(wrapped, generateRecoveryCode(), salt),
+    () => unwrapDataKeyWithRecoveryCode(wrapped, generateRecoveryCode(), salt, 'words12'),
     'WrongRecoveryCodeError'
   );
 
@@ -192,8 +215,74 @@ console.log('\n--- recovery code (HKDF) ---');
   // local unlock factor has ever been able to open it, which is why moving
   // unlock to the device credential changed nothing about this guarantee.
   throws('a short guess cannot unwrap the recovery blob', () =>
-    unwrapDataKeyWithRecoveryCode(wrapped, '123456', salt)
+    unwrapDataKeyWithRecoveryCode(wrapped, '123456', salt, 'words12')
   );
+}
+
+// --- the old character format still opens its blobs -------------------------
+//
+// THE POINT OF THIS BLOCK. Key derivation eats the NORMALISED STRING, so
+// changing the alphabet changes the key. Every recovery code written down
+// before words existed is stored with no `format` in kdf_params, and must keep
+// working forever -- there is no migration path, because the plaintext code
+// exists only on the user's piece of paper.
+console.log('\n--- legacy recovery codes (crockford25) ---');
+{
+  const dataKey = generateDataKey();
+  const salt = generateSalt();
+  const code = generateLegacyRecoveryCode();
+
+  check('still five groups of five', /^[0-9A-Z]{5}(-[0-9A-Z]{5}){4}$/.test(code), code);
+  check('well-formed under its own format', isWellFormedRecoveryCode(code, 'crockford25'));
+  check('125 bits of entropy', normalizeRecoveryCode(code, 'crockford25').length * 5 === 125);
+  check('folds I and L to 1, O to 0', normalizeRecoveryCode('ILO12', 'crockford25') === '11012');
+
+  const wrapped = wrapDataKeyWithRecoveryCode(dataKey, code, salt, 'crockford25');
+
+  // A record written before formats existed: kdf_params has `alg` and nothing
+  // else. resolveRecoveryFormat is what has to read that absence correctly.
+  const legacyParams = { alg: 'hkdf-sha256' } as KdfParams;
+  check("an absent format resolves to 'crockford25'", resolveRecoveryFormat(legacyParams) === 'crockford25');
+
+  const reopened = unwrapDataKeyWithRecoveryCode(
+    wrapped,
+    code.toLowerCase().replace(/-/g, ' '),
+    salt,
+    resolveRecoveryFormat(legacyParams)
+  );
+  check('a pre-words blob still unwraps with its original code', sameBytes(reopened, dataKey));
+
+  // And the guard that makes the discriminator worth having: reading an old
+  // blob as if it were the new format must FAIL rather than silently produce
+  // a wrong key.
+  throws(
+    'reading a legacy blob as words12 is rejected, not silently wrong',
+    () => unwrapDataKeyWithRecoveryCode(wrapped, code, salt, 'words12'),
+    'WrongRecoveryCodeError'
+  );
+
+  check('a word code is not well-formed as crockford25',
+    !isWellFormedRecoveryCode(generateRecoveryCode(), 'crockford25'));
+  check('a legacy code is not well-formed as words12',
+    !isWellFormedRecoveryCode(code, 'words12'));
+}
+
+// --- the wordlist itself -----------------------------------------------------
+//
+// The index of a word IS its 11-bit value, so an accidental edit to
+// lib/crypto/wordlist.ts silently changes what every existing code decodes to,
+// or shrinks the keyspace. Cheap to re-check on every run.
+console.log('\n--- wordlist ---');
+{
+  check('exactly 2048 words (2^11)', WORDLIST.length === 2048, String(WORDLIST.length));
+  check('all unique', new Set(WORDLIST).size === 2048);
+  check('all lowercase a-z', WORDLIST.every((w) => /^[a-z]+$/.test(w)));
+  check('sorted', WORDLIST.every((w, i) => i === 0 || WORDLIST[i - 1] < w));
+  check(
+    'four-character prefixes all distinct',
+    new Set(WORDLIST.map((w) => w.slice(0, 4))).size === 2048
+  );
+  check('index lookup agrees with position', WORDLIST.every((w, i) => WORD_INDEX.get(w) === i));
 }
 
 // --- the two wrapped copies are of the SAME key ------------------------------
@@ -206,9 +295,10 @@ console.log('\n--- cross-check ---');
 
   const viaDevice = unwrapWith(wrapWith(dataKey, deviceKey), deviceKey);
   const viaCode = unwrapDataKeyWithRecoveryCode(
-    wrapDataKeyWithRecoveryCode(dataKey, code, recoverySalt),
+    wrapDataKeyWithRecoveryCode(dataKey, code, recoverySalt, CURRENT_RECOVERY_FORMAT),
     code,
-    recoverySalt
+    recoverySalt,
+    CURRENT_RECOVERY_FORMAT
   );
 
   check('device path and recovery path yield the same data key', sameBytes(viaDevice, viaCode));

@@ -12,6 +12,7 @@
 import { execSync } from 'node:child_process';
 import {
   generateDataKey,
+  CURRENT_RECOVERY_FORMAT,
   generateRecoveryCode,
   generateSalt,
   keyFingerprint,
@@ -32,7 +33,7 @@ if (!userId) throw new Error(`No such user: ${email}`);
 const key = generateDataKey();
 const code = generateRecoveryCode();
 const salt = generateSalt();
-const wrapped = wrapDataKeyWithRecoveryCode(key, code, salt);
+const wrapped = wrapDataKeyWithRecoveryCode(key, code, salt, CURRENT_RECOVERY_FORMAT);
 const fingerprint = keyFingerprint(key);
 
 psql(`delete from public.user_keys where user_id = '${userId}';`);

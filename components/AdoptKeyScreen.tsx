@@ -1,10 +1,15 @@
 import React, { useCallback, useState, useSyncExternalStore } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { RecoveryCodeInput } from '@/components/RecoveryCodeView';
+import { LegacyRecoveryCodeInput, RecoveryCodeInput } from '@/components/RecoveryCodeView';
 import { KeyStepScreen, confirmSignOut } from '@/components/KeyStepScreen';
 import { getPendingAdoption, subscribePendingAdoption } from '@/lib/crypto/adoption';
-import { WrongRecoveryCodeError, isWellFormedRecoveryCode } from '@/lib/crypto/keys';
+import {
+  RECOVERY_WORDS,
+  WrongRecoveryCodeError,
+  isWellFormedRecoveryCode,
+  resolveRecoveryFormat,
+} from '@/lib/crypto/keys';
 
 export function usePendingAdoption() {
   return useSyncExternalStore(subscribePendingAdoption, getPendingAdoption, getPendingAdoption);
@@ -26,7 +31,18 @@ export function usePendingAdoption() {
  */
 export function AdoptKeyScreen() {
   const pending = usePendingAdoption();
-  const [code, setCode] = useState('');
+
+  // Which format THIS account's blob was written in, taken from the record
+  // that was just fetched -- never assumed. An account claimed before word
+  // codes existed has no `format` in its kdf_params, and its owner is holding
+  // a 25-character code; showing them twelve word slots would be a screen they
+  // could not possibly complete.
+  const format = resolveRecoveryFormat(pending?.record.kdfParams);
+  const isWords = format === 'words12';
+
+  const [words, setWords] = useState<string[]>(() => Array(RECOVERY_WORDS).fill(''));
+  const [legacyCode, setLegacyCode] = useState('');
+  const code = isWords ? words.join(' ') : legacyCode;
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
 
@@ -63,7 +79,7 @@ export function AdoptKeyScreen() {
 
   if (!pending) return null;
 
-  const ready = isWellFormedRecoveryCode(code) && !busy;
+  const ready = isWellFormedRecoveryCode(code, format) && !busy;
 
   return (
     // cancelDisabled while busy is load-bearing here specifically: submit()
@@ -78,7 +94,11 @@ export function AdoptKeyScreen() {
         unlock them here. We can&apos;t do this for you — the code is the only thing that can.
       </Text>
 
-      <RecoveryCodeInput value={code} onChange={setCode} />
+      {isWords ? (
+        <RecoveryCodeInput value={words} onChange={setWords} />
+      ) : (
+        <LegacyRecoveryCodeInput value={legacyCode} onChange={setLegacyCode} />
+      )}
 
       <View className="h-8 justify-center">
         <Text className={`text-sm ${error ? 'text-destructive' : 'text-muted-foreground'}`}>{error ?? ''}</Text>

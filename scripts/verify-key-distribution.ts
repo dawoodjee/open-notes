@@ -21,6 +21,7 @@ import { randomUUID } from 'node:crypto';
 import { decrypt, encrypt, isEncrypted } from '../lib/crypto/envelope';
 import {
   generateDataKey,
+  CURRENT_RECOVERY_FORMAT,
   generateRecoveryCode,
   generateSalt,
   keyFingerprint,
@@ -92,7 +93,7 @@ async function main() {
   const key1 = generateDataKey();
   const recoveryCode = generateRecoveryCode();
   const recoverySalt = generateSalt();
-  const wrapped = wrapDataKeyWithRecoveryCode(key1, recoveryCode, recoverySalt);
+  const wrapped = wrapDataKeyWithRecoveryCode(key1, recoveryCode, recoverySalt, CURRENT_RECOVERY_FORMAT);
 
   const { error: insertError } = await asA.from('user_keys').insert({
     user_id: userA,
@@ -164,7 +165,8 @@ async function main() {
     unwrapDataKeyWithRecoveryCode(
       fetched!.recovery_wrapped_key,
       generateRecoveryCode(),
-      fetched!.recovery_salt
+      fetched!.recovery_salt,
+      CURRENT_RECOVERY_FORMAT
     );
   } catch {
     wrongCodeWorked = false;
@@ -175,7 +177,8 @@ async function main() {
   const adopted = unwrapDataKeyWithRecoveryCode(
     fetched!.recovery_wrapped_key,
     recoveryCode,
-    fetched!.recovery_salt
+    fetched!.recovery_salt,
+    CURRENT_RECOVERY_FORMAT
   );
   check('the recovery code yields the account key', keyFingerprint(adopted) === keyFingerprint(key1));
   check('device 2 can now read the note', decrypt(storedBody, adopted) === NOTE);
@@ -203,7 +206,7 @@ async function main() {
   // which would orphan every note encrypted under the original.
   const { error: overwrite } = await asA.from('user_keys').insert({
     user_id: userA,
-    recovery_wrapped_key: wrapDataKeyWithRecoveryCode(key2, recoveryCode, recoverySalt),
+    recovery_wrapped_key: wrapDataKeyWithRecoveryCode(key2, recoveryCode, recoverySalt, CURRENT_RECOVERY_FORMAT),
     recovery_salt: recoverySalt,
     kdf_params: { alg: 'hkdf-sha256' },
     key_fingerprint: keyFingerprint(key2),

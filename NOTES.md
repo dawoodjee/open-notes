@@ -6,10 +6,10 @@ around, so it's worth stating plainly before anything gets built on top of it.
 **The server cannot read your notes.** Not "doesn't", *cannot*. `notes.body`
 and `notes.title` in Postgres hold `enc:v1:` envelopes, and the key that opens
 them exists in exactly two places: the device's Keychain, and a copy on the
-server wrapped under a 125-bit recovery code that only the user has. There is
-no admin path, no support path, and no "just this once" path. Any feature that
-needs to read note content either runs on the device or gets that content
-handed to it deliberately.
+server wrapped under a 132-bit recovery code -- twelve words -- that only the
+user has. There is no admin path, no support path, and no "just this once"
+path. Any feature that needs to read note content either runs on the device or
+gets that content handed to it deliberately.
 
 That isn't a limitation to engineer around. It's the product.
 

@@ -11,6 +11,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/ciphers/utils.js';
 import {
   KdfParams,
+  CURRENT_RECOVERY_FORMAT,
   RECOVERY_KDF_PARAMS,
   generateDataKey,
   generateDeviceKey,
@@ -105,7 +106,7 @@ interface StoredVault {
    * The same data key, wrapped under the recovery code. Absent until the user
    * signs in -- a device that has never had an account has nothing to transport
    * the key TO, so there is nothing to recover and no reason to make someone
-   * transcribe 25 characters before writing their first note.
+   * transcribe twelve words before writing their first note.
    */
   wrappedByRecoveryCode?: string;
   recoverySalt?: string;
@@ -306,7 +307,12 @@ export async function addRecoveryCode(): Promise<string> {
 
   await writeVault({
     ...vault,
-    wrappedByRecoveryCode: wrapDataKeyWithRecoveryCode(getDataKey(), recoveryCode, recoverySalt),
+    wrappedByRecoveryCode: wrapDataKeyWithRecoveryCode(
+      getDataKey(),
+      recoveryCode,
+      recoverySalt,
+      CURRENT_RECOVERY_FORMAT
+    ),
     recoverySalt,
     kdfParams: RECOVERY_KDF_PARAMS,
     recoveryConfirmed: false,
@@ -346,7 +352,13 @@ export async function markRecoveryConfirmed(): Promise<void> {
 export async function adoptAccountDataKey(
   accountKey: Uint8Array,
   accountRecoveryWrapped: string,
-  accountRecoverySalt: string
+  accountRecoverySalt: string,
+  // The ACCOUNT's kdf params, not this device's. Adopting copies the account's
+  // recovery blob verbatim, so the format that blob was written in has to come
+  // with it -- stamping today's default onto an account claimed before word
+  // codes existed would make this device normalise its owner's perfectly good
+  // character code the wrong way and refuse it on the next restore.
+  accountKdfParams?: KdfParams
 ): Promise<{ previousKey: Uint8Array }> {
   const vault = await readVault();
   if (!vault) throw new Error('No vault on this device.');
@@ -366,7 +378,7 @@ export async function adoptAccountDataKey(
     // recovery code becomes meaningless and is discarded.
     wrappedByRecoveryCode: accountRecoveryWrapped,
     recoverySalt: accountRecoverySalt,
-    kdfParams: RECOVERY_KDF_PARAMS,
+    kdfParams: accountKdfParams ?? { alg: RECOVERY_KDF_PARAMS.alg },
     backedUp: true, // it came from the server by definition
     recoveryConfirmed: true,
   });

@@ -11,7 +11,12 @@
 import { execSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { encrypt } from '../lib/crypto/envelope';
-import { keyFingerprint, unwrapDataKeyWithRecoveryCode } from '../lib/crypto/keys';
+import {
+  type KdfParams,
+  keyFingerprint,
+  resolveRecoveryFormat,
+  unwrapDataKeyWithRecoveryCode,
+} from '../lib/crypto/keys';
 
 function psql(sql: string): string {
   return execSync(
@@ -29,9 +34,13 @@ if (!userId) throw new Error(`No such user: ${email}`);
 
 const wrapped = psql(`select recovery_wrapped_key from public.user_keys where user_id='${userId}';`);
 const salt = psql(`select recovery_salt from public.user_keys where user_id='${userId}';`);
+const kdfRaw = psql(`select kdf_params from public.user_keys where user_id='${userId}';`);
 if (!wrapped) throw new Error('That account has no key row.');
 
-const accountKey = unwrapDataKeyWithRecoveryCode(wrapped, code, salt);
+// The format comes off the row, so this seeds correctly against an account
+// claimed either before or after word codes existed.
+const format = resolveRecoveryFormat(kdfRaw ? (JSON.parse(kdfRaw) as KdfParams) : null);
+const accountKey = unwrapDataKeyWithRecoveryCode(wrapped, code, salt, format);
 console.log('unwrapped account key, fingerprint:', keyFingerprint(accountKey));
 
 const body = '<p>FROMOTHERDEVICE written under the account key</p>';

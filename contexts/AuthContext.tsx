@@ -8,7 +8,7 @@ import { runSerialized } from '@/lib/auth/serializeAuthWork';
 import { setPendingAdoption } from '@/lib/crypto/adoption';
 import { setPendingKeySetup } from '@/lib/crypto/keySetup';
 import { AccountKeyRecord, fetchAccountKey, uploadAccountKey } from '@/lib/crypto/keyBackup';
-import { unwrapDataKeyWithRecoveryCode } from '@/lib/crypto/keys';
+import { resolveRecoveryFormat, unwrapDataKeyWithRecoveryCode } from '@/lib/crypto/keys';
 import { reEncryptLocalNotes } from '@/lib/crypto/reEncrypt';
 import {
   adoptAccountDataKey,
@@ -162,16 +162,24 @@ function beginAdoption(
     record,
     async complete(recoveryCode: string) {
       // Throws WrongRecoveryCodeError on a bad code, before anything changes.
+      //
+      // The format comes off the RECORD, never from what was typed. An
+      // account claimed before word codes existed has no `format` in its
+      // kdf_params and its blob is only openable by normalising as the old
+      // character format -- resolveRecoveryFormat is what reads that absence
+      // correctly instead of assuming today's default.
       const accountKey = unwrapDataKeyWithRecoveryCode(
         record.recoveryWrappedKey,
         recoveryCode,
-        record.recoverySalt
+        record.recoverySalt,
+        resolveRecoveryFormat(record.kdfParams)
       );
 
       const { previousKey } = await adoptAccountDataKey(
         accountKey,
         record.recoveryWrappedKey,
-        record.recoverySalt
+        record.recoverySalt,
+        record.kdfParams
       );
 
       // Both keys are in hand only here, so the local notes have to be
