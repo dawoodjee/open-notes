@@ -9,9 +9,11 @@ import { HStack } from '@/components/ui/hstack';
 import { Input, InputField } from '@/components/ui/input';
 import { Pressable } from '@/components/ui/pressable';
 import { Icon } from '@/components/ui/icon';
-import { X } from 'lucide-react-native';
+import { SettingsHeader } from '@/components/ui/settings-group';
+import { UserRound, X } from 'lucide-react-native';
 
 import { supabase } from '@/lib/supabase/client';
+import { isValidEmail, normalizeEmail } from '@/lib/validation/email';
 import { signInWithGoogle } from '@/lib/auth/oauth';
 import { useAuth } from '@/contexts/AuthContext';
 import { BACKGROUND, useTheme } from '@/contexts/ThemeContext';
@@ -75,15 +77,29 @@ export default function EnableSyncScreen() {
     if (session) dismiss();
   }, [session, dismiss]);
 
+  // Validity is enforced by the button being unavailable, not by telling
+  // someone their half-typed address is wrong. An address is invalid for most
+  // of the time it is being typed, so anything that reacts while typing is
+  // wrong more often than it is right.
+  const emailIsValid = isValidEmail(email);
+
   async function handleSendCode() {
+    // The NORMALISED address is what gets sent and what the code screen
+    // echoes, so the account signed into is the one the user will see. A
+    // pasted " Jane@Example.com " would otherwise create a different account
+    // from the one they already have.
+    const address = normalizeEmail(email);
+    if (!isValidEmail(address)) return;
+
     setIsSubmitting(true);
     setError(null);
-    const { error } = await supabase.auth.signInWithOtp({ email });
+    const { error } = await supabase.auth.signInWithOtp({ email: address });
     setIsSubmitting(false);
     if (error) {
       setError(error.message);
       return;
     }
+    setEmail(address);
     setStep('code');
   }
 
@@ -131,12 +147,19 @@ export default function EnableSyncScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: BACKGROUND[scheme] }}>
-      <HStack className="justify-between items-center px-4 py-3">
-        <RNText className="text-lg font-semibold text-foreground">Sync</RNText>
-        <Pressable onPress={dismiss} className="p-1.5 rounded-full active:bg-muted">
-          <Icon as={X} className="text-muted-foreground w-5 h-5" />
-        </Pressable>
-      </HStack>
+      {/* SettingsHeader rather than a hand-rolled row, so this sheet's title
+          sits at the same left edge and weight as Settings and Manage
+          Account. The header was the last thing on this screen still drawing
+          its own chrome. */}
+      <SettingsHeader
+        title="Sync Account"
+        icon={UserRound}
+        right={
+          <Pressable onPress={dismiss} className="p-1.5 rounded-full active:bg-muted">
+            <Icon as={X} className="text-muted-foreground w-5 h-5" />
+          </Pressable>
+        }
+      />
 
       <VStack className="flex-1 px-6 pt-4 gap-4">
         {step === 'email' && (
@@ -150,13 +173,16 @@ export default function EnableSyncScreen() {
                 onChangeText={setEmail}
                 placeholder="janedoe@email.com"
                 autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="email"
+                textContentType="emailAddress"
                 keyboardType="email-address"
                 className="text-sm"
               />
             </Input>
             <Pressable
               onPress={handleSendCode}
-              disabled={isSubmitting || !email}
+              disabled={isSubmitting || !emailIsValid}
               className="py-3 rounded-lg bg-lime-500 items-center active:bg-lime-600 disabled:opacity-50"
             >
               {isSubmitting ? (
