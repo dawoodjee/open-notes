@@ -112,6 +112,27 @@ interface StoredVault {
   recoverySalt?: string;
   /** Travels with the blob so a future derivation change doesn't strand it. */
   kdfParams?: KdfParams;
+  /**
+   * WHICH ACCOUNT the recovery code above belongs to.
+   *
+   * Everything else in this blob describes the device. This one field
+   * describes an account, and it is here because the recovery code is the one
+   * piece of vault state that is account-scoped: it wraps the key for one
+   * specific account, and means nothing for any other.
+   *
+   * Without it a code looked current no matter whose it was, and that had
+   * teeth. hasRecoveryCode() gates whether sign-in stops to issue a code, so a
+   * stale code left behind by a previous account made every later sign-up skip
+   * the step and silently claim the account with the old device key -- no code
+   * shown, and public.user_keys is insert-only, so the wrong key was permanent.
+   * Observed on the dev stack: three unrelated accounts sharing one
+   * fingerprint, two of which had no recoverable code in existence.
+   *
+   * Undefined on vaults written before this field existed, and read as "not
+   * this account" -- see hasRecoveryCode. That errs toward issuing a fresh
+   * code, which is the harmless direction.
+   */
+  recoveryUserId?: string;
   /** Whether wrappedByRecoveryCode has made it to public.user_keys yet. */
   backedUp: boolean;
   /**
@@ -284,9 +305,61 @@ export async function setLockSettings(lock: LockSettings): Promise<void> {
 
 // --- recovery code ----------------------------------------------------------
 
-export async function hasRecoveryCode(): Promise<boolean> {
+/**
+ * Does this device hold a confirmed recovery code FOR THIS ACCOUNT?
+ *
+ * The userId argument is not decoration. This used to ask only whether a code
+ * existed, and a code outlives the account it was issued for -- logout clears
+ * the local database but the keychain is untouched, by design, because the
+ * device key still has local notes to protect. So the next account to sign in
+ * on this device found a code sitting there, skipped the step that issues one,
+ * and claimed the account with a key nobody had ever written down.
+ *
+ * A code belonging to someone else is not a code as far as this question is
+ * concerned. Same for a vault predating recoveryUserId: unknown ownership is
+ * treated as foreign, so the worst case is issuing a fresh code that was not
+ * strictly needed.
+ */
+export async function hasRecoveryCode(userId: string): Promise<boolean> {
   const vault = await readVault();
-  return !!vault?.wrappedByRecoveryCode && vault.recoveryConfirmed;
+  if (!vault?.wrappedByRecoveryCode || !vault.recoveryConfirmed) return false;
+  return vault.recoveryUserId === userId;
+}
+
+/**
+ * Forget the recovery code, keeping everything else. Called from logout().
+ *
+ * ONLY the account-scoped fields. Wiping the whole vault would be the obvious
+ * reading of "clean up after sign-out" and it would destroy data: the vault
+ * also holds wrappedByDevice and wrappedDbSeedByDevice, which are what make
+ * this device's remaining local notes -- and the SQLCipher file they live in --
+ * readable at all. Those belong to the device and survive signing out.
+ *
+ * Belt and braces alongside recoveryUserId above. That field alone is enough to
+ * stop a stale code being MISTAKEN for a current one; this stops it lingering
+ * in the keychain after the account it belonged to is gone, which is a
+ * different and equally good reason.
+ *
+ * Signing back into the same account is unaffected: the data key is untouched,
+ * so its fingerprint still matches the account's and reconciliation returns
+ * 'ok' without ever consulting any of this.
+ */
+export async function clearRecoveryState(): Promise<void> {
+  const vault = await readVault();
+  if (!vault) return;
+
+  // Rebuilt by hand rather than spread-and-undefine: `{...vault, x: undefined}`
+  // keeps the keys with undefined values, and JSON.stringify drops them, so it
+  // happens to work -- via two coincidences in a row. Naming what stays is
+  // worth more here than brevity, since what stays is the difference between
+  // readable notes and a brick.
+  await writeVault({
+    wrappedByDevice: vault.wrappedByDevice,
+    wrappedDbSeedByDevice: vault.wrappedDbSeedByDevice,
+    backedUp: false,
+    recoveryConfirmed: false,
+    lock: vault.lock,
+  });
 }
 
 /**
@@ -321,11 +394,18 @@ export async function addRecoveryCode(): Promise<string> {
   return recoveryCode;
 }
 
-/** Called once the recovery code has been shown AND typed back. */
-export async function markRecoveryConfirmed(): Promise<void> {
+/**
+ * Called once the recovery code has been shown AND typed back.
+ *
+ * Also the moment the code gets stamped with its owner. Deliberately here
+ * rather than in addRecoveryCode: an unconfirmed code is not a code (see
+ * recoveryConfirmed), so claiming ownership of the account before the user has
+ * proved they wrote it down would be claiming something untrue.
+ */
+export async function markRecoveryConfirmed(userId: string): Promise<void> {
   const vault = await readVault();
   if (!vault) throw new Error('No vault to confirm.');
-  await writeVault({ ...vault, recoveryConfirmed: true });
+  await writeVault({ ...vault, recoveryConfirmed: true, recoveryUserId: userId });
 }
 
 // --- account key reconciliation --------------------------------------------
@@ -351,6 +431,11 @@ export async function markRecoveryConfirmed(): Promise<void> {
  */
 export async function adoptAccountDataKey(
   accountKey: Uint8Array,
+  // The account being adopted FROM, stamped onto the recovery material below.
+  // Adoption copies that material verbatim from the server, so it belongs to
+  // this account by definition -- and recording that is what stops the next
+  // sign-up on this device mistaking it for its own.
+  userId: string,
   accountRecoveryWrapped: string,
   accountRecoverySalt: string,
   // The ACCOUNT's kdf params, not this device's. Adopting copies the account's
@@ -379,6 +464,7 @@ export async function adoptAccountDataKey(
     wrappedByRecoveryCode: accountRecoveryWrapped,
     recoverySalt: accountRecoverySalt,
     kdfParams: accountKdfParams ?? { alg: RECOVERY_KDF_PARAMS.alg },
+    recoveryUserId: userId,
     backedUp: true, // it came from the server by definition
     recoveryConfirmed: true,
   });
