@@ -5,7 +5,13 @@ const expoConfig = require('eslint-config-expo/flat');
 module.exports = defineConfig([
   expoConfig,
   {
-    ignores: ['dist/*'],
+    // components/ui/ is generated Gluestack code, not ours to edit. Linting it
+    // produced 38 errors and 83 warnings on a clean checkout, against zero
+    // errors in hand-written code -- so `npm run lint` failed by default and
+    // the signal that matters was buried under vendor noise. CONTRIBUTING.md
+    // asks contributors to run this before opening a PR, which only means
+    // something if a clean tree passes.
+    ignores: ['dist/*', 'components/ui/**'],
   },
   {
     // The encryption key is reachable from exactly one directory.

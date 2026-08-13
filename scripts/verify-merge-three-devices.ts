@@ -38,14 +38,21 @@ import { mergeBody } from '../lib/powersync/mergeBody';
 // duplicated here -- the same rule scripts/ios-live.sh follows, and for the
 // same reason: two hand-maintained copies of a server address is how a test
 // ends up quietly proving something about the wrong backend.
-const easLive = JSON.parse(readFileSync(new URL('../eas.json', import.meta.url), 'utf-8')).build.live
-  .env as Record<string, string>;
+// Paths are relative to the repo root, matching verify-merge-two-devices.ts and
+// the rest of scripts/ -- these are all run as `npx tsx scripts/<name>.ts` from
+// there. Deliberately not `new URL(..., import.meta.url)`: this project
+// compiles with lib.dom, so the global URL is the DOM one, which node:fs will
+// not accept and fileURLToPath will not take either.
+const easLive = JSON.parse(readFileSync('eas.json', 'utf-8')).build.live.env as Record<
+  string,
+  string
+>;
 const SUPABASE_URL = easLive.EXPO_PUBLIC_SUPABASE_URL;
 const POWERSYNC_URL = easLive.EXPO_PUBLIC_POWERSYNC_URL;
 const ANON_KEY = easLive.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 function readServiceKey(): string {
-  const path = new URL('../.env.live.local', import.meta.url);
+  const path = '.env.live.local';
   if (!existsSync(path)) {
     throw new Error(
       '.env.live.local not found. It must contain SUPABASE_SERVICE_ROLE_KEY=<key from the Supabase dashboard>.'
