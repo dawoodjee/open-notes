@@ -1,0 +1,310 @@
+# Self-hosted backend: Supabase + PowerSync, one command.
+#
+# This is the stack a self-hoster runs. It is deliberately NOT the same file as
+# the repo-root docker-compose.yml, which runs PowerSync alone against a
+# Supabase started by the `supabase` CLI -- a local development arrangement that
+# needs the CLI installed and cannot be deployed anywhere.
+#
+#   Start:  docker compose --env-file ../.env up -d
+#   Stop:   docker compose --env-file ../.env down
+#   Reset:  docker compose --env-file ../.env down -v      # -v also deletes the data volume
+#
+# See ../docs/self-hosting.md. Every service below has a comment saying what it
+# does and why it is here.
+#
+# Pinned to the exact image versions this project's migrations are known to work
+# against, rather than :latest. An unpinned Supabase stack is a stack that
+# breaks on a Tuesday for reasons unrelated to anything you changed.
+
+# Compose derives the project name from the directory, which would make this
+# "selfhost" -- indistinguishable from any other project someone has in a
+# directory of that name, and different again if the repo is cloned elsewhere.
+# Pinning it means `docker compose` commands address these containers no matter
+# where they run from.
+name: notes-selfhost
+
+services:
+  # ---------------------------------------------------------------------------
+  # db -- Postgres, with the extensions, schemas and roles Supabase expects.
+  #
+  # Not stock Postgres: this image ships the `auth`, `storage` and `extensions`
+  # schemas and the anon/authenticated/service_role roles that RLS policies
+  # refer to. Stock Postgres would apply the migrations and then fail every
+  # policy, because the roles they grant to would not exist.
+  # ---------------------------------------------------------------------------
+  db:
+    image: public.ecr.aws/supabase/postgres:17.6.1.143
+    restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      POSTGRES_DB: postgres
+      POSTGRES_PORT: '5432'
+      PGPORT: '5432'
+      # Sets the superuser password at first init, and is read by the scripts in
+      # ./init to give the other Supabase roles the same password.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      JWT_EXP: ${JWT_EXPIRY:-3600}
+    volumes:
+      # Scripts in init-scripts/ run once, on an empty data directory only.
+      # Re-running `up` on an existing volume does not re-run them.
+      - ./init/01-roles.sql:/docker-entrypoint-initdb.d/init-scripts/01-roles.sql:ro
+      - ./init/02-jwt.sql:/docker-entrypoint-initdb.d/init-scripts/02-jwt.sql:ro
+      - db-data:/var/lib/postgresql/data
+    ports:
+      # Exposed so you can psql in, take backups, and run the repair script.
+      # Bind to 127.0.0.1 on a public server -- see docs/self-hosting.md.
+      - '${POSTGRES_HOST_PORT:-5432}:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -h localhost']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # ---------------------------------------------------------------------------
+  # auth -- GoTrue. Signup, email OTP, OAuth, JWT issuing.
+  #
+  # Creates and migrates its own `auth` schema at startup, INCLUDING auth.users.
+  # That is why the migrator below waits for this service to be healthy: the
+  # app's schema has `user_id uuid references auth.users (id)`, which cannot be
+  # applied before GoTrue has created that table.
+  # ---------------------------------------------------------------------------
+  auth:
+    image: public.ecr.aws/supabase/gotrue:v2.195.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: '9999'
+      # The URL clients reach this API on from outside. Wrong value here =
+      # confirmation links that point somewhere unreachable.
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL:?set API_EXTERNAL_URL in .env}
+
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+
+      # `notes://` for the mobile app's deep link. Add your web origin here too
+      # if you serve the web build.
+      GOTRUE_SITE_URL: ${SITE_URL:-notes://}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS:-notes://*}
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP:-false}
+
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY:-3600}
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+
+      # This app signs in with a 6-digit emailed code, not a password.
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: 'true'
+      GOTRUE_MAILER_AUTOCONFIRM: ${MAILER_AUTOCONFIRM:-false}
+      GOTRUE_MAILER_OTP_EXP: '3600'
+      GOTRUE_SMTP_HOST: ${SMTP_HOST:-mailpit}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT:-1025}
+      GOTRUE_SMTP_USER: ${SMTP_USER:-}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS:-}
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL:-notes@localhost}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-Notes}
+
+      # Optional. Leave the client id blank in .env to keep Google sign-in off;
+      # GoTrue reads the flag, so an empty id with the flag on fails at startup.
+      GOTRUE_EXTERNAL_GOOGLE_ENABLED: ${GOOGLE_ENABLED:-false}
+      GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ${SUPABASE_AUTH_GOOGLE_CLIENT_ID:-}
+      GOTRUE_EXTERNAL_GOOGLE_SECRET: ${SUPABASE_AUTH_GOOGLE_SECRET:-}
+      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${API_EXTERNAL_URL}/auth/v1/callback
+    healthcheck:
+      test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:9999/health']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # ---------------------------------------------------------------------------
+  # rest -- PostgREST. Turns the Postgres schema into a REST API.
+  #
+  # This is what supabase-js talks to for `profiles`, `user_keys` and the
+  # plaintext-endpoint tables. Notes do NOT go through here; they go through
+  # PowerSync. Every request runs as the role in the caller's JWT, so RLS is
+  # what actually restricts rows.
+  # ---------------------------------------------------------------------------
+  rest:
+    image: public.ecr.aws/supabase/postgrest:v14.16
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: 'false'
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY:-3600}
+
+  # ---------------------------------------------------------------------------
+  # kong -- the API gateway. The single port everything is reached through.
+  #
+  # Clients send one base URL (EXPO_PUBLIC_SUPABASE_URL) and Kong routes
+  # /auth/v1/* to GoTrue and /rest/v1/* to PostgREST. It also checks the `apikey`
+  # header, which is why an anon key is required even on public routes.
+  #
+  # The shell wrapper expands ${...} inside kong.yml -- Kong itself does not read
+  # environment variables in a declarative config file.
+  # ---------------------------------------------------------------------------
+  kong:
+    image: public.ecr.aws/supabase/kong:2.8.1
+    restart: unless-stopped
+    depends_on:
+      auth:
+        condition: service_healthy
+    entrypoint: >
+      bash -c 'eval "echo \"$$(cat /home/kong/template.yml)\"" > /home/kong/kong.yml
+      && /docker-entrypoint.sh kong docker-start'
+    environment:
+      KONG_DATABASE: 'off'
+      KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+      SUPABASE_ANON_KEY: ${ANON_KEY:?set ANON_KEY in .env}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY:?set SERVICE_ROLE_KEY in .env}
+    volumes:
+      - ./kong.yml:/home/kong/template.yml:ro
+    ports:
+      - '${KONG_HTTP_PORT:-8000}:8000'
+
+  # ---------------------------------------------------------------------------
+  # migrator -- one-shot. Applies this repo's schema, then exits.
+  #
+  # Runs as a service rather than as a db init script for one reason: init
+  # scripts run before GoTrue exists, and this schema references auth.users.
+  # `condition: service_healthy` on auth is what enforces the ordering.
+  #
+  # Also sets the powersync_role password. The migration creates that role with
+  # `password null` on purpose, so a working password never lands in a committed
+  # file. Skip this step and PowerSync fails 28P01 and replicates nothing while
+  # every container still reports healthy.
+  # ---------------------------------------------------------------------------
+  migrator:
+    image: public.ecr.aws/supabase/postgres:17.6.1.143
+    depends_on:
+      db:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+    restart: 'no'
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POWERSYNC_REPLICATION_PASSWORD: ${POWERSYNC_REPLICATION_PASSWORD:?set POWERSYNC_REPLICATION_PASSWORD in .env}
+    volumes:
+      - ../supabase/migrations:/migrations:ro
+      - ./migrate.sh:/migrate.sh:ro
+    entrypoint: ['/bin/bash', '/migrate.sh']
+
+  # ---------------------------------------------------------------------------
+  # powersync -- the sync service. What the app actually syncs notes through.
+  #
+  # Reads Postgres's write-ahead log directly (that is what powersync_role's
+  # `replication` privilege is for), and hands each client only the rows its JWT
+  # entitles it to, per ./powersync/sync-rules.yaml.
+  #
+  # It never sees plaintext. notes.title and notes.body are `enc:v1:` envelopes
+  # encrypted on the device before they ever reach Postgres.
+  # ---------------------------------------------------------------------------
+  powersync:
+    image: journeyapps/powersync-service:1.23.3
+    restart: unless-stopped
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    command: ['start', '-r', 'unified']
+    environment:
+      POWERSYNC_CONFIG_PATH: /config/config.yaml
+      NODE_OPTIONS: --max-old-space-size=1000
+      PS_DATA_SOURCE_URI: postgresql://powersync_role:${POWERSYNC_REPLICATION_PASSWORD}@db:5432/postgres
+      PS_STORAGE_URI: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+      PS_PORT: '8080'
+      # Verifies the JWT every client connects with. Self-hosted GoTrue signs
+      # with this shared secret (HS256) -- see ./powersync/config.yaml.
+      PS_SUPABASE_JWT_SECRET: ${JWT_SECRET}
+    volumes:
+      - ./powersync/config.yaml:/config/config.yaml:ro
+      # The self-hosted sync config. Note this is sync-RULES, not sync-STREAMS;
+      # the two are different formats and both are in this repo. See
+      # ../docs/self-hosting.md.
+      - ../powersync/sync-rules.yaml:/config/sync-rules.yaml:ro
+    ports:
+      - '${POWERSYNC_HTTP_PORT:-8080}:8080'
+
+  # ---------------------------------------------------------------------------
+  # studio -- the web admin UI (tables, SQL editor, users). Optional.
+  #
+  # Comment this and `meta` out if you do not want a dashboard. Nothing in the
+  # app depends on either.
+  # ---------------------------------------------------------------------------
+  studio:
+    image: public.ecr.aws/supabase/studio:2026.08.03-sha-022b374
+    restart: unless-stopped
+    depends_on:
+      - meta
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DEFAULT_ORGANIZATION_NAME: ${STUDIO_DEFAULT_ORGANIZATION:-Notes}
+      DEFAULT_PROJECT_NAME: ${STUDIO_DEFAULT_PROJECT:-Notes}
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: ${API_EXTERNAL_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      # Keeps Studio off Logflare, which this stack deliberately does not run.
+      NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
+    ports:
+      - '${STUDIO_PORT:-54323}:3000'
+
+  # meta -- the schema introspection API Studio reads. No reason to call it
+  # yourself; it exists so Studio can list tables and columns.
+  meta:
+    image: public.ecr.aws/supabase/postgres-meta:v0.96.8
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: '8080'
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: '5432'
+      PG_META_DB_NAME: postgres
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+
+  # ---------------------------------------------------------------------------
+  # mailpit -- catches outgoing email instead of sending it. FOR TRYING THE
+  # STACK OUT ONLY.
+  #
+  # Sign-in codes land in a web inbox at http://localhost:${MAILPIT_PORT} rather
+  # than in a real mailbox, so you can test signup without SMTP credentials.
+  # For real use, set SMTP_* in .env to a real provider and delete this service
+  # -- otherwise nobody but you can ever sign in.
+  # ---------------------------------------------------------------------------
+  mailpit:
+    image: public.ecr.aws/supabase/mailpit:v1.30.2
+    restart: unless-stopped
+    ports:
+      - '${MAILPIT_PORT:-54324}:8025'
+
+volumes:
+  # Named volume, not a bind mount: Postgres on a macOS/Windows bind mount is
+  # both slow and prone to permission failures. `docker compose down` keeps it;
+  # `down -v` destroys it and every note in it.
+  db-data:

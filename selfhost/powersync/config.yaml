@@ -1,0 +1,78 @@
+# yaml-language-server: $schema=https://unpkg.com/@powersync/service-schema@latest/json-schema/powersync-config.json
+#
+# PowerSync config for the SELF-HOSTED stack.
+#
+# Deliberately a separate file from ../../powersync/config.yaml, which is for
+# the maintainer's CLI-based dev stack. They differ in exactly one important
+# place -- client_auth -- and copying that file here produces a stack where
+# every container is healthy and every client is rejected. See below.
+#
+# Values marked `!env` come from the environment ../docker-compose.yml sets on
+# this container, so nothing secret is committed here.
+
+telemetry:
+  disable_telemetry_sharing: false
+
+# Where PowerSync reads the write-ahead log from. `powersync_role` is created by
+# the app's migration with the `replication` and `bypassrls` attributes:
+# replication reads the raw table rather than acting as any particular end user,
+# so Postgres RLS does not apply at this layer. The sync rules below are the
+# security boundary during sync instead.
+replication:
+  connections:
+    - type: postgresql
+      uri: !env PS_DATA_SOURCE_URI
+      # Both containers are on the same private Docker network and Postgres here
+      # has no TLS listener. Turn this on if you move the database off-box.
+      sslmode: disable
+
+# PowerSync's own checkpoint and bucket state. Reusing the same Postgres server
+# in its own schema rather than running MongoDB alongside -- fully supported,
+# and it keeps the stack to one database to back up.
+storage:
+  type: postgresql
+  uri: !env PS_STORAGE_URI
+  sslmode: disable
+
+port: !env PS_PORT
+
+sync_config:
+  # sync-RULES (bucket_definitions), NOT sync-streams.yaml. Both files exist in
+  # this repo and only this one is the self-hosted format. Mounted by
+  # docker-compose.yml from ../../powersync/sync-rules.yaml.
+  path: sync-rules.yaml
+
+# -----------------------------------------------------------------------------
+# How client JWTs are verified. THE ONE THING THAT DIFFERS FROM THE DEV CONFIG.
+#
+# The dev config verifies tokens against a JWKS URL, because the Supabase CLI
+# provisions an asymmetric (ES256) signing key and publishes its public half.
+# A self-hosted GoTrue configured the standard way -- one shared JWT_SECRET --
+# signs HS256 instead, and has no public key to publish. Point this stack at a
+# JWKS endpoint and PowerSync starts cleanly, reports healthy, and rejects every
+# real client with an authentication error.
+#
+# `supabase: true` plus `supabase_jwt_secret` is the supported form: the service
+# turns the shared secret into a symmetric key itself, and applies Supabase's
+# token conventions (audience `authenticated`, one-week maximum lifetime).
+# Both keys are required -- the secret alone is ignored without the flag.
+#
+# Expect exactly this warning at startup, every time:
+#
+#   Supabase Auth is enabled, but no Supabase connection string found.
+#   Skipping Supabase JWKS URL configuration.
+#
+# It is expected and harmless. `supabase: true` also makes the service try to
+# derive a JWKS URL from the replication connection string, which only works
+# against a hosted Supabase URI; the shared secret above is what actually does
+# the verifying. Nothing is broken and there is nothing to fix.
+#
+# If you have configured GoTrue with asymmetric signing keys instead, drop the
+# two lines below and use:
+#     jwks_uri: http://kong:8000/auth/v1/.well-known/jwks.json
+#     block_local_jwks: false     # the URI is an internal Docker hostname
+# -----------------------------------------------------------------------------
+client_auth:
+  supabase: true
+  supabase_jwt_secret: !env PS_SUPABASE_JWT_SECRET
+  audience: ['authenticated']
