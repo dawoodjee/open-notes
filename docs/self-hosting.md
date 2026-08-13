@@ -369,7 +369,11 @@ replicates into it as an `enc:v1:` envelope; and a second signed-in account
 cannot see that note over sync or over the REST API, nor can an anonymous
 caller. That is what `scripts/verify-selfhost.mjs` re-runs.
 
-**Not covered:** a physical device against a self-hosted stack, TLS behind a real
-domain, and Google sign-in. The VPS section is written from the same
-configuration, but the certificate and DNS steps have not been executed here. If
-you hit a wall, please open an issue.
+**VPS mode:** with `BIND_ADDR=127.0.0.1` the whole stack boots and passes the
+same fifteen checks, every published port binds to loopback only, and the LAN
+interface refuses connections on Kong, PowerSync and Postgres. `selfhost/Caddyfile`
+passes `caddy validate`.
+
+**Not covered:** a physical device against a self-hosted stack, a real
+certificate against a real domain (the DNS and ACME steps have not been executed
+here), and Google sign-in. If you hit a wall, please open an issue.
