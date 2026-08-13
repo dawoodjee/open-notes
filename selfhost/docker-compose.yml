@@ -270,7 +270,7 @@ services:
       # Keeps Studio off Logflare, which this stack deliberately does not run.
       NEXT_ANALYTICS_BACKEND_PROVIDER: postgres
     ports:
-      - '${STUDIO_PORT:-54323}:3000'
+      - '${STUDIO_PORT:-8001}:3000'
 
   # meta -- the schema introspection API Studio reads. No reason to call it
   # yourself; it exists so Studio can list tables and columns.
@@ -301,7 +301,7 @@ services:
     image: public.ecr.aws/supabase/mailpit:v1.30.2
     restart: unless-stopped
     ports:
-      - '${MAILPIT_PORT:-54324}:8025'
+      - '${MAILPIT_PORT:-8025}:8025'
 
 volumes:
   # Named volume, not a bind mount: Postgres on a macOS/Windows bind mount is

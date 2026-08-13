@@ -75,10 +75,12 @@ database role the caller acts as. They have to be generated together, and
 changing `JWT_SECRET` later invalidates both.
 
 ```bash
-node selfhost/generate-keys.mjs
+node selfhost/generate-keys.mjs --write
 ```
 
-That prints six lines. Paste each over the matching empty value in `.env`.
+That fills the six generated values straight into `.env` and tells you which
+ones it set. It never overwrites a value that is already there, so it is safe to
+re-run. Drop `--write` if you would rather see them and paste them yourself.
 (Needs Node 18+, which you will want anyway for building the app.)
 
 Then set one address by hand:
@@ -100,6 +102,12 @@ Everything else in `.env` has a working default.
 ```bash
 cd selfhost && docker compose --env-file ../.env up -d
 ```
+
+**Every `docker compose` command below is run from `selfhost/`, and every one
+needs `--env-file ../.env`.** Compose looks for a `.env` beside the compose
+file, and this project's lives at the repo root. Forget the flag and it stops
+with `required variable POSTGRES_PASSWORD is missing a value` rather than
+starting something half-configured.
 
 First run pulls several GB of images and takes a few minutes. After that it is
 seconds.
@@ -137,7 +145,7 @@ reload. Then follow [building.md](building.md).
 
 Sign-in is a 6-digit code sent by email. Out of the box the stack does not send
 email — it catches it in **Mailpit**, a fake inbox at
-<http://127.0.0.1:54324>. Request a code in the app, open that page, read the
+<http://127.0.0.1:8025>. Request a code in the app, open that page, read the
 code.
 
 That is for trying the stack out. For real use, set `SMTP_*` in `.env` to a real
@@ -159,7 +167,7 @@ server on the open internet is not accepting new accounts.
 | **kong** | The gateway. One public port, routed to `auth` or `rest` by URL prefix, with the `apikey` header checked first. |
 | **powersync** | The sync service. Reads Postgres's write-ahead log and hands each device the rows its token entitles it to. Never sees plaintext. |
 | **migrator** | Runs once, applies the schema, exits. Not a bug when you see it stopped. |
-| **studio** | The web admin UI at <http://127.0.0.1:54323>. Optional — nothing depends on it. |
+| **studio** | The web admin UI at <http://127.0.0.1:8001>. Optional — nothing depends on it. |
 | **meta** | Schema introspection, so Studio can list tables. Optional, with Studio. |
 | **mailpit** | Fake inbox for testing. Delete it for real use. |
 
@@ -239,8 +247,16 @@ docker exec notes-selfhost-db-1 pg_dump -U supabase_admin postgres > backup.sql
 
 ## Troubleshooting
 
-**Containers exit with code 137.** Out of memory — the OS killed them. Give
-Docker at least 4 GB. Running two Supabase stacks at once will do this.
+**Containers exit with code 137.** Out of memory — the OS killed them, and
+nothing in the logs will say so. Give Docker at least 4 GB. Running two Supabase
+stacks at once will do this on a 4 GB allowance, so if you are also running the
+`supabase` CLI for development, stop it first.
+
+**`port is already allocated`.** Something else holds one of the published
+ports. Change it in `.env` — `KONG_HTTP_PORT`, `POWERSYNC_HTTP_PORT`,
+`POSTGRES_HOST_PORT`, `STUDIO_PORT`, `MAILPIT_PORT` — and remember to update
+`API_EXTERNAL_URL` and the `EXPO_PUBLIC_*` URLs to match if you moved Kong or
+PowerSync.
 
 **`auth` or `rest` restart forever, "password authentication failed".** The
 role passwords are set by a script that runs only when the data volume is first
@@ -283,7 +299,7 @@ curl -H "apikey: $ANON_KEY" http://127.0.0.1:8000/auth/v1/health
 ```
 
 **Sign-in emails never arrive.** Expected, unless you configured `SMTP_*` —
-they are in Mailpit at <http://127.0.0.1:54324>.
+they are in Mailpit at <http://127.0.0.1:8025>.
 
 ---
 
