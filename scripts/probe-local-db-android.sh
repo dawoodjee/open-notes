@@ -48,10 +48,34 @@ file_exists() {
   [ "$(run_as sh -c "[ -f '$1' ] && echo yes || echo no" | tr -d '\r\n')" = "yes" ]
 }
 
-if ! run_as ls >/dev/null 2>&1; then
-  echo "run-as refused for $PKG -- not installed, or not a debuggable build."
-  exit 1
-fi
+# The capability gate has to read OUTPUT, not an exit status, for exactly the
+# reason count_in documents above -- and this line is where that lesson was
+# originally missed. `adb exec-out run-as <non-debuggable-pkg>` prints
+# "run-as: package not debuggable" and still exits 0, so `if ! run_as ls`
+# never fired and the script sailed past it.
+#
+# What that produced on a release build was not an error but a clean bill of
+# health: every check below was handed the string "run-as: package not
+# debuggable: com.adawoodjee.notes" instead of file contents. That string does
+# not contain "SQLite format 3", so check 1 printed "ok: no SQLite header". It
+# does not contain the search term, so check 2 printed "clean: 0 matches". The
+# probe reported the encryption was working while reading nothing at all.
+#
+# Caught by the Stage 8 pass running it against a release EAS build, which is
+# the first time this script had ever been pointed at a non-debuggable install.
+PROBE_OUT="$(run_as ls 2>&1 || true)"
+case "$PROBE_OUT" in
+  *'run-as:'* | *'not debuggable'* | *'is unknown'* | *'Could not set capabilities'*)
+    echo "run-as refused for $PKG:"
+    echo "  $PROBE_OUT"
+    echo
+    echo "This is the CORRECT behaviour on a release build -- run-as steps into"
+    echo "the app's uid, which the platform only permits for a debuggable one."
+    echo "This probe therefore cannot inspect a release install, by design."
+    echo "To use it, install a debug build (npm run android) and re-run."
+    exit 1
+    ;;
+esac
 
 echo "package: $PKG"
 echo
