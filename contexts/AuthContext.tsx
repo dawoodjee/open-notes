@@ -68,7 +68,7 @@ async function reconcileAccountKey(
     // Adoption deliberately does NOT require this device to have a recovery
     // code of its own -- it's about to inherit the account's, and its own
     // becomes meaningless the moment it adopts.
-    return beginAdoption(account, setSessionState);
+    return beginAdoption(userId, account, setSessionState);
   }
 
   // This device is first, so its key becomes the account's. That is the point
@@ -76,7 +76,13 @@ async function reconcileAccountKey(
   // user_keys is the ONLY way this key ever reaches a second device, and
   // uploading notes before one exists would produce ciphertext on the server
   // whose key lives on exactly one phone with no way off it.
-  if (!(await hasRecoveryCode())) {
+  //
+  // Asked PER ACCOUNT, not per device. Asking only "does a code exist here"
+  // was the bug behind three dev-stack accounts sharing one key fingerprint:
+  // a code issued for a previous account was still in the keychain, so this
+  // branch was skipped and the account was claimed with a key that had never
+  // been written down anywhere. See hasRecoveryCode.
+  if (!(await hasRecoveryCode(userId))) {
     return beginKeySetup(userId, setSessionState);
   }
 
@@ -91,7 +97,7 @@ async function reconcileAccountKey(
   // Fall through and adopt whatever won.
   const winner = await fetchAccountKey(userId);
   if (!winner) return 'ok';
-  return beginAdoption(winner, setSessionState);
+  return beginAdoption(userId, winner, setSessionState);
 }
 
 /**
@@ -137,6 +143,10 @@ function beginKeySetup(
   setSessionState: (s: Session | null) => void
 ): 'blocked' {
   setPendingKeySetup({
+    // Carried through to the screen so the code it issues can be stamped with
+    // the account it is for. The screen is rendered from the root layout with
+    // no component ancestry back to here, so this object is the only channel.
+    userId,
     async complete() {
       setPendingKeySetup(null);
       const outcome = await reconcileAccountKey(userId, setSessionState);
@@ -155,6 +165,7 @@ function beginKeySetup(
 }
 
 function beginAdoption(
+  userId: string,
   record: AccountKeyRecord,
   setSessionState: (s: Session | null) => void
 ): 'blocked' {
@@ -177,6 +188,7 @@ function beginAdoption(
 
       const { previousKey } = await adoptAccountDataKey(
         accountKey,
+        userId,
         record.recoveryWrappedKey,
         record.recoverySalt,
         record.kdfParams
@@ -189,15 +201,18 @@ function beginAdoption(
       previousKey.fill(0);
 
       setPendingAdoption(null);
-      // The session is already set by the time adoption can start, so this is
-      // the account whose key was just adopted. No fallback to a bare
-      // connect: connecting without claiming first is precisely what
-      // discards unowned notes at the first checkpoint, so if the session
-      // has somehow gone, fail loudly and leave sync off rather than risk
-      // deleting the user's notes to keep going.
-      const userId = getCurrentSession()?.user.id;
-      if (!userId) {
-        throw new Error('Adoption completed without a current session; refusing to connect.');
+      // Re-read the session and check it is still the SAME account, rather
+      // than trusting the userId this call was created with. No fallback to a
+      // bare connect: connecting without claiming first is precisely what
+      // discards unowned notes at the first checkpoint, so if the session has
+      // gone -- or has become somebody else while the user was typing twelve
+      // words -- fail loudly and leave sync off rather than risk claiming this
+      // device's notes for the wrong account.
+      const sessionUserId = getCurrentSession()?.user.id;
+      if (sessionUserId !== userId) {
+        throw new Error(
+          'Adoption completed without a matching session; refusing to connect.'
+        );
       }
       await claimAndConnect(userId);
     },

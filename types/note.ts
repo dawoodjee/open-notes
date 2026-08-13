@@ -263,9 +263,19 @@ export function formatNoteDate(date: Date): string {
   const diffTime = nowDate.getTime() - targetDate.getTime();
   const diffDays = diffTime / (1000 * 60 * 60 * 24);
 
-  // 1. If it's today -> Show just the time (e.g., "4:32 PM")
+  // 1. If it's today -> Show just the time, 24-hour, as "HH:MM" (e.g. "16:32")
+  //
+  // Formatted by hand rather than through toLocaleTimeString, which is the
+  // less obvious of the two options and the reason is worth keeping: the
+  // locale formatter decides the clock from the DEVICE's region, so a
+  // 12-hour locale would put "PM" back regardless of what is asked for here.
+  // Passing hour12: false gets close but is not the same thing -- under the
+  // h24 cycle some locales render midnight as "24:05" rather than "00:05".
+  // padStart has neither problem and produces exactly two digits, always.
   if (diffDays === 0) {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${hours}:${minutes}`;
   }
 
   // 2. If it's yesterday -> Show "Yesterday"

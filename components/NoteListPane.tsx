@@ -155,7 +155,7 @@ export default function NoteListPane({
                   style={{ flexShrink: 0 }}
                 >
                   {formatNoteDate(new Date(note.updatedAt))}
-                  {" "}
+                  {"  "}
                 </RNText>
 
                 <RNText

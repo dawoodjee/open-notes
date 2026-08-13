@@ -64,7 +64,7 @@ export function SecureAccountScreen() {
     // Order matters: the code is only "real" once it's confirmed, and
     // getKeyBackupPayload() refuses to hand over an unconfirmed one -- so
     // marking it first is what lets the upload in complete() succeed.
-    await markRecoveryConfirmed();
+    await markRecoveryConfirmed(pending.userId);
     await pending.complete();
   }, [pending]);
 

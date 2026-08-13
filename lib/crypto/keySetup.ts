@@ -18,6 +18,15 @@
  */
 
 export interface PendingKeySetup {
+  /**
+   * The account this code is being issued for.
+   *
+   * The screen needs it to stamp ownership onto the code (see
+   * markRecoveryConfirmed), and cannot get it any other way -- it renders from
+   * the root layout, with no component ancestry back to the sign-in sequence
+   * that produced this object.
+   */
+  userId: string;
   /** Generates the code, shows it, and resumes sign-in once confirmed. */
   complete: () => Promise<void>;
   /** Abandons the attempt and signs back out. */
