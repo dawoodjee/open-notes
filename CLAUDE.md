@@ -60,6 +60,10 @@ final approach is captured, and tool output already acted on.
 Terse structured notes under these headings. Not prose. If a fact would need to
 be looked up again to act on it, it wasn't preserved.
 
+## Front-load what needs me
+Before starting execution, list everything in the task that will need my hands or my approval — physical device access, credentials, dashboard logins, OAuth consent screens, email verification codes, destructive steps needing sign-off — and get all of it done or confirmed up front. Don't discover these one at a time mid-run and stall waiting on me; by then I've likely stopped watching and the run sits idle. If something genuinely can't be front-loaded, say so and tell me exactly when in the run it will come up.
+
+
 ## Balance
 Teach densely, not lengthily — maximum learning per word, and keep momentum. Concise is not shallow: compress the explanation, never the substance. Skip preamble, restatement of what the diff already shows, and boilerplate caveats.
 
