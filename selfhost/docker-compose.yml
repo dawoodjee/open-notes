@@ -57,9 +57,17 @@ services:
       - ./init/02-jwt.sql:/docker-entrypoint-initdb.d/init-scripts/02-jwt.sql:ro
       - db-data:/var/lib/postgresql/data
     ports:
-      # Exposed so you can psql in, take backups, and run the repair script.
-      # Bind to 127.0.0.1 on a public server -- see docs/self-hosting.md.
-      - '${POSTGRES_HOST_PORT:-5432}:5432'
+      # Loopback by default: exposed so YOU can psql in, take backups and run
+      # the repair script, not so the internet can. Postgres open to the world
+      # is the single worst thing to get wrong here.
+      #
+      # BIND_ADDR is the whole-stack switch. Unset, the two ports the app needs
+      # (kong, powersync) listen on every interface so a phone on your LAN can
+      # reach a laptop, while the admin surfaces below stay on loopback. Set
+      # BIND_ADDR=127.0.0.1 on a public server and NOTHING is directly
+      # reachable -- a reverse proxy in front terminates TLS and is the only
+      # way in. See ../docs/self-hosting.md.
+      - '${BIND_ADDR:-127.0.0.1}:${POSTGRES_HOST_PORT:-5432}:5432'
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U postgres -h localhost']
       interval: 5s
@@ -249,7 +257,9 @@ services:
     volumes:
       - ./kong.yml:/home/kong/template.yml:ro
     ports:
-      - '${KONG_HTTP_PORT:-8000}:8000'
+      # Every interface by default so a phone can reach a laptop stack.
+      # BIND_ADDR=127.0.0.1 puts it behind a reverse proxy instead.
+      - '${BIND_ADDR:-0.0.0.0}:${KONG_HTTP_PORT:-8000}:8000'
 
   # ---------------------------------------------------------------------------
   # migrator -- one-shot. Applies this repo's schema, then exits.
@@ -312,7 +322,7 @@ services:
       # ../docs/self-hosting.md.
       - ../powersync/sync-rules.yaml:/config/sync-rules.yaml:ro
     ports:
-      - '${POWERSYNC_HTTP_PORT:-8080}:8080'
+      - '${BIND_ADDR:-0.0.0.0}:${POWERSYNC_HTTP_PORT:-8080}:8080'
     # The image ships neither curl nor wget, so the check goes through node.
     # Liveness only says the HTTP server is up -- it does NOT mean replication
     # connected. For that, look for "Created replication slot" in the logs.
@@ -359,7 +369,7 @@ services:
       # confusing first impression of a stack you have just stood up.
       HOSTNAME: '0.0.0.0'
     ports:
-      - '${STUDIO_PORT:-8001}:3000'
+      - '${BIND_ADDR:-127.0.0.1}:${STUDIO_PORT:-8001}:3000'
 
   # meta -- the schema introspection API Studio reads. No reason to call it
   # yourself; it exists so Studio can list tables and columns.
@@ -390,7 +400,7 @@ services:
     image: public.ecr.aws/supabase/mailpit:v1.30.2
     restart: unless-stopped
     ports:
-      - '${MAILPIT_PORT:-8025}:8025'
+      - '${BIND_ADDR:-127.0.0.1}:${MAILPIT_PORT:-8025}:8025'
 
 volumes:
   # Named volume, not a bind mount: Postgres on a macOS/Windows bind mount is

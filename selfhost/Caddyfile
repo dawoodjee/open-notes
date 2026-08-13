@@ -1,0 +1,39 @@
+# Reverse proxy for a public deployment. Runs on the HOST, not in the compose
+# stack, and is the only thing listening on the public internet.
+#
+#   sudo cp selfhost/Caddyfile /etc/caddy/Caddyfile
+#   # edit the two hostnames, then:
+#   sudo systemctl reload caddy
+#
+# Caddy obtains and renews Let's Encrypt certificates on its own, with no flags
+# and no cron job -- which is why it is the suggestion here rather than nginx.
+# Both hostnames must already resolve to this server, or the certificate request
+# fails.
+#
+# Set BIND_ADDR=127.0.0.1 in .env before using this. Otherwise the containers
+# stay reachable on their raw ports and the proxy is decoration: anyone can skip
+# it and talk to Kong over plain HTTP.
+#
+# Why two hostnames rather than one with paths: the app is configured with two
+# separate URLs (EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_POWERSYNC_URL), and
+# PowerSync serves from the root of its own origin.
+
+api.notes.example.com {
+	reverse_proxy 127.0.0.1:8000
+}
+
+sync.notes.example.com {
+	# PowerSync holds a long-lived streaming connection open per client. Caddy
+	# proxies that and websockets without extra configuration; if you swap in
+	# nginx, turn buffering off and raise the read timeout, or sync will appear
+	# to connect and then stall.
+	reverse_proxy 127.0.0.1:8080
+}
+
+# Studio, the admin dashboard, is deliberately absent. It is bound to loopback
+# and has no authentication of its own -- publishing it hands anyone who finds
+# it full read/write on the database. Reach it over an SSH tunnel instead:
+#
+#     ssh -L 8001:127.0.0.1:8001 you@your-server
+#
+# then open http://127.0.0.1:8001 on your own machine.
