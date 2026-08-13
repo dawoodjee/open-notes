@@ -1,53 +1,36 @@
 # Self-hosting
 
-Run the backend yourself: Postgres, auth, and sync, on your own machine or your
-own server. One `docker compose up`.
+Run the backend yourself — Postgres, auth and sync — on a laptop or a server.
+One `docker compose up`.
 
-**Self-hosting does not weaken the encryption, and it does not strengthen it
-either — there is nothing left to strengthen.** Note titles and bodies are
-encrypted on the device before they are ever sent, so the database stores
-`enc:v1:` envelopes and nothing else. Your server cannot read your notes any
-more than anyone else's can. What self-hosting changes is who holds the
-metadata — account rows, timestamps, which notes exist — and who is responsible
-for backups.
+**Self-hosting does not change the encryption.** Note titles and bodies are
+encrypted on the device before they are sent, so the database holds `enc:v1:`
+envelopes either way and your server cannot read your notes. What changes is who
+holds the metadata — accounts, timestamps, which notes exist — and who is
+responsible for backups.
+
+Two paths below. [Local](#local-trial) to try it in ten minutes;
+[VPS](#deploy-to-a-vps) for something your phone can reach from anywhere. The
+first four steps are shared.
 
 ---
 
-## If you have never used Docker
+## Docker in a minute
 
-Four words to know, and then you can skip to the next section.
+Skip if you know it.
 
-- **Image** — a frozen, read-only filesystem with a program in it. `postgres` is
-  an image. Nothing runs; it is a template.
-- **Container** — an image that has been started. Isolated from your machine
-  except where you explicitly connect it.
-- **Volume** — a disk that outlives its container. Containers are disposable;
-  volumes are where the data actually lives. **Deleting a volume deletes your
-  notes.**
-- **Compose** — a YAML file describing several containers and how they connect,
-  so you start them together instead of one by one.
+- **Image** — a frozen filesystem with a program in it. A template; nothing runs.
+- **Container** — a started image, isolated from your machine.
+- **Volume** — a disk that outlives its container. **Deleting a volume deletes
+  your notes.**
+- **Compose** — a YAML file describing several containers, started together.
 
-Two commands do almost everything:
+`docker compose up -d` starts everything in the background, `down` stops it and
+keeps your data, `down -v` also destroys the volumes.
 
-```bash
-docker compose up -d
-```
-
-```bash
-docker compose down
-```
-
-`up -d` starts everything in the background; `down` stops it. `down` keeps your
-data. `down -v` also deletes the volumes, which deletes your notes.
-
-Install [Docker Desktop](https://docs.docker.com/get-started/get-docker/), or
-Docker Engine on Linux. Everything here needs Docker Compose v2 (`docker
-compose`, two words — not the older `docker-compose`).
-
-**Give Docker at least 4 GB of memory.** Docker Desktop's default is often
-lower, and this stack will be killed partway through starting if it is — you
-will see containers exit with code 137, which is the operating system killing
-them, not a bug in the stack. Docker Desktop → Settings → Resources.
+Install [Docker](https://docs.docker.com/get-started/get-docker/) — Compose v2
+(`docker compose`, two words). **Give it at least 4 GB of memory**, or containers
+get killed mid-start with exit code 137, which no log will explain.
 
 ---
 
@@ -56,46 +39,23 @@ them, not a bug in the stack. Docker Desktop → Settings → Resources.
 ### 1. Get the code
 
 ```bash
-git clone https://github.com/dawoodjee/open-notes.git
+git clone https://github.com/dawoodjee/open-notes.git && cd open-notes
 ```
 
-```bash
-cd open-notes
-```
-
-### 2. Create your `.env`
+### 2. Generate secrets
 
 ```bash
 cp .env.example .env
 ```
 
-Now generate the secrets. They are not free-form passwords: `ANON_KEY` and
-`SERVICE_ROLE_KEY` are JSON Web Tokens signed by `JWT_SECRET`, carrying the
-database role the caller acts as. They have to be generated together, and
-changing `JWT_SECRET` later invalidates both.
-
 ```bash
 node selfhost/generate-keys.mjs --write
 ```
 
-That fills the six generated values straight into `.env` and tells you which
-ones it set. It never overwrites a value that is already there, so it is safe to
-re-run. Drop `--write` if you would rather see them and paste them yourself.
-(Needs Node 18+, which you will want anyway for building the app.)
-
-Then set one address by hand:
-
-```
-API_EXTERNAL_URL=http://127.0.0.1:8000
-```
-
-This is the URL clients reach the API on **from outside Docker**. `127.0.0.1`
-is right if you are only using a simulator on the same machine. If a real phone
-will connect, it must be an address that phone can resolve — your machine's LAN
-IP, or a domain name. Getting this wrong produces sign-in emails whose links go
-nowhere.
-
-Everything else in `.env` has a working default.
+`ANON_KEY` and `SERVICE_ROLE_KEY` are not passwords — they are JWTs signed by
+`JWT_SECRET`, carrying the database role the caller acts as. They must be
+generated together, and changing `JWT_SECRET` later invalidates both. The script
+fills all six values into `.env` and never overwrites one already set.
 
 ### 3. Start it
 
@@ -103,294 +63,317 @@ Everything else in `.env` has a working default.
 cd selfhost && docker compose --env-file ../.env up -d
 ```
 
-**Every `docker compose` command below is run from `selfhost/`, and every one
-needs `--env-file ../.env`.** Compose looks for a `.env` beside the compose
-file, and this project's lives at the repo root. Forget the flag and it stops
-with `required variable POSTGRES_PASSWORD is missing a value` rather than
-starting something half-configured.
+**Every compose command below runs from `selfhost/` and needs
+`--env-file ../.env`** — Compose looks for `.env` beside the compose file, and
+this one lives at the repo root. Forget it and you get
+`required variable POSTGRES_PASSWORD is missing a value` rather than a
+half-configured stack.
 
-First run pulls several GB of images and takes a few minutes. After that it is
-seconds.
-
-Check it came up:
+First run pulls a few GB. Then:
 
 ```bash
 docker compose --env-file ../.env ps -a
 ```
 
-What a good stack looks like: **nine services `running`**, of which eight report
-`(healthy)` and `rest` shows a bare `Up` — the PostgREST image ships no HTTP
-client, so there is nothing to health-check it with. The tenth, `migrator`, must
-show `Exited (0)`: it applies the database schema and stops, so a stopped
-migrator is success, not a crash. Anything other than 0 there, read
+Healthy looks like **nine services `running`** — eight `(healthy)`, with `rest`
+showing a bare `Up` because the PostgREST image has no HTTP client to probe
+itself with. `migrator` must show **`Exited (0)`**: it applies the schema and
+stops, so a stopped migrator is success. Anything else there, read
 `docker compose --env-file ../.env logs migrator`.
 
 ### 4. Prove it works
-
-Before building an app against it, check the backend end to end:
 
 ```bash
 node scripts/verify-selfhost.mjs
 ```
 
-Fifteen checks, plain Node, nothing to install. It signs up two accounts,
-writes a note, and confirms the parts that fail quietly: that the sign-in email
-carries a code rather than a link, that PowerSync accepts the token this stack
-issues, that the note reaches the right sync bucket as ciphertext, and that a
-second account cannot see it. Expect `15/15 passed`.
+Fifteen checks, plain Node, nothing to install. Signs up two accounts, writes a
+note, and confirms the things that fail silently: the sign-in email carries a
+code rather than a link, PowerSync accepts the token this stack issues, the note
+lands in the right sync bucket as ciphertext, and a second account cannot see
+it. Expect `15/15 passed`.
 
-It leaves two junk accounts and one note behind, so run it while you are still
-setting up rather than on a stack holding real notes. It needs the bundled
-`mailpit` service, since it reads the code out of that inbox.
+It leaves two junk accounts and a note behind — run it while setting up, not on
+a stack holding real notes. Needs the bundled `mailpit` service.
 
-### 5. Point the app at it
+---
 
-Back in `.env`, the app's three variables:
+## Local trial
+
+Good for a simulator, or a phone on the same network.
+
+Nothing more to configure: `API_EXTERNAL_URL` already defaults to
+`http://127.0.0.1:8000`, and Kong and PowerSync listen on every interface so
+another device on your LAN can reach them. If a real phone will connect, replace
+`127.0.0.1` with your machine's LAN IP in `API_EXTERNAL_URL` and in the
+`EXPO_PUBLIC_*` URLs — a phone cannot resolve your laptop's loopback.
+
+Sign-in is a 6-digit emailed code, and out of the box nothing is sent: it is
+caught by **Mailpit**, a fake inbox at <http://127.0.0.1:8025>. Request a code in
+the app, open that page, read it.
+
+Then build the app — [building.md](building.md).
+
+---
+
+## Deploy to a VPS
+
+What the local path skips: a domain, TLS, real email, and not exposing Postgres
+to the internet. Two small instances or one 2 GB box is enough; the stack idles
+around 1.5 GB.
+
+### 1. DNS
+
+Point two names at the server:
 
 ```
-EXPO_PUBLIC_SUPABASE_URL=http://127.0.0.1:8000
+api.notes.example.com   A   <server-ip>
+sync.notes.example.com  A   <server-ip>
+```
+
+Two hostnames rather than one, because the app is configured with two
+independent URLs and PowerSync serves from the root of its own origin.
+
+### 2. Close the raw ports
+
+In `.env`:
+
+```
+BIND_ADDR=127.0.0.1
+```
+
+This is the difference between a proxy and a decoration. Without it every
+container port stays open on the public interface and anyone can bypass TLS by
+talking to Kong directly on `:8000`. With it, nothing is reachable except
+through the proxy.
+
+### 3. Terminate TLS
+
+```bash
+sudo cp selfhost/Caddyfile /etc/caddy/Caddyfile
+```
+
+Edit the two hostnames, then `sudo systemctl reload caddy`. Caddy obtains and
+renews Let's Encrypt certificates by itself — no flags, no cron. Both names must
+already resolve to the server or the certificate request fails.
+
+Note content is encrypted regardless, but **session tokens are not** — over
+plain HTTP anyone on the path can take one and read the account's metadata.
+
+### 4. Point everything at the domain
+
+In `.env`:
+
+```
+API_EXTERNAL_URL=https://api.notes.example.com
+EXPO_PUBLIC_SUPABASE_URL=https://api.notes.example.com
+EXPO_PUBLIC_POWERSYNC_URL=https://sync.notes.example.com
 EXPO_PUBLIC_SUPABASE_ANON_KEY=<the ANON_KEY you generated>
-EXPO_PUBLIC_POWERSYNC_URL=http://127.0.0.1:8080
 ```
 
-`EXPO_PUBLIC_` is not decoration — Expo inlines those values into the app bundle
-at build time, so they ship inside the app and anyone can read them out. That is
-fine for these three (the anon key is public by design; row-level security is
-what protects data). Never put a secret behind that prefix.
+`API_EXTERNAL_URL` is what sign-in emails are built from — wrong value, links
+that go nowhere. The `EXPO_PUBLIC_*` three are inlined into the app bundle at
+build time, so changing them needs a rebuild, not a reload. That prefix means
+"ships inside the app and is readable by anyone", which is fine for these (the
+anon key is public by design; row-level security is what protects data) and must
+never hold a secret.
 
-These are baked in at build time, so changing them needs a rebuild, not a
-reload. Then follow [building.md](building.md).
+### 5. Real email
 
-### 6. Sign in once
+Without working SMTP nobody can sign in, including you on a new device. Set
+`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` and `SMTP_ADMIN_EMAIL` to a
+real provider, and delete the `mailpit` service from the compose file.
 
-Sign-in is a 6-digit code sent by email. Out of the box the stack does not send
-email — it catches it in **Mailpit**, a fake inbox at
-<http://127.0.0.1:8025>. Request a code in the app, open that page, read the
-code.
+### 6. Lock it down
 
-That is for trying the stack out. For real use, set `SMTP_*` in `.env` to a real
-provider and delete the `mailpit` service from the compose file. Without working
-email, nobody can sign in — including you, on a new device.
+```bash
+docker compose --env-file ../.env up -d
+```
 
-Once your own devices are enrolled, set `DISABLE_SIGNUP=true` and restart, so a
-server on the open internet is not accepting new accounts.
+Then:
+
+- **`DISABLE_SIGNUP=true`** once your own devices are enrolled, and restart.
+  Otherwise a server on the open internet accepts new accounts.
+- **Firewall to 22, 80 and 443.** With `BIND_ADDR` set nothing else listens
+  publicly, but a firewall is the thing that stays correct when a future compose
+  edit forgets.
+- **`SERVICE_ROLE_KEY` bypasses row-level security entirely.** Server only.
+- **Studio is not proxied**, on purpose — it has no authentication of its own.
+  Reach it over SSH: `ssh -L 8001:127.0.0.1:8001 you@server`, then open
+  <http://127.0.0.1:8001>.
+- **Back up.** The volume is the only server-side copy:
+
+  ```bash
+  docker exec notes-selfhost-db-1 pg_dump -U supabase_admin postgres > backup.sql
+  ```
+
+  Devices keep their own encrypted copies, so a wipe is survivable while one
+  still has the data — but do not rely on that.
+
+### Google sign-in
+
+Optional, and needs the real domain: Google will not accept an IP address as a
+redirect URI. Create an OAuth client in Google Cloud Console with
+`https://api.notes.example.com/auth/v1/callback` as the authorised redirect,
+then set `GOOGLE_ENABLED=true`, `SUPABASE_AUTH_GOOGLE_CLIENT_ID` and
+`SUPABASE_AUTH_GOOGLE_SECRET`.
 
 ---
 
 ## What each service does
 
-| Service | What it is for |
+| Service | For |
 |---|---|
-| **db** | Postgres. Not stock Postgres — this image ships the schemas and the `anon` / `authenticated` / `service_role` roles that the security policies refer to. Stock Postgres applies the schema and then fails every policy. |
-| **auth** | GoTrue. Signup, emailed sign-in codes, OAuth, and issuing the tokens everything else checks. Creates its own `auth` schema at startup. |
-| **rest** | PostgREST. Exposes the tables as a REST API — accounts, usernames, wrapped keys. **Notes do not go through here**; they go through PowerSync. |
-| **kong** | The gateway. One public port, routed to `auth` or `rest` by URL prefix, with the `apikey` header checked first. |
-| **powersync** | The sync service. Reads Postgres's write-ahead log and hands each device the rows its token entitles it to. Never sees plaintext. |
-| **migrator** | Runs once, applies the schema, exits. Not a bug when you see it stopped. |
-| **templates** | Serves the sign-in email template to GoTrue over the internal network. A whole container for one HTML file, because GoTrue fetches templates over HTTP and cannot read them off disk. Not published to any port. |
-| **studio** | The web admin UI at <http://127.0.0.1:8001>. Optional — nothing depends on it. |
-| **meta** | Schema introspection, so Studio can list tables. Optional, with Studio. |
-| **mailpit** | Fake inbox for testing. Delete it for real use. |
+| **db** | Postgres — but not stock Postgres. This image ships the schemas and the `anon` / `authenticated` / `service_role` roles the security policies refer to; stock Postgres applies the schema and then fails every policy. |
+| **auth** | GoTrue. Signup, emailed codes, OAuth, and issuing the tokens everything else checks. |
+| **rest** | PostgREST. Accounts, usernames, wrapped keys. **Notes do not go through here** — they go through PowerSync. |
+| **kong** | The gateway. One port, routed by URL prefix, `apikey` header checked first. |
+| **powersync** | Sync. Reads Postgres's write-ahead log and hands each device only the rows its token allows. Never sees plaintext. |
+| **migrator** | Runs once, applies the schema, exits. Stopped is correct. |
+| **templates** | Serves the sign-in email template to GoTrue. A whole container for one HTML file, because GoTrue fetches templates over HTTP and cannot read them off disk. |
+| **studio** | Admin dashboard. Optional. |
+| **meta** | Schema introspection for Studio. Optional, with it. |
+| **mailpit** | Fake inbox. Delete it for real use. |
 
-**Deliberately not included:** file storage and image proxying (this app uploads
-no files), realtime subscriptions (nothing subscribes), Logflare analytics and
-the log shipper, and connection pooling. They are in Supabase's own compose file
-if you want them; Logflare in particular is the most common reason a self-hosted
-Supabase will not boot, and nothing here needs it.
+**Deliberately absent:** file storage and image proxying (nothing uploads
+files), realtime (nothing subscribes), Logflare analytics and its log shipper,
+and connection pooling. All are in Supabase's own compose file if you want them.
+Logflare in particular is the most common reason a self-hosted Supabase will not
+boot, and nothing here needs it.
 
 ---
 
 ## Three things that will trip you up
 
-### 1. There are two sync config files and only one is yours
+### 1. Two sync configs, one of them yours
 
 ```
-powersync/sync-rules.yaml     <-- self-hosted. This is the one you edit.
-powersync/sync-streams.yaml   <-- PowerSync Cloud only. Ignore it.
+powersync/sync-rules.yaml     <- self-hosted. Edit this one.
+powersync/sync-streams.yaml   <- PowerSync Cloud only.
 ```
 
-Both are real, both are committed, and they are different formats for the same
-rules — `bucket_definitions` versus Sync Streams edition 3. The self-hosted
-service reads **`sync-rules.yaml`**. Edit `sync-streams.yaml` and nothing you
-change will have any effect, with no error to tell you why.
+Both are real and committed; they are different formats for the same rules
+(`bucket_definitions` versus Sync Streams edition 3). Editing the wrong one
+changes nothing, with no error to say why.
 
-If you are changing what syncs to whom, that is the file, and
-`selfhost/docker-compose.yml` mounts it.
+### 2. A device can claim an account with the wrong key
 
-### 2. A device can end up claiming an account with the wrong key
+**Symptom:** you sign into a second account on a device already used with
+another, are never shown a recovery code, and later that account's notes arrive
+elsewhere undecryptable.
 
-**Symptom.** You sign into a second account on a device that has already been
-used with a different one, and you are never shown a recovery code. Later, notes
-from that account arrive on another device and cannot be decrypted.
+**Cause:** one device has one data key, and it offers that key to each account it
+signs into. An account with no key on record accepts it — even when the key
+belongs to a different account.
 
-**Cause.** One device has one data key. The device offers its existing key to
-each account it signs into, and if that account has no key on record it is
-accepted — including when the key really belongs to a different account and no
-recovery code was ever issued for this one.
+**Why you cannot just edit it away:** `user_keys` allows `INSERT` and `SELECT`
+and deliberately nothing else. A key that can be swapped in place is a key that
+can silently orphan every note encrypted under the old one. Insert-only keeps
+the failure recoverable.
 
-**Why you cannot just fix it.** The `user_keys` table has a policy allowing
-`INSERT` and a policy allowing `SELECT`, and deliberately nothing for `UPDATE` or
-`DELETE`. That is not an oversight. A key that could be swapped in place is a key
-that can silently orphan every note already encrypted under the old one, with no
-way back. Insert-only means the failure is recoverable; editable would mean it is
-not.
-
-**The fix**, out-of-band, with the service key:
+**The fix**, out-of-band:
 
 ```bash
 npx tsx scripts/repair-shared-account-keys.ts
 ```
 
-It prints what it would do and changes nothing. Re-run with `--apply` to delete
-the duplicate key rows, keeping the oldest claimant of each. Those accounts then
-run key setup on next sign-in and get a real recovery code.
+Dry-run by default; `--apply` deletes the duplicate rows, keeping the oldest
+claimant of each. Those accounts then run key setup on next sign-in and get a
+real recovery code. It does **not** touch notes — anything encrypted under the
+old key stays that way and the app flags it rather than overwriting, so it is
+still readable if the original code turns up. Read the script header before
+pointing it at anything you care about.
 
-It does **not** touch notes. Anything already encrypted under the old key stays
-encrypted under it; the app flags those as undecryptable rather than overwriting
-them, so if the original recovery code turns up they can still be read. Deleting
-them would be the irreversible option, and the script does not make that choice
-for you.
+### 3. The database is the only server-side copy
 
-The script is written against a local dev stack; read the header before pointing
-it at anything you care about, and back up first.
-
-### 3. The database is the only copy
-
-`docker compose down -v` deletes the volume, and the volume is the notes.
-Devices hold their own encrypted copies, so a wipe is survivable if a device
-still has the data — but the server has no backup of its own. Take one:
-
-```bash
-docker exec notes-selfhost-db-1 pg_dump -U supabase_admin postgres > backup.sql
-```
+`down -v` deletes the volume, and the volume is the notes. See the backup
+command above.
 
 ---
 
 ## Troubleshooting
 
-**Containers exit with code 137.** Out of memory — the OS killed them, and
-nothing in the logs will say so. Give Docker at least 4 GB. Running two Supabase
-stacks at once will do this on a 4 GB allowance, so if you are also running the
-`supabase` CLI for development, stop it first.
+**Exit code 137.** Out of memory; the OS killed them and no log will say so.
+Give Docker 4 GB. Running two Supabase stacks at once does this — stop the
+`supabase` CLI if you use it for development.
 
-**`port is already allocated`.** Something else holds one of the published
-ports. Change it in `.env` — `KONG_HTTP_PORT`, `POWERSYNC_HTTP_PORT`,
-`POSTGRES_HOST_PORT`, `STUDIO_PORT`, `MAILPIT_PORT` — and remember to update
-`API_EXTERNAL_URL` and the `EXPO_PUBLIC_*` URLs to match if you moved Kong or
-PowerSync.
+**`port is already allocated`.** Change the port in `.env`
+(`KONG_HTTP_PORT`, `POWERSYNC_HTTP_PORT`, `POSTGRES_HOST_PORT`, `STUDIO_PORT`,
+`MAILPIT_PORT`) and update `API_EXTERNAL_URL` and the `EXPO_PUBLIC_*` URLs if
+you moved Kong or PowerSync.
 
-**`auth` or `rest` restart forever, "password authentication failed".** The
-role passwords are set by a script that runs only when the data volume is first
-created. If you changed `POSTGRES_PASSWORD` after the first start, the database
-still has the old one. Either put the old value back, or
-`docker compose --env-file ../.env down -v` and start clean — which deletes the
-data.
+**`auth` or `rest` restart forever, "password authentication failed".** Role
+passwords are set once, when the data volume is first created. If you changed
+`POSTGRES_PASSWORD` afterwards, the database still has the old one. Restore the
+old value, or `down -v` and start clean — which deletes the data.
 
-**PowerSync is healthy but nothing syncs.** Almost always
-`POWERSYNC_REPLICATION_PASSWORD`. The schema creates the replication role with
-no password on purpose, so a working password never ends up in a committed file,
-and `selfhost/migrate.sh` sets it afterwards. If that step did not run, PowerSync
-logs `28P01 password authentication failed for user "powersync_role"` and syncs
-nothing while every container still reports healthy. Check with:
+**PowerSync is healthy but nothing syncs.** Almost always the replication
+password. The schema creates that role with none on purpose, so no working
+password is ever committed, and `selfhost/migrate.sh` sets it afterwards. If
+that step did not run, PowerSync logs `28P01` and syncs nothing while every
+container reports healthy:
 
 ```bash
 docker compose --env-file ../.env logs powersync | grep -i "replication slot"
 ```
 
-A working stack logs `Created replication slot` and then
+A working stack logs `Created replication slot`, then
 `Activated new replication stream`.
 
-**PowerSync warns about Supabase Auth at startup.** This line is expected on
-every start and is not a problem:
+**PowerSync warns `Supabase Auth is enabled, but no Supabase connection string
+found`.** Expected on every start. It only means the service could not
+auto-discover a key URL, which never works outside hosted Supabase; verification
+uses the shared secret, configured explicitly.
 
-```
-Supabase Auth is enabled, but no Supabase connection string found.
-Skipping Supabase JWKS URL configuration.
-```
-
-It only means the service could not auto-discover a key URL from the database
-connection string, which never works outside hosted Supabase. Verification is
-done with the shared secret instead, which is configured explicitly.
-
-**Requests return 401 with a valid-looking key.** The gateway wants the key in
-an `apikey` header, not only in `Authorization`. That includes health checks:
+**401 with a valid-looking key.** The gateway wants it in an `apikey` header,
+not only `Authorization`:
 
 ```bash
-curl -H "apikey: $ANON_KEY" http://127.0.0.1:8000/auth/v1/health
+curl -H "apikey: $ANON_KEY" https://api.notes.example.com/auth/v1/health
 ```
 
-**Sign-in emails never arrive.** Expected, unless you configured `SMTP_*` —
-they are in Mailpit at <http://127.0.0.1:8025>.
-
-**`429 over_email_send_rate_limit` while testing.** GoTrue throttles outgoing
-email: roughly one per address every 15 seconds, plus an hourly cap across the
-whole instance. Testing sign-in a dozen times in a row will hit it. Wait, or
-raise `GOTRUE_RATE_LIMIT_EMAIL_SENT` on the `auth` service. Not a
-misconfiguration.
-
-**The sign-in email is a link instead of a 6-digit code.** The app's sign-in
-screen asks for a code, so a link means the `templates` service is not being
-reached, or `MAILER_AUTOCONFIRM` was set to `false`. Check with
+**The sign-in email is a link, not a 6-digit code.** The `templates` service is
+unreachable, or `MAILER_AUTOCONFIRM` is `false`. Check
 `docker compose --env-file ../.env logs auth | grep template` — a failed fetch
-is logged and GoTrue then silently falls back to its own link template, so the
+is logged, then GoTrue silently falls back to its own link template, so the
 email is the only visible symptom.
 
-**`DEPRECATION NOTICE: GOTRUE_JWT_ADMIN_GROUP_NAME` in the auth logs.** Harmless
-and not set by this stack. Note that the similar notice for
-`GOTRUE_JWT_DEFAULT_GROUP_NAME` should be ignored rather than acted on —
-removing that variable leaves `auth.users.role` empty and issues tokens with no
-usable Postgres role.
+**`429 over_email_send_rate_limit`.** GoTrue throttles email: roughly one per
+address per 15 seconds plus an hourly cap. Testing sign-in repeatedly hits it.
+Not a misconfiguration.
 
----
-
-## Running it on a real server
-
-The compose file exposes ports directly, which is right for a laptop and wrong
-for the public internet. On a server:
-
-- Put a TLS-terminating reverse proxy in front and bind the published ports to
-  `127.0.0.1` instead of `0.0.0.0`. Sign-in tokens over plain HTTP are readable
-  in transit — note *content* stays encrypted regardless, but session tokens do
-  not.
-- Do not expose `POSTGRES_HOST_PORT` at all.
-- Set `DISABLE_SIGNUP=true` once your devices are enrolled.
-- `SERVICE_ROLE_KEY` bypasses row-level security completely. It belongs on the
-  server and nowhere else.
-- Back up the volume.
+**`DEPRECATION NOTICE: GOTRUE_JWT_ADMIN_GROUP_NAME`.** Harmless, not set here.
+The similar notice for `GOTRUE_JWT_DEFAULT_GROUP_NAME` should be ignored rather
+than acted on — removing that variable empties `auth.users.role` and issues
+tokens naming no Postgres role at all.
 
 ---
 
 ## How far this has been verified
 
-Everything below was run against this compose file on an empty volume, using the
-same HTTP calls the app makes.
+Run against this compose file on an empty volume, using the same HTTP calls the
+app makes.
 
-**Infrastructure.** The stack boots from empty; every service reaches healthy
-and `migrator` exits 0; the schema applies and `user_keys` has exactly the
-SELECT and INSERT policies described above; PowerSync creates a replication slot
-and replicates `public.notes`; the gateway routes to GoTrue and PostgREST and
-rejects requests with no `apikey`; re-running `up` does not re-apply migrations;
-`down -v` then `up` reproduces all of it from scratch.
+**Infrastructure:** boots from empty; every service reaches healthy and
+`migrator` exits 0; the schema applies and `user_keys` has exactly the SELECT and
+INSERT policies above; PowerSync creates a replication slot and replicates
+`public.notes`; Kong routes to GoTrue and PostgREST and rejects requests with no
+`apikey`; re-running `up` does not re-apply migrations; `down -v` then `up`
+reproduces all of it.
 
-**The full sign-in and sync round trip**, end to end:
+**The full round trip:** a sign-in request emails a real 6-digit code; the code
+exchanges for a session with `role` and `aud` of `authenticated`; PowerSync
+rejects an unauthenticated client and accepts the token this GoTrue issued; the
+client gets a bucket scoped to its own user id; a note written by that user
+replicates into it as an `enc:v1:` envelope; and a second signed-in account
+cannot see that note over sync or over the REST API, nor can an anonymous
+caller. That is what `scripts/verify-selfhost.mjs` re-runs.
 
-1. Requesting a sign-in code emails a real **6-digit code** with the subject
-   "Your sign-in code" — the app's screen asks for a code, so a magic link would
-   be useless.
-2. That code exchanges for a session whose token carries `role: authenticated`
-   and `aud: authenticated`.
-3. PowerSync **rejects** an unauthenticated client (401) and **accepts** the
-   token this self-hosted GoTrue issued — the HS256 path described in
-   `selfhost/powersync/config.yaml`.
-4. The client is handed a bucket scoped to its own user id, taken from the
-   token.
-5. A note written by that user replicates through the write-ahead log into that
-   bucket, and what the server holds is an `enc:v1:` envelope, not readable
-   text.
-6. A **second** signed-in account gets its own empty bucket, cannot see the
-   first user's note over sync, and cannot see it over the REST API either.
-   Nor can an anonymous caller.
+**VPS mode:** with `BIND_ADDR=127.0.0.1` the whole stack boots and passes the
+same fifteen checks, every published port binds to loopback only, and the LAN
+interface refuses connections on Kong, PowerSync and Postgres. `selfhost/Caddyfile`
+passes `caddy validate`.
 
-Not covered: running the actual mobile app against a self-hosted stack from a
-physical device, and Google sign-in, which needs a real domain. If you hit a
-wall in either, please open an issue.
+**Not covered:** a physical device against a self-hosted stack, a real
+certificate against a real domain (the DNS and ACME steps have not been executed
+here), and Google sign-in. If you hit a wall, please open an issue.
