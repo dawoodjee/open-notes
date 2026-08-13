@@ -52,3 +52,7 @@ scripts/.verify-enc-*.db*
 # pg_dumps from scripts/backup-local-data.sh -- real account rows and real
 # note bodies. Never commit these.
 supabase/backups/
+
+# build docs
+mvp-build-plan.md
+prd.md
