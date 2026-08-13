@@ -118,12 +118,32 @@ Check it came up:
 docker compose --env-file ../.env ps -a
 ```
 
-Eight services should be `running` and one — `migrator` — should be
-`exited (0)`. That one is supposed to exit; it applies the database schema and
-stops. If it exited with anything other than 0, read
-`docker compose logs migrator`.
+What a good stack looks like: **nine services `running`**, of which eight report
+`(healthy)` and `rest` shows a bare `Up` — the PostgREST image ships no HTTP
+client, so there is nothing to health-check it with. The tenth, `migrator`, must
+show `Exited (0)`: it applies the database schema and stops, so a stopped
+migrator is success, not a crash. Anything other than 0 there, read
+`docker compose --env-file ../.env logs migrator`.
 
-### 4. Point the app at it
+### 4. Prove it works
+
+Before building an app against it, check the backend end to end:
+
+```bash
+node scripts/verify-selfhost.mjs
+```
+
+Fifteen checks, plain Node, nothing to install. It signs up two accounts,
+writes a note, and confirms the parts that fail quietly: that the sign-in email
+carries a code rather than a link, that PowerSync accepts the token this stack
+issues, that the note reaches the right sync bucket as ciphertext, and that a
+second account cannot see it. Expect `15/15 passed`.
+
+It leaves two junk accounts and one note behind, so run it while you are still
+setting up rather than on a stack holding real notes. It needs the bundled
+`mailpit` service, since it reads the code out of that inbox.
+
+### 5. Point the app at it
 
 Back in `.env`, the app's three variables:
 
@@ -141,7 +161,7 @@ what protects data). Never put a secret behind that prefix.
 These are baked in at build time, so changing them needs a rebuild, not a
 reload. Then follow [building.md](building.md).
 
-### 5. Sign in once
+### 6. Sign in once
 
 Sign-in is a 6-digit code sent by email. Out of the box the stack does not send
 email — it catches it in **Mailpit**, a fake inbox at
@@ -167,6 +187,7 @@ server on the open internet is not accepting new accounts.
 | **kong** | The gateway. One public port, routed to `auth` or `rest` by URL prefix, with the `apikey` header checked first. |
 | **powersync** | The sync service. Reads Postgres's write-ahead log and hands each device the rows its token entitles it to. Never sees plaintext. |
 | **migrator** | Runs once, applies the schema, exits. Not a bug when you see it stopped. |
+| **templates** | Serves the sign-in email template to GoTrue over the internal network. A whole container for one HTML file, because GoTrue fetches templates over HTTP and cannot read them off disk. Not published to any port. |
 | **studio** | The web admin UI at <http://127.0.0.1:8001>. Optional — nothing depends on it. |
 | **meta** | Schema introspection, so Studio can list tables. Optional, with Studio. |
 | **mailpit** | Fake inbox for testing. Delete it for real use. |
@@ -301,6 +322,25 @@ curl -H "apikey: $ANON_KEY" http://127.0.0.1:8000/auth/v1/health
 **Sign-in emails never arrive.** Expected, unless you configured `SMTP_*` —
 they are in Mailpit at <http://127.0.0.1:8025>.
 
+**`429 over_email_send_rate_limit` while testing.** GoTrue throttles outgoing
+email: roughly one per address every 15 seconds, plus an hourly cap across the
+whole instance. Testing sign-in a dozen times in a row will hit it. Wait, or
+raise `GOTRUE_RATE_LIMIT_EMAIL_SENT` on the `auth` service. Not a
+misconfiguration.
+
+**The sign-in email is a link instead of a 6-digit code.** The app's sign-in
+screen asks for a code, so a link means the `templates` service is not being
+reached, or `MAILER_AUTOCONFIRM` was set to `false`. Check with
+`docker compose --env-file ../.env logs auth | grep template` — a failed fetch
+is logged and GoTrue then silently falls back to its own link template, so the
+email is the only visible symptom.
+
+**`DEPRECATION NOTICE: GOTRUE_JWT_ADMIN_GROUP_NAME` in the auth logs.** Harmless
+and not set by this stack. Note that the similar notice for
+`GOTRUE_JWT_DEFAULT_GROUP_NAME` should be ignored rather than acted on —
+removing that variable leaves `auth.users.role` empty and issues tokens with no
+usable Postgres role.
+
 ---
 
 ## Running it on a real server
@@ -322,18 +362,35 @@ for the public internet. On a server:
 
 ## How far this has been verified
 
-Honest scope, because the difference matters if something does not work for you.
+Everything below was run against this compose file on an empty volume, using the
+same HTTP calls the app makes.
 
-**Confirmed by running it:** the stack boots from empty; all eight services
-reach healthy and `migrator` exits 0; the schema applies and `user_keys` has
-exactly the two policies described above; PowerSync creates a replication slot
-and begins replicating `public.notes`; the gateway routes to GoTrue and
-PostgREST and rejects requests without an `apikey`; re-running `up` does not
-re-apply migrations; and `down -v` followed by `up` reproduces all of it from
-scratch.
+**Infrastructure.** The stack boots from empty; every service reaches healthy
+and `migrator` exits 0; the schema applies and `user_keys` has exactly the
+SELECT and INSERT policies described above; PowerSync creates a replication slot
+and replicates `public.notes`; the gateway routes to GoTrue and PostgREST and
+rejects requests with no `apikey`; re-running `up` does not re-apply migrations;
+`down -v` then `up` reproduces all of it from scratch.
 
-**Not yet confirmed end to end:** a full signup-and-sync round trip — creating
-an account against this stack from the app and watching a note replicate to a
-second device. The token verification path in particular is configured from the
-PowerSync service's own source rather than proven with a live client. If you hit
-a wall there, please open an issue; that is the gap.
+**The full sign-in and sync round trip**, end to end:
+
+1. Requesting a sign-in code emails a real **6-digit code** with the subject
+   "Your sign-in code" — the app's screen asks for a code, so a magic link would
+   be useless.
+2. That code exchanges for a session whose token carries `role: authenticated`
+   and `aud: authenticated`.
+3. PowerSync **rejects** an unauthenticated client (401) and **accepts** the
+   token this self-hosted GoTrue issued — the HS256 path described in
+   `selfhost/powersync/config.yaml`.
+4. The client is handed a bucket scoped to its own user id, taken from the
+   token.
+5. A note written by that user replicates through the write-ahead log into that
+   bucket, and what the server holds is an `enc:v1:` envelope, not readable
+   text.
+6. A **second** signed-in account gets its own empty bucket, cannot see the
+   first user's note over sync, and cannot see it over the REST API either.
+   Nor can an anonymous caller.
+
+Not covered: running the actual mobile app against a self-hosted stack from a
+physical device, and Google sign-in, which needs a real domain. If you hit a
+wall in either, please open an issue.

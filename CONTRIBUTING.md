@@ -55,6 +55,13 @@ Run `verify-crypto` for any change under `lib/crypto/`, and
 asserts that nothing in that directory imports Supabase, which is the property
 keeping plaintext off the sync path.
 
+**Checks a self-hosted backend end to end** — needs the stack running, creates
+two accounts and a note, deletes nothing:
+
+```bash
+node scripts/verify-selfhost.mjs
+```
+
 **Need a running local stack, and write to it:** `verify-sync.ts`,
 `verify-merge-encrypted.ts`, `verify-merge-two-devices.ts`,
 `verify-oauth-errors.ts`. These create rows and delete the specific rows they
