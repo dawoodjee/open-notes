@@ -21,7 +21,7 @@ import {
 import { Disclosure, listDisclosures } from '@/lib/plaintext/broker';
 
 const LOCK_AFTER_OPTIONS = [
-  { label: 'Now', value: 0 },
+  { label: 'Immediately', value: 0 },
   { label: '5 min', value: 5 * 60 * 1000 },
   { label: '1 hour', value: 60 * 60 * 1000 },
 ];
@@ -119,7 +119,7 @@ export function SecurityView({
 
           {lockSettings.enabled && canLock ? (
             <SettingsRow
-              label="Ask again after"
+              label="Lock Time"
               right={
                 <SettingsSegmented
                   options={LOCK_AFTER_OPTIONS}

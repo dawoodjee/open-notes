@@ -82,17 +82,45 @@ echo
 # only runs while this Mac is reachable. Release bundles the JS into the app,
 # which is the entire point of putting it on a device you carry around. It also
 # means no dev server, so nothing competes for port 8081 with another checkout.
-if [[ ! -d ios ]]; then
+
+# `ios/` is gitignored, so a `git merge` (or `git pull`) that brings in a
+# renamed app or a new native dependency never touches it -- it silently goes
+# stale instead of erroring. Caught in the wild: app.json's name changed from
+# "notes" to "Notes" on main, a worktree here merged that in, and this script
+# happily kept building the OLD ios/notes.xcworkspace against the NEW
+# app.json, because "ios/ exists" was the only check that used to run. Compare
+# what's actually on disk to what app.json expects now, and nuke + regenerate
+# on any mismatch rather than trusting a directory's mere presence.
+EXPECTED_SCHEME=$(node -e "console.log(require('./app.json').expo.name)")
+CURRENT_WORKSPACE=$(ls -d ios/*.xcworkspace 2>/dev/null | head -1)
+CURRENT_SCHEME=$(basename "${CURRENT_WORKSPACE:-__none__}" .xcworkspace)
+
+if [[ ! -d ios ]] || [[ "$CURRENT_SCHEME" != "$EXPECTED_SCHEME" ]]; then
+  if [[ -d ios ]]; then
+    echo "ios/ is stale (built as \"$CURRENT_SCHEME\", app.json now says \"$EXPECTED_SCHEME\") -- regenerating"
+    rm -rf ios
+  fi
   npx expo prebuild --platform ios
 fi
 
-# Discovered, not hardcoded: a project rename (the app went from "notes" to
-# "Notes") silently broke a version of this script that assumed the lowercase
-# name, with xcodebuild's error pointing at a scheme name rather than at the
-# rename itself. `expo prebuild` names the workspace/scheme after app.json's
-# "name" field, so whatever that says today is what gets built.
+# Belt-and-braces: `expo prebuild` has reported "Finished prebuild" on this
+# project while never actually producing a .xcworkspace at all -- pod install
+# ran as an internal step and didn't complete, with nothing in the output
+# marked as an error. Podfile.lock is the artifact a real `pod install`
+# success writes, so its absence is the tell regardless of what prebuild
+# claimed. Running it here directly (rather than trusting prebuild's exit
+# code) is what actually produces the workspace xcodebuild needs next.
+if [[ ! -f ios/Podfile.lock ]]; then
+  echo "Podfile.lock missing -- running pod install directly"
+  (cd ios && pod install)
+fi
+
+# Discovered, not hardcoded: `expo prebuild` names the workspace/scheme after
+# app.json's "name" field, so re-deriving it here (rather than reusing
+# EXPECTED_SCHEME) stays correct even if Expo's sanitization of that field
+# ever differs from a plain copy.
 WORKSPACE=$(ls -d ios/*.xcworkspace 2>/dev/null | head -1)
-[[ -n "$WORKSPACE" ]] || { echo "error: no .xcworkspace under ios/" >&2; exit 1; }
+[[ -n "$WORKSPACE" ]] || { echo "error: no .xcworkspace under ios/ after prebuild" >&2; exit 1; }
 SCHEME=$(basename "$WORKSPACE" .xcworkspace)
 
 xcodebuild \

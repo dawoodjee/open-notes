@@ -1,0 +1,24 @@
+-- Stage 8: service_role could not read its own tables.
+--
+-- notes_and_profiles.sql:99-105 already reasoned through PostgREST's grant
+-- requirement (RLS policies alone are not enough; PostgREST also checks plain
+-- SQL privileges) and granted table access to `authenticated`, `anon` (schema
+-- usage only) and `powersync_role`. `service_role` was never added, because
+-- nothing before this had ever queried these tables AS service_role over
+-- PostgREST -- every existing script reads them as an authenticated user, or
+-- drives Postgres directly. scripts/probe-live-account.mjs is the first
+-- caller to do this, for a read-only Stage 8 admin check, and it failed with
+-- 42501 permission denied and Postgres's own hint: `GRANT SELECT ON
+-- public.notes TO service_role`.
+--
+-- Not a security fix -- RLS was never bypassed, and this key never reaches a
+-- device -- but a real functional gap: server-side admin/support tooling
+-- using this project's own service_role key could not read its data. Both
+-- tables the current admin tooling actually reads; nothing wider.
+--
+-- select-only, deliberately: service_role has no business writing through
+-- this path, and RLS's absence for this role (it bypasses RLS by role
+-- attribute) means an insert/update/delete grant here would have no policy
+-- backing it at all.
+grant select on public.notes to service_role;
+grant select on public.user_keys to service_role;

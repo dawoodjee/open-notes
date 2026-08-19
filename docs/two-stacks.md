@@ -109,9 +109,24 @@ Sessions are deliberately not preserved; sign in again after a reset.
 - Supabase project ref `svbrvtnldkjwtnppsugi`, region `eu-central-1`.
 - The anon key in `eas.json` is public by design — RLS is the security
   boundary, and the migration grants table privileges to `authenticated` only,
-  never to `anon`. Because this repo is public, **new signups should stay
-  disabled** on the live project except when you're deliberately adding a
-  device.
-- Google sign-in is possible on live (a real HTTPS callback, which Google
-  accepts) but is not wired up. It needs an OAuth client and redirect URI in
-  Google Cloud Console.
+  never to `anon`.
+- **Signups are open on live, deliberately.** `disable_signup` is `false`.
+  An earlier version of this file said they "should stay disabled", which was
+  never true of the running project — the setting lives only in the Supabase
+  dashboard, so nothing in the repo ever contradicted it and the claim went
+  unchallenged. Public signup is the intent; RLS is what keeps a new account
+  from seeing anyone else's rows. Verify the live state rather than trusting
+  this line:
+
+  ```bash
+  curl -s "https://svbrvtnldkjwtnppsugi.supabase.co/auth/v1/settings" \
+    -H "apikey: $EXPO_PUBLIC_SUPABASE_ANON_KEY" | jq '{disable_signup, external}'
+  ```
+
+  That the policy has no repo-level expression is the real gap here. The
+  self-hosted stack states it as `DISABLE_SIGNUP` in `.env.example`; the
+  hosted project has no equivalent, which is exactly how this drifted.
+- **Google sign-in is enabled on live** (`external.google` is `true` from the
+  same endpoint). This file previously said it "is not wired up"; that is out
+  of date. It has not been exercised by a regression pass, so treat it as
+  enabled-but-unverified rather than known-good.
