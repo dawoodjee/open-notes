@@ -112,6 +112,16 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const [lockSettings, setLockSettingsState] = useState<LockSettings>(DEFAULT_LOCK_SETTINGS);
   const [bootError, setBootError] = useState<string | null>(null);
   const backgroundedAt = useRef<number | null>(null);
+  // Set for the duration of authenticateWithDeviceCredential(). The system
+  // Face ID / Touch ID sheet is presented as its OWN foreground surface, which
+  // drives this app through inactive/background and back to active around it
+  // -- a real AppState transition, indistinguishable from the user genuinely
+  // switching apps. With afterMs: 0 ("Now"), any such blip satisfies
+  // `away >= afterMs`, so a successful unlock's own prompt immediately
+  // re-locks the app, which raises the prompt again: an unbreakable loop,
+  // recoverable only by force-quitting. 5-minute and 1-hour settings never
+  // showed it because the blip is a few hundred ms, well under threshold.
+  const authenticating = useRef(false);
 
   // Read by the AppState listener, which is registered once and would
   // otherwise capture the settings as they were at mount.
@@ -157,7 +167,18 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const unlock = useCallback(async () => {
+    authenticating.current = true;
     const outcome = await authenticateWithDeviceCredential('Unlock your notes');
+    // Cleared on a short delay, not synchronously: the AppState 'active'
+    // event the prompt's own dismissal causes can land either just before or
+    // just after this promise resolves -- there is no ordering guarantee
+    // across platforms -- so clearing the instant we resume would still lose
+    // the race half the time. 750ms is comfortably longer than that blip
+    // (observed low hundreds of ms) and short enough that a real background
+    // spell immediately after unlocking is never mistaken for the prompt.
+    setTimeout(() => {
+      authenticating.current = false;
+    }, 750);
     // 'cancelled' means the user was asked and declined -- staying locked is
     // the whole point. 'unavailable' means there is nothing to ask with, and
     // refusing someone their own notes over that would be a lockout rather
@@ -231,6 +252,14 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
       const away = Date.now() - backgroundedAt.current;
       backgroundedAt.current = null;
+
+      // The blip this transition measures may be the device's own Face ID /
+      // Touch ID sheet rather than a genuine background spell -- see the
+      // `authenticating` ref's comment. Treating it as elapsed time would
+      // immediately re-lock a successful unlock and loop the prompt forever,
+      // which is exactly what "Now" (afterMs: 0) exposed: even the shortest
+      // real background would otherwise satisfy `away >= afterMs`.
+      if (authenticating.current) return;
 
       const { enabled, afterMs } = lockRef.current;
       if (enabled && away >= afterMs) setStatus('locked');
