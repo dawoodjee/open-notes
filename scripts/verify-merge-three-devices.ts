@@ -103,9 +103,25 @@ async function mintSession(email: string): Promise<Session> {
   });
   if (linkError) throw linkError;
 
+  // The `type` requested above is not the `type` verifyOtp needs below --
+  // GoTrue reports the ACTUAL verification flow it minted in
+  // properties.verification_type, and for a brand-new email that is
+  // "signup", not "magiclink" (a real magic link only exists for an
+  // account that already has one). This script mints a fresh email every
+  // run, so it always hits "signup". Hardcoding 'magiclink' here produced
+  // `AuthApiError: otp_expired` -- a real token, rejected for the wrong
+  // verification type, misreported as expiry. Reading the type back from
+  // GoTrue's own response is what makes this correct for both a fresh
+  // account and a reused one (verify-merge-two-devices.ts's fixed
+  // user-a@test.local never hits the "signup" branch, which is why the
+  // bug was never visible there).
+  const verificationType = (linkData.properties as any).verification_type as
+    | 'magiclink'
+    | 'signup';
+
   const anon = createClient(SUPABASE_URL, ANON_KEY, wsOptions);
   const { data, error } = await anon.auth.verifyOtp({
-    type: 'magiclink',
+    type: verificationType,
     token_hash: (linkData.properties as any).hashed_token,
   });
   if (error) throw error;
