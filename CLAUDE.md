@@ -1,7 +1,7 @@
 # Project rules
 
 ## Who I am
-I know plain JavaScript, HTML, and CSS well. I'm new to TypeScript, npm, Expo/React Native, NativeWind, Gluestack UI, Supabase, and PowerSync. Treat unfamiliar concepts as things to teach, not just implement.
+I know plain JavaScript, HTML, and CSS well. I'm new to TypeScript, npm, Expo/React Native, NativeWind, Gluestack UI, Supabase, and PowerSync. Treat unfamiliar concepts as things to teach concisely, not just implement.
 
 ## Branching
 Every stage or feature gets its own branch off main. Tell me the branch name when you start. Merge to main only when the stage checkpoint passes — never commit directly to main.
@@ -21,6 +21,8 @@ Default to deciding and moving. Choices that are cheap to reverse — file place
 Escalate before acting only when a choice is expensive to undo or changes something I'd notice as a user: data shape and schema, new dependencies, auth or security properties, sync and conflict behavior, or anything that changes stored data or visible product behavior. For those, tell me plainly and concisely — the options, your recommendation, and the tradeoff. I make that call.
 
 The test when unsure: would undoing this in two weeks take minutes or days? Minutes, decide. Days, ask. And if I explicitly delegate a decision in a prompt ("decide and implement"), that overrides all of the above — just make the call.
+
+When I accept a tradeoff on an escalated decision, record it in the Decisions Log in `mvp-build-plan.md` — the decision, the reasoning, and the consequence I accepted — before moving on.
 
 ## Verification
 Prove things rather than asserting them: use the terminal to run, boot, query, or test what you built, and show me the result.
@@ -42,13 +44,14 @@ conversation. Compaction is lossy, so preserve in this order:
    what's still unfinished.
 3. **Decisions, with reasoning and tradeoff** — especially anything escalated to
    me under the Decisions rule and what I chose. Never silently drop an accepted
-   tradeoff (the PIN-wraps-a-key model's stated consequence, the no-SMS/WhatsApp
-   call, the username case-insensitivity/ASCII rules) — these are load-bearing
-   for later stages. A decision without its tradeoff gets relitigated.
+   tradeoff; a decision without its tradeoff gets relitigated. Anything already
+   written to the Decisions Log in `mvp-build-plan.md` is durable — reference it
+   by name, don't re-summarize it. Preserve decisions made this session that
+   haven't been written down yet.
 4. **Cross-stage deferrals** — what was deferred, which stage it lands in, and
    what forces it then. The landing stage is the half that goes missing and
-   resurfaces as rework (web platform before/alongside Stage 6; native-vs-redirect
-   OAuth at Stage 5; seed notes with no `user_id` hitting the Stage 5 claim step).
+   resurfaces as rework, so never record a deferral without it. Deferrals
+   already captured in `mvp-build-plan.md` are durable — reference by path.
 5. **Verification actually run** — which command, what it proved. Not "tests passed."
 6. **Errors verbatim** — never paraphrased, never summarized.
 7. **Open questions** — including concepts I asked about that aren't yet settled.
@@ -62,7 +65,6 @@ be looked up again to act on it, it wasn't preserved.
 
 ## Front-load what needs me
 Before starting execution, list everything in the task that will need my hands or my approval — physical device access, credentials, dashboard logins, OAuth consent screens, email verification codes, destructive steps needing sign-off — and get all of it done or confirmed up front. Don't discover these one at a time mid-run and stall waiting on me; by then I've likely stopped watching and the run sits idle. If something genuinely can't be front-loaded, say so and tell me exactly when in the run it will come up.
-
 
 ## Balance
 Teach densely, not lengthily — maximum learning per word, and keep momentum. Concise is not shallow: compress the explanation, never the substance. Skip preamble, restatement of what the diff already shows, and boilerplate caveats.
