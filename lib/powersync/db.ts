@@ -85,6 +85,8 @@ export async function initPowerSync(): Promise<void> {
     // forever, so nothing could ever retry.
     await db.init();
     instance = db;
+
+    await encryptLegacyPlaintextNotes(db);
   })();
 
   try {
@@ -203,6 +205,47 @@ async function refreshSyncBaseIfSettled(): Promise<void> {
   } finally {
     refreshInFlight = false;
   }
+}
+
+/**
+ * Re-encrypts any note whose body/title is still plaintext -- a note created
+ * before the vault existed, never reopened through updateNoteInDB since.
+ *
+ * WHY THIS HAS TO RUN HERE, ONCE, RATHER THAN AS A GUARD IN EACH WRITE
+ * FUNCTION BELOW: trashNoteInDB, restoreNoteInDB, setNoteHiddenFromApi and
+ * claimUnownedNotes all write only their own columns, never body/title. That
+ * looks harmless -- until connector.ts's uploadEntry, which uploads a row's
+ * CURRENT LOCAL STATE on any queued op for it, not just the changed columns.
+ * A metadata-only write on a note that's still plaintext locally forwards
+ * that plaintext to Postgres as a legitimate update. This already happened
+ * for real (see mvp-build-plan.md's Decisions Log, 2026-08-19).
+ *
+ * A per-function guard only protects the functions that remember to call it.
+ * Running this once, before anything else touches the table, makes the bug
+ * structurally impossible instead: by the time any UPDATE executes this
+ * session, there is no plaintext left to forward, regardless of which
+ * function fires next -- including ones written after this comment.
+ *
+ * updated_at is deliberately left untouched, same reasoning as
+ * setNoteHiddenFromApi below: this changes storage representation, not the
+ * note's substance, so it must not reorder the list or read as an edit.
+ */
+async function encryptLegacyPlaintextNotes(db: PowerSyncDatabase): Promise<void> {
+  const rows = await db.getAll<{ id: string; body: string; title: string }>(
+    `SELECT id, body, title FROM notes
+     WHERE body NOT LIKE 'enc:v1:%' OR title NOT LIKE 'enc:v1:%'`
+  );
+  if (rows.length === 0) return;
+
+  await db.writeTransaction(async (tx) => {
+    for (const row of rows) {
+      await tx.execute(`UPDATE notes SET body = ?, title = ? WHERE id = ?`, [
+        encryptField(row.body),
+        encryptField(row.title),
+        row.id,
+      ]);
+    }
+  });
 }
 
 /**
