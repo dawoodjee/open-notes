@@ -683,8 +683,8 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
             onPress={handleSignOut}
             className="w-4/5 self-center mt-32 py-3.5 rounded-2xl bg-red-500 flex-row items-center justify-center gap-2 active:bg-red-700"
           >
-            <Icon as={LogOut} className="text-white w-4 h-4" />
-            <RNText className="text-base font-semibold text-white">Log Out</RNText>
+            <Icon as={LogOut} className="text-on-accent w-4 h-4" />
+            <RNText className="text-base font-semibold text-on-accent">Log Out</RNText>
           </Pressable>
 
           {/* Matches the spacer Settings ends on, so the last control clears

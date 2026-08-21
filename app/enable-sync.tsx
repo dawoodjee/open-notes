@@ -16,7 +16,7 @@ import { supabase } from '@/lib/supabase/client';
 import { isValidEmail, normalizeEmail } from '@/lib/validation/email';
 import { signInWithGoogle } from '@/lib/auth/oauth';
 import { useAuth } from '@/contexts/AuthContext';
-import { BACKGROUND, useTheme } from '@/contexts/ThemeContext';
+import { BACKGROUND, ON_ACCENT, useTheme } from '@/contexts/ThemeContext';
 
 type Step = 'email' | 'code';
 
@@ -202,9 +202,9 @@ export default function EnableSyncScreen() {
               className="py-3 rounded-lg bg-lime-500 items-center active:bg-lime-600 disabled:opacity-50"
             >
               {isSubmitting ? (
-                <ActivityIndicator color="white" />
+                <ActivityIndicator color={ON_ACCENT} />
               ) : (
-                <RNText className="text-sm font-semibold text-white">Send Code</RNText>
+                <RNText className="text-sm font-semibold text-on-accent">Send Code</RNText>
               )}
             </Pressable>
 
@@ -270,9 +270,9 @@ export default function EnableSyncScreen() {
               className="py-3 rounded-lg bg-lime-500 items-center active:bg-lime-600 disabled:opacity-50"
             >
               {isSubmitting ? (
-                <ActivityIndicator color="white" />
+                <ActivityIndicator color={ON_ACCENT} />
               ) : (
-                <RNText className="text-sm font-semibold text-white">Verify</RNText>
+                <RNText className="text-sm font-semibold text-on-accent">Verify</RNText>
               )}
             </Pressable>
             <Pressable onPress={() => setStep('email')} className="items-center py-2">

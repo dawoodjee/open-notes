@@ -108,10 +108,10 @@ export function AdoptKeyScreen() {
         onPress={() => void submit()}
         disabled={!ready}
         className={`rounded-2xl h-12 items-center justify-center ${
-          ready ? 'bg-black active:opacity-70' : 'bg-muted'
+          ready ? 'bg-primary active:opacity-70' : 'bg-muted'
         }`}
       >
-        <Text className={`font-semibold ${ready ? 'text-white' : 'text-muted-foreground'}`}>
+        <Text className={`font-semibold ${ready ? 'text-primary-foreground' : 'text-muted-foreground'}`}>
           {busy ? 'Unlocking…' : 'Unlock'}
         </Text>
       </Pressable>

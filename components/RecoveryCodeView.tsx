@@ -121,9 +121,9 @@ export function RecoveryCodeView({
 
         <Pressable
           onPress={() => setStep('verify')}
-          className="bg-black rounded-2xl h-12 items-center justify-center active:opacity-70"
+          className="bg-primary rounded-2xl h-12 items-center justify-center active:opacity-70"
         >
-          <Text className="text-white font-semibold">I&apos;ve written it down</Text>
+          <Text className="text-primary-foreground font-semibold">I&apos;ve written it down</Text>
         </Pressable>
       </KeyStepScreen>
     );
@@ -159,10 +159,10 @@ export function RecoveryCodeView({
         }}
         disabled={!matches || busy}
         className={`rounded-2xl h-12 items-center justify-center ${
-          matches && !busy ? 'bg-black active:opacity-70' : 'bg-muted'
+          matches && !busy ? 'bg-primary active:opacity-70' : 'bg-muted'
         }`}
       >
-        <Text className={`font-semibold ${matches && !busy ? 'text-white' : 'text-muted-foreground'}`}>
+        <Text className={`font-semibold ${matches && !busy ? 'text-primary-foreground' : 'text-muted-foreground'}`}>
           {busy ? 'Saving…' : 'Done'}
         </Text>
       </Pressable>

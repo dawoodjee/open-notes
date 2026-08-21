@@ -73,7 +73,7 @@ const editorThemeCSS = `
     margin: 0;
     padding: 0;
     color: #1c1c1e;
-    background-color: #ffffff;
+    background-color: #fbfbfd;
     font-size: 16px;
     line-height: 1.5;
   }
@@ -184,14 +184,14 @@ export default function RichEditor({
   const isHeading2Active = editorState.headingLevel === 2;
 
   return (
-    <Box className="flex-1 bg-white flex flex-col">
+    <Box className="flex-1 bg-background flex flex-col">
       {/* Editor Canvas */}
       <Box className="flex-1">
         <RichText editor={editor} style={{ flex: 1 }} />
       </Box>
 
       {/* Toolbar built with Gluestack UI components */}
-      <Box className="border-t border-gray-100 bg-white px-3 py-1.5">
+      <Box className="border-t border-gray-100 bg-background px-3 py-1.5">
         <HStack className="items-center space-x-1 flex-wrap">
           {/* Bold */}
           <Pressable

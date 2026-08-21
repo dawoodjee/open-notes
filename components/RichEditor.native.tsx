@@ -114,7 +114,7 @@ function sanitizeHtmlOutput(html: string): string {
  */
 const EDITOR_COLORS = {
   light: {
-    bg: '#ffffff',
+    bg: '#fbfbfd',
     fg: '#1c1c1e',
     body: '#374151',
     heading: '#111827',
@@ -126,7 +126,7 @@ const EDITOR_COLORS = {
     caret: '#1c1c1e',
   },
   dark: {
-    bg: '#0a0a0a',
+    bg: '#0a0a0c',
     fg: '#fafafa',
     body: '#d4d4d4',
     heading: '#fafafa',
