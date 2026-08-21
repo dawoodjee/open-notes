@@ -32,6 +32,10 @@ import {
   Folder,
   MAX_FOLDER_DEPTH,
 } from '../types/folder';
+import {
+  DISABLED_FOLDER_SUBTREE_CTE,
+  NOT_IN_DISABLED_FOLDER,
+} from '../lib/powersync/folderQueries';
 
 const DB_FILE = './scripts/.verify-folders.db';
 const TRASH_RETENTION_DAYS = 30;
@@ -78,13 +82,13 @@ async function purgeExpiredTrash(db: AbstractPowerSyncDatabase): Promise<void> {
 async function insertFolder(
   db: AbstractPowerSyncDatabase,
   key: Uint8Array,
-  opts: { name: string; parentId?: string | null; depth?: number; includeInNotes?: boolean; kind?: string; sortOrder?: number }
+  opts: { name: string; parentId?: string | null; depth?: number; includeInNotes?: boolean; kind?: string; sortOrder?: number; isEnabled?: boolean }
 ): Promise<string> {
   const id = randomUUID();
   const now = new Date().toISOString();
   await db.execute(
-    `INSERT INTO folders (id, user_id, parent_id, name, kind, depth, sort_order, include_in_notes, group_by_date, created_at, updated_at)
-     VALUES (?, 'u1', ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+    `INSERT INTO folders (id, user_id, parent_id, name, kind, depth, sort_order, include_in_notes, group_by_date, is_enabled, created_at, updated_at)
+     VALUES (?, 'u1', ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
     [
       id,
       opts.parentId ?? null,
@@ -93,6 +97,7 @@ async function insertFolder(
       opts.depth ?? 0,
       opts.sortOrder ?? 0,
       opts.includeInNotes === false ? 0 : 1,
+      opts.isEnabled === false ? 0 : 1,
       now,
       now,
     ]
@@ -103,14 +108,14 @@ async function insertFolder(
 async function insertNote(
   db: AbstractPowerSyncDatabase,
   key: Uint8Array,
-  opts: { body: string; folderId?: string | null; trashedDaysAgo?: number }
+  opts: { body: string; folderId?: string | null; trashedDaysAgo?: number; hiddenFromApi?: boolean }
 ): Promise<string> {
   const id = randomUUID();
   const now = new Date().toISOString();
   const trashed = opts.trashedDaysAgo !== undefined;
   await db.execute(
     `INSERT INTO notes (id, user_id, body, title, created_at, updated_at, is_trashed, trashed_at, is_hidden_from_api, folder_id)
-     VALUES (?, 'u1', ?, ?, ?, ?, ?, ?, 0, ?)`,
+     VALUES (?, 'u1', ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       encrypt(opts.body, key),
@@ -119,6 +124,7 @@ async function insertNote(
       now,
       trashed ? 1 : 0,
       trashed ? daysAgo(opts.trashedDaysAgo!) : null,
+      opts.hiddenFromApi ? 1 : 0,
       opts.folderId ?? null,
     ]
   );
@@ -241,6 +247,148 @@ async function main() {
     check('the pre-insert count map was empty for that folder', !countMap.has(chain[3]));
 
     // ---------------------------------------------------------------------
+    console.log('\n=== 4b. A disabled folder is invisible to apps, reversibly ===');
+
+    const skills = await insertFolder(db, key, { name: 'Skills', kind: 'skills', depth: 0 });
+    const skillsChild = await insertFolder(db, key, {
+      name: 'Nested skill', parentId: skills, depth: 1,
+    });
+    // One visible, one the user hid BY HAND, one nested. The hand-hidden note
+    // is the whole point: it is the state a bulk write would destroy.
+    const skillVisible = await insertNote(db, key, { body: 'skill visible', folderId: skills });
+    const skillHidden = await insertNote(db, key, {
+      body: 'skill hidden by hand', folderId: skills, hiddenFromApi: true,
+    });
+    const skillNested = await insertNote(db, key, { body: 'nested skill', folderId: skillsChild });
+
+    // The broker's query, with the real exported CTE and predicate -- not a
+    // transcription. If those constants change, this check changes with them.
+    const brokerVisible = async () => {
+      const rows = await db.getAll<{ id: string }>(
+        `${DISABLED_FOLDER_SUBTREE_CTE}
+         SELECT id FROM notes
+         WHERE is_trashed = 0 AND is_hidden_from_api = 0 AND ${NOT_IN_DISABLED_FOLDER}`
+      );
+      return new Set(rows.map((r) => r.id));
+    };
+
+    let reachable = await brokerVisible();
+    check('enabled: the visible skill note is reachable by the broker', reachable.has(skillVisible));
+    check('enabled: the nested skill note is reachable', reachable.has(skillNested));
+    check(
+      'enabled: the hand-hidden note is NOT reachable',
+      !reachable.has(skillHidden),
+      'the per-note flag still governs on its own'
+    );
+
+    await db.execute('UPDATE folders SET is_enabled = 0 WHERE id = ?', [skills]);
+    reachable = await brokerVisible();
+    check('disabled: the visible skill note is now excluded', !reachable.has(skillVisible));
+    check(
+      'disabled: the NESTED note is excluded too',
+      !reachable.has(skillNested),
+      'the CTE has to walk the subtree, not just match the folder itself'
+    );
+
+    const stillThere = await db.get<{ c: number }>(
+      'SELECT count(*) as c FROM notes WHERE id IN (?, ?, ?)',
+      [skillVisible, skillHidden, skillNested]
+    );
+    check('disabled: no note was deleted or rewritten', stillThere.c === 3);
+
+    await db.execute('UPDATE folders SET is_enabled = 1 WHERE id = ?', [skills]);
+    reachable = await brokerVisible();
+    check('re-enabled: the visible notes come back', reachable.has(skillVisible) && reachable.has(skillNested));
+    check(
+      're-enabled: the hand-hidden note STAYS hidden',
+      !reachable.has(skillHidden),
+      'this is the property a bulk write would have destroyed -- it could not know this note was hidden on purpose'
+    );
+
+    // ---------------------------------------------------------------------
+    console.log('\n=== 4c. Bulk Visible-to-Apps, and the aggregate it reports ===');
+
+    const aggregate = async (folderId: string) => {
+      const ids = [folderId, skillsChild].filter((id, i, a) => a.indexOf(id) === i);
+      const placeholders = ids.map(() => '?').join(',');
+      const row = await db.get<{ total: number; hidden: number }>(
+        `SELECT count(*) as total, sum(is_hidden_from_api) as hidden FROM notes
+         WHERE folder_id IN (${placeholders}) AND is_trashed = 0`,
+        ids
+      );
+      if (row.total === 0) return 'empty';
+      const hidden = row.hidden ?? 0;
+      if (hidden === 0) return 'all-visible';
+      if (hidden === row.total) return 'all-hidden';
+      return 'mixed';
+    };
+
+    check(
+      'one note hidden among three reports "mixed", not a tidy on/off',
+      (await aggregate(skills)) === 'mixed',
+      `got ${await aggregate(skills)} -- the menu must not claim a single state when the notes disagree`
+    );
+
+    await db.execute(
+      `UPDATE notes SET is_hidden_from_api = 0 WHERE folder_id IN (?, ?) AND is_trashed = 0`,
+      [skills, skillsChild]
+    );
+    check('bulk show: the aggregate becomes all-visible', (await aggregate(skills)) === 'all-visible');
+    const bulkShown = await db.get<{ c: number }>(
+      'SELECT count(*) as c FROM notes WHERE id = ? AND is_hidden_from_api = 0',
+      [skillHidden]
+    );
+    check(
+      'bulk show OVERRODE the hand-hidden note',
+      bulkShown.c === 1,
+      'destructive by instruction -- this is the documented difference from disabling the folder'
+    );
+
+    await db.execute(
+      `UPDATE notes SET is_hidden_from_api = 1 WHERE folder_id IN (?, ?) AND is_trashed = 0`,
+      [skills, skillsChild]
+    );
+    check('bulk hide: the aggregate becomes all-hidden', (await aggregate(skills)) === 'all-hidden');
+
+    // Reset so the tree checks below see the shape they expect.
+    await db.execute('DELETE FROM notes WHERE folder_id IN (?, ?)', [skills, skillsChild]);
+    await db.execute('DELETE FROM folders WHERE id IN (?, ?)', [skillsChild, skills]);
+
+    // ---------------------------------------------------------------------
+    console.log('\n=== 4d. Skills is pinned and cannot be reordered ===');
+
+    const pinned = await insertFolder(db, key, { name: 'Skills', kind: 'skills', depth: 0, sortOrder: 0 });
+    const userA = await insertFolder(db, key, { name: 'A', depth: 0, sortOrder: 1 });
+    const userB = await insertFolder(db, key, { name: 'B', depth: 0, sortOrder: 2 });
+
+    // Transcribed from moveTopLevelFolder's guard. Ordering is not a security
+    // property, so the project's usual transcription convention applies here --
+    // unlike the broker predicate above, which is imported for real.
+    const movableSiblings = await db.getAll<{ id: string }>(
+      `SELECT id FROM folders WHERE parent_id IS NULL AND kind != 'skills'
+       ORDER BY sort_order ASC, created_at ASC`
+    );
+    check(
+      'Skills is absent from the reorderable set',
+      !movableSiblings.some((f) => f.id === pinned),
+      'so a user folder above it moves PAST it rather than swapping with a row that cannot move'
+    );
+    // Scoped to the three folders this section created -- earlier sections
+    // leave their own top-level folders in the table, so asserting on the
+    // whole set would be asserting on unrelated fixtures.
+    const mine = movableSiblings.filter((f) => f.id === userA || f.id === userB);
+    check(
+      'both user folders are reorderable, in order',
+      mine.length === 2 && mine[0].id === userA && mine[1].id === userB,
+      `got ${mine.length} of 2`
+    );
+
+    const kindOf = await db.get<{ kind: string }>('SELECT kind FROM folders WHERE id = ?', [pinned]);
+    check('the guard can identify Skills by its plaintext kind flag', kindOf.kind === 'skills');
+
+    await db.execute('DELETE FROM folders WHERE id IN (?, ?, ?)', [pinned, userA, userB]);
+
+    // ---------------------------------------------------------------------
     console.log('\n=== 5. Tree building (real buildFolderTree, not transcribed) ===');
     const rows = await db.getAll<any>(
       'SELECT * FROM folders ORDER BY sort_order ASC, created_at ASC'
@@ -255,6 +403,7 @@ async function main() {
       sortOrder: r.sort_order,
       includeInNotes: Boolean(r.include_in_notes),
       groupByDate: Boolean(r.group_by_date),
+      isEnabled: r.is_enabled == null ? true : Boolean(r.is_enabled),
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     }));
@@ -277,7 +426,7 @@ async function main() {
     const orphan: Folder = {
       id: 'orphan', userId: 'u1', parentId: 'a-parent-that-has-not-synced-yet',
       name: 'Orphan', kind: 'user', depth: 1, sortOrder: 99,
-      includeInNotes: true, groupByDate: false,
+      includeInNotes: true, groupByDate: false, isEnabled: true,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
     const withOrphan = buildFolderTree([...folders, orphan], recountMap);

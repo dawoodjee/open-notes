@@ -3,6 +3,12 @@ import type { AbstractPowerSyncDatabase } from '@powersync/common';
 import { getPowerSync } from './db';
 import { getCurrentUserId } from '@/lib/auth/currentUser';
 import { encryptField, tryDecryptField } from '@/lib/crypto/noteCrypto';
+// Re-exported so callers have one import surface for folder concerns, while
+// the strings themselves live somewhere the verify scripts can reach.
+export {
+  DISABLED_FOLDER_SUBTREE_CTE,
+  NOT_IN_DISABLED_FOLDER,
+} from './folderQueries';
 import {
   Folder,
   FolderKind,
@@ -24,7 +30,8 @@ import {
  */
 
 export const FOLDER_COLUMNS =
-  'id, user_id, parent_id, name, kind, depth, sort_order, include_in_notes, group_by_date, created_at, updated_at';
+  'id, user_id, parent_id, name, kind, depth, sort_order, include_in_notes, group_by_date, is_enabled, created_at, updated_at';
+
 
 /** The single point where a stored folder row becomes app data. Synchronous,
  *  same as mapRowToNote and for the same reason: it runs inside watch(). */
@@ -41,6 +48,9 @@ export function mapRowToFolder(row: any): Folder {
     sortOrder: row.sort_order ?? 0,
     includeInNotes: Boolean(row.include_in_notes),
     groupByDate: Boolean(row.group_by_date),
+    // Absent reads as ENABLED. A row written before this column existed must
+    // behave as a normal folder rather than silently vanishing from the sidebar.
+    isEnabled: row.is_enabled == null ? true : Boolean(row.is_enabled),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     // Surfaced rather than swallowed, same as Note.decryptFailed: an
@@ -184,8 +194,8 @@ export async function createFolderInDB(options: CreateFolderOptions): Promise<Fo
 
   await getPowerSync().execute(
     `INSERT INTO folders
-       (id, user_id, parent_id, name, kind, depth, sort_order, include_in_notes, group_by_date, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+       (id, user_id, parent_id, name, kind, depth, sort_order, include_in_notes, group_by_date, is_enabled, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?)`,
     [
       id,
       userId,
@@ -210,6 +220,7 @@ export async function createFolderInDB(options: CreateFolderOptions): Promise<Fo
     sortOrder: sortRow.next,
     includeInNotes,
     groupByDate: false,
+    isEnabled: true,
     createdAt: now,
     updatedAt: now,
   };
@@ -323,8 +334,21 @@ export async function folderHasContents(folderId: string): Promise<boolean> {
  */
 export async function moveTopLevelFolder(id: string, direction: -1 | 1): Promise<void> {
   const db = getPowerSync();
+
+  // Skills is pinned. Guarded here as well as hidden in the sidebar, so the
+  // rule survives a second caller appearing later -- a UI-only rule is one
+  // refactor away from being no rule at all.
+  const moving = await db.getOptional<{ kind: string }>(
+    'SELECT kind FROM folders WHERE id = ?',
+    [id]
+  );
+  if (moving?.kind === 'skills') return;
+
+  // Skills is also excluded from the ORDER the swap is computed against, so a
+  // user folder directly below it moves past it rather than trading places
+  // with a row that cannot move.
   const siblings = await db.getAll<{ id: string; sort_order: number }>(
-    `SELECT id, sort_order FROM folders WHERE parent_id IS NULL
+    `SELECT id, sort_order FROM folders WHERE parent_id IS NULL AND kind != 'skills'
      ORDER BY sort_order ASC, created_at ASC`
   );
 
@@ -376,6 +400,87 @@ export async function moveTopLevelFolder(id: string, direction: -1 | 1): Promise
   });
 }
 
+/**
+ * Switch a folder on or off.
+ *
+ * Reversible by construction: this writes ONE flag and touches no note. What
+ * makes the notes invisible to apps is the broker consulting that flag at read
+ * time (see DISABLED_FOLDER_SUBTREE_CTE above), so re-enabling restores exactly
+ * the visibility that was there before, per-note choices included.
+ */
+export async function setFolderEnabled(id: string, enabled: boolean): Promise<void> {
+  await getPowerSync().execute(
+    'UPDATE folders SET is_enabled = ?, updated_at = ? WHERE id = ?',
+    [enabled ? 1 : 0, new Date().toISOString(), id]
+  );
+}
+
+export type SubtreeApiVisibility = 'all-visible' | 'all-hidden' | 'mixed' | 'empty';
+
+/**
+ * Whether the notes under a folder are visible to apps -- as one answer.
+ *
+ * Returns 'mixed' rather than picking a side when they disagree, because the
+ * menu item that renders this is a bulk action: showing it as simply "on" when
+ * three of five notes are hidden would misrepresent what tapping it destroys.
+ */
+export async function subtreeApiVisibility(folderId: string): Promise<SubtreeApiVisibility> {
+  const db = getPowerSync();
+  const ids = await subtreeFolderIds(db, folderId);
+  const placeholders = ids.map(() => '?').join(',');
+
+  const row = await db.get<{ total: number; hidden: number }>(
+    `SELECT count(*) as total, sum(is_hidden_from_api) as hidden FROM notes
+     WHERE folder_id IN (${placeholders}) AND is_trashed = 0`,
+    ids
+  );
+
+  if (row.total === 0) return 'empty';
+  const hidden = row.hidden ?? 0;
+  if (hidden === 0) return 'all-visible';
+  if (hidden === row.total) return 'all-hidden';
+  return 'mixed';
+}
+
+/**
+ * Set api visibility on every note under a folder, including subfolders.
+ *
+ * DESTRUCTIVE OF PER-NOTE CHOICES, deliberately and by instruction: "affecting
+ * all its contents" is what a bulk action means, and there is no way to honour
+ * that while also preserving the individual flags it is overwriting. The menu
+ * item surfaces the aggregate first (see subtreeApiVisibility) so the state
+ * being replaced is at least visible before it is replaced.
+ *
+ * Contrast setFolderEnabled above, which is reversible precisely because it
+ * writes no note. Two different tools, and the difference is worth keeping
+ * clear: one stands the folder down, the other rewrites its contents.
+ *
+ * Does not touch updated_at, same as setNoteHiddenFromApi: changing who may
+ * read a note is not an edit to the note, and bumping it would reorder the list.
+ */
+export async function setSubtreeApiVisibility(
+  folderId: string,
+  visible: boolean
+): Promise<number> {
+  const db = getPowerSync();
+  const ids = await subtreeFolderIds(db, folderId);
+  const placeholders = ids.map(() => '?').join(',');
+
+  const affected = await db.getAll<{ id: string }>(
+    `SELECT id FROM notes WHERE folder_id IN (${placeholders}) AND is_trashed = 0
+       AND is_hidden_from_api != ?`,
+    [...ids, visible ? 0 : 1]
+  );
+  if (affected.length === 0) return 0;
+
+  await db.execute(
+    `UPDATE notes SET is_hidden_from_api = ?
+     WHERE folder_id IN (${placeholders}) AND is_trashed = 0`,
+    [visible ? 0 : 1, ...ids]
+  );
+  return affected.length;
+}
+
 // =============================================================================
 // Seeding and claiming
 // =============================================================================
@@ -406,8 +511,8 @@ export async function seedSkillsFolder(db: AbstractPowerSyncDatabase): Promise<v
   const now = new Date().toISOString();
   await db.execute(
     `INSERT INTO folders
-       (id, user_id, parent_id, name, kind, depth, sort_order, include_in_notes, group_by_date, created_at, updated_at)
-     VALUES (?, ?, NULL, ?, 'skills', 0, 0, 0, 0, ?, ?)`,
+       (id, user_id, parent_id, name, kind, depth, sort_order, include_in_notes, group_by_date, is_enabled, created_at, updated_at)
+     VALUES (?, ?, NULL, ?, 'skills', 0, 0, 0, 0, 1, ?, ?)`,
     [
       Crypto.randomUUID(),
       getCurrentUserId(),

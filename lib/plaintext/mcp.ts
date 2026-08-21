@@ -1,4 +1,5 @@
 import { getPowerSync } from '@/lib/powersync/db';
+import { DISABLED_FOLDER_SUBTREE_CTE, NOT_IN_DISABLED_FOLDER } from '@/lib/powersync/folderQueries';
 import { requestPlaintext, BrokerResult, PlaintextNote } from './broker';
 
 /**
@@ -46,9 +47,17 @@ export async function listNoteMetadata(): Promise<NoteMetadata[]> {
   // hidden note in the metadata would still tell an app that the note exists,
   // when it was written and when it last changed, which is most of what
   // someone hiding a note is trying not to say.
+  //
+  // Notes in a disabled folder are excluded HERE too, not only in the broker --
+  // exactly the reasoning the hidden-note exclusion above already follows.
+  // Leaving them in the metadata would tell an app that the note exists, when
+  // it was written and when it last changed, which is most of what switching
+  // the folder off was meant to withhold.
   const rows = await getPowerSync().getAll<any>(
-    `SELECT id, created_at, updated_at, is_trashed FROM notes
-     WHERE is_hidden_from_api = 0 ORDER BY updated_at DESC`
+    `${DISABLED_FOLDER_SUBTREE_CTE}
+     SELECT id, created_at, updated_at, is_trashed FROM notes
+     WHERE is_hidden_from_api = 0 AND ${NOT_IN_DISABLED_FOLDER}
+     ORDER BY updated_at DESC`
   );
   return rows.map((row) => ({
     id: row.id,

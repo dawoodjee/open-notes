@@ -10,8 +10,10 @@ import {
   FolderPlus,
   Pencil,
   Trash2,
+  Radio,
 } from 'lucide-react-native';
 import { MAX_FOLDER_DEPTH } from '@/types/folder';
+import type { SubtreeApiVisibility } from '@/lib/powersync/folders';
 
 /**
  * The folder context menu -- long-press on touch, right-click on web/desktop.
@@ -40,6 +42,9 @@ export interface FolderMenuTarget {
   depth: number;
   includeInNotes: boolean;
   groupByDate: boolean;
+  /** Skills only: whether the notes underneath are visible to apps, as one
+   *  answer. 'mixed' when they disagree -- see subtreeApiVisibility(). */
+  apiVisibility?: SubtreeApiVisibility;
   anchor: { x: number; y: number };
 }
 
@@ -51,6 +56,8 @@ export interface FolderContextMenuProps {
   onNewFolder: (target: FolderMenuTarget) => void;
   onToggleGroupByDate: (target: FolderMenuTarget) => void;
   onDelete: (target: FolderMenuTarget) => void;
+  /** Skills only. Bulk-writes every note underneath -- see the item below. */
+  onSetSubtreeApiVisibility: (target: FolderMenuTarget, visible: boolean) => void;
 }
 
 export function FolderContextMenu({
@@ -61,6 +68,7 @@ export function FolderContextMenu({
   onNewFolder,
   onToggleGroupByDate,
   onDelete,
+  onSetSubtreeApiVisibility,
 }: FolderContextMenuProps) {
   if (!target) return null;
 
@@ -126,6 +134,41 @@ export function FolderContextMenu({
         </MenuItem>
       ) : null}
 
+      {/*
+        SKILLS ONLY, and deliberately unlike every other item in this menu: this
+        one BULK-WRITES every note underneath, subfolders included, overwriting
+        whatever each note's own "Visible to Apps" was set to.
+
+        The label leads with the aggregate so the state about to be replaced is
+        visible before it is replaced -- "Mixed" being the case that matters,
+        since that is where the bulk write actually destroys a decision. The
+        word "All" is in the label for the same reason: this is not the per-note
+        toggle wearing a different hat.
+      */}
+      {target.variant === 'skills' ? (
+        <MenuItem
+          key="api-visibility"
+          textValue="Visible to Apps"
+          onPress={() => {
+            onClose();
+            onSetSubtreeApiVisibility(target, target.apiVisibility !== 'all-visible');
+          }}
+          className="px-4 py-3 flex-row items-center gap-3"
+        >
+          <Icon
+            as={Radio}
+            className={`w-[18px] h-[18px] ${
+              target.apiVisibility === 'all-visible'
+                ? 'text-foreground'
+                : 'text-muted-foreground'
+            }`}
+          />
+          <MenuItemLabel className="text-base text-foreground">
+            {apiVisibilityLabel(target.apiVisibility)}
+          </MenuItemLabel>
+        </MenuItem>
+      ) : null}
+
       {!isDefault ? (
         <MenuItem
           key="rename"
@@ -187,4 +230,21 @@ export function FolderContextMenu({
       ) : null}
     </Menu>
   );
+}
+
+/** What the bulk item says, given what the notes underneath currently are. */
+function apiVisibilityLabel(state: SubtreeApiVisibility | undefined): string {
+  switch (state) {
+    case 'all-visible':
+      return 'Hide All from Apps';
+    case 'all-hidden':
+      return 'Show All to Apps';
+    case 'mixed':
+      // Names the destruction rather than hiding it behind a tidy toggle.
+      return 'Show All to Apps (some hidden)';
+    default:
+      // No notes to act on. Kept rather than removed so the folder's
+      // capabilities don't appear and disappear as it fills and empties.
+      return 'Show All to Apps';
+  }
 }

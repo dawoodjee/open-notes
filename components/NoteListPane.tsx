@@ -45,6 +45,8 @@ export interface NoteListPaneProps {
   onOpenFolders?: () => void;
   /** Wide layouts only: collapse/expand the persistent folder pane. */
   onToggleSidebar?: () => void;
+  /** True on phones. Decides the header shape -- see the note on the header. */
+  useCompactHeader: boolean;
 }
 
 export default function NoteListPane({
@@ -62,6 +64,7 @@ export default function NoteListPane({
   onSearchChange,
   onOpenFolders,
   onToggleSidebar,
+  useCompactHeader,
 }: NoteListPaneProps) {
   // The bottom bar is one of the few places styled with inline `style` rather
   // than classes (it predates the settings primitives), so its colours can't
@@ -153,7 +156,7 @@ export default function NoteListPane({
         would point at somewhere you already are.
       */}
       <VStack className="p-4 pb-2" style={{ paddingTop: insets.top + 16 }}>
-        {onOpenFolders ? (
+        {useCompactHeader && onOpenFolders ? (
           // PHONE: circular back button in its own row, large title beneath.
           // The reference draws the round controls on their own line and lets
           // the title own the next one; putting the two on one row is what
@@ -176,15 +179,17 @@ export default function NoteListPane({
               and the title overflowed straight across the avatar at
               accessibility text sizes. */}
           <HStack className="flex-1 min-w-0 items-center gap-2">
-            {!onOpenFolders ? (
-              // WIDE LAYOUT: the split-view toggle, inline beside the title.
-              // Correct here and only here -- it means "show/hide the pane
-              // next to this one", which is a true statement when there IS a
-              // pane next to this one.
+            {!useCompactHeader ? (
+              // WIDE LAYOUT (iPad both orientations, desktop): the reveal
+              // control, INLINE with the title rather than stacked above it.
+              //
+              // Whether it reveals a floating panel or expands a persistent
+              // pane is the parent's business -- from here it is one control
+              // meaning "show me the folders", which is why both cases route
+              // through the same button rather than forking the header again.
               <Pressable
-                onPress={onToggleSidebar}
+                onPress={onOpenFolders ?? onToggleSidebar}
                 hitSlop={8}
-                className="hidden md:flex"
                 style={{
                   minHeight: 44,
                   minWidth: 44,
@@ -192,7 +197,7 @@ export default function NoteListPane({
                   justifyContent: 'center',
                 }}
                 accessibilityRole="button"
-                accessibilityLabel="Toggle folder sidebar"
+                accessibilityLabel="Show folders"
               >
                 <Icon as={PanelLeft} className="w-6 h-6 text-foreground" />
               </Pressable>
@@ -217,6 +222,13 @@ export default function NoteListPane({
               </RNText>
             </VStack>
           </HStack>
+
+          {/* Wide layouts put the account menu here, as an overflow glyph
+              rather than an avatar -- see AvatarMenuTrigger's `variant`. On a
+              phone it lives in the circular-button row above instead. */}
+          {!useCompactHeader ? (
+            <AvatarMenuTrigger variant="overflow" className="shrink-0" />
+          ) : null}
         </HStack>
       </VStack>
 

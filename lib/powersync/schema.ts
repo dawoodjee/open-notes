@@ -51,6 +51,11 @@ export const foldersTable = new Table({
   sort_order: column.integer,
   include_in_notes: column.integer, // 0/1 -> boolean
   group_by_date: column.integer, // 0/1 -> boolean
+  // Whether this folder is switched on. 0/1, default 1. A disabled folder is
+  // hidden from the sidebar AND its notes are excluded inside the broker --
+  // see the Stage 10 review-2 migration for why that is a read-time filter
+  // rather than a bulk write over the notes.
+  is_enabled: column.integer,
   created_at: column.text,
   updated_at: column.text,
 });
