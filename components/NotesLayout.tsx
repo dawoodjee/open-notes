@@ -81,6 +81,11 @@ export default function NotesLayout() {
   // Mobile only: the folder pane is a separate screen rather than a third
   // column, so it needs its own visibility. Desktop/tablet ignore this.
   const [isFolderPaneOpen, setIsFolderPaneOpen] = useState<boolean>(false);
+  // Wide layouts only: the persistent folder pane can be tucked away, the same
+  // way the note list already can. Separate state from isFolderPaneOpen, which
+  // is the narrow-layout "am I on the folders screen" flag -- one is a
+  // collapse, the other is navigation.
+  const [isFolderSidebarCollapsed, setIsFolderSidebarCollapsed] = useState(false);
 
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   // 768 is the `md:` breakpoint the rest of the app already uses. Above it,
@@ -847,7 +852,11 @@ export default function NotesLayout() {
           allNotesCount={allNotesCount}
           trashCount={trashedNotes.length}
           expandedIds={expandedIds}
-          isVisible={foldersArePersistent || (isFolderPaneOpen && !selectedNoteId)}
+          isVisible={
+            foldersArePersistent
+              ? !isFolderSidebarCollapsed
+              : isFolderPaneOpen && !selectedNoteId
+          }
           isPersistent={foldersArePersistent}
           width={
             Platform.OS === 'web' && foldersArePersistent ? 288 : undefined
@@ -902,6 +911,7 @@ export default function NotesLayout() {
             onOpenFolders={
               foldersArePersistent ? undefined : () => setIsFolderPaneOpen(true)
             }
+            onToggleSidebar={() => setIsFolderSidebarCollapsed((v) => !v)}
           />
         )}
 

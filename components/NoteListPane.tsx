@@ -10,12 +10,13 @@ import { Input, InputField, InputSlot, InputIcon } from '@/components/ui/input';
 import { Icon } from '@/components/ui/icon';
 
 // Lucide Icons
-import { Search, SquarePen, PanelLeft } from 'lucide-react-native';
+import { Search, SquarePen, PanelLeft, ChevronLeft } from 'lucide-react-native';
 
 // Custom Types & Helpers
 import { Note, parseNoteContent, formatNoteDate } from '@/types/note';
 import AvatarMenuTrigger from './AvatarMenuTrigger';
 import { PressableScale } from './PressableScale';
+import { HeaderCircleButton } from './HeaderCircleButton';
 import { useTheme } from '@/contexts/ThemeContext';
 import type { FolderSelection } from '@/types/folder';
 
@@ -39,7 +40,11 @@ export interface NoteListPaneProps {
   onSelectNote: (id: string) => void;
   onCreateNote: () => void;
   onSearchChange: (query: string) => void;
+  /** Supplied on narrow layouts only. Its presence IS the "am I a phone?"
+   *  signal for the header shape above. */
   onOpenFolders?: () => void;
+  /** Wide layouts only: collapse/expand the persistent folder pane. */
+  onToggleSidebar?: () => void;
 }
 
 export default function NoteListPane({
@@ -56,6 +61,7 @@ export default function NoteListPane({
   onCreateNote,
   onSearchChange,
   onOpenFolders,
+  onToggleSidebar,
 }: NoteListPaneProps) {
   // The bottom bar is one of the few places styled with inline `style` rather
   // than classes (it predates the settings primitives), so its colours can't
@@ -136,60 +142,83 @@ export default function NoteListPane({
         ${isSidebarTucked ? 'md:hidden' : 'md:w-80'}
       `}
     >
-      {/* Header with Top-Right Avatar for Mobile/List view */}
-      <HStack
-        className="justify-between items-start p-4 pb-2"
-        style={{ paddingTop: insets.top + 16 }}
-      >
-        {/* flex-1/min-w-0 as CLASSES, not as an inline style. NativeWind
-            compiles className into its own `style` prop, which overwrites any
-            `style` passed beside it -- the same collision documented in
-            PressableScale. Passed as a style, this flex was silently dropped
-            and the title overflowed straight across the avatar at
-            accessibility text sizes. */}
-        <HStack className="flex-1 min-w-0 items-center gap-2">
-          {onOpenFolders ? (
-            // Mobile only: the folder pane is a separate screen there, so the
-            // list needs a way back to it. On desktop both panes are visible
-            // at once and this would be a button to somewhere you already are.
-            <Pressable
+      {/*
+        TWO HEADER SHAPES, because a phone and a split view are answering
+        different questions.
+
+        `onOpenFolders` is only supplied when the folder pane is NOT persistent
+        -- i.e. on a phone, and on an iPad in portrait -- so it doubles as the
+        signal for which shape to draw. Where the sidebar is already on screen
+        beside this pane there is nothing to navigate back to, and the control
+        would point at somewhere you already are.
+      */}
+      <VStack className="p-4 pb-2" style={{ paddingTop: insets.top + 16 }}>
+        {onOpenFolders ? (
+          // PHONE: circular back button in its own row, large title beneath.
+          // The reference draws the round controls on their own line and lets
+          // the title own the next one; putting the two on one row is what
+          // made this read as a tablet header on a phone.
+          <HStack className="justify-between items-center mb-2">
+            <HeaderCircleButton
+              icon={ChevronLeft}
+              accessibilityLabel="Back to folders"
               onPress={onOpenFolders}
-              hitSlop={8}
-              className="md:hidden"
-              style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}
-              accessibilityRole="button"
-              accessibilityLabel="Show folders"
-            >
-              <Icon as={PanelLeft} className="w-6 h-6 text-foreground" />
-            </Pressable>
-          ) : null}
+            />
+            <AvatarMenuTrigger className="shrink-0" />
+          </HStack>
+        ) : null}
 
-          <VStack className="flex-1 min-w-0">
-            <RNText
-              className="text-3xl font-bold text-foreground"
-              numberOfLines={1}
-              // adjustsFontSizeToFit would be the wrong fix here -- it defeats
-              // the whole point of Dynamic Type by shrinking text the user
-              // asked to be bigger. Truncating a folder name is the honest
-              // failure; the full name is one tap away in the sidebar.
-              ellipsizeMode="tail"
-            >
-              {isSearching ? 'Search' : folderTitle}
-            </RNText>
-            <RNText className="text-xs text-muted-foreground font-medium mt-0.5">
-              {isSearching
-                ? `${filteredNotes.length} ${filteredNotes.length === 1 ? 'Result' : 'Results'}`
-                : `${filteredNotes.length} ${filteredNotes.length === 1 ? 'Note' : 'Notes'}`}
-            </RNText>
-          </VStack>
+        <HStack className="items-start justify-between">
+          {/* flex-1/min-w-0 as CLASSES, not as an inline style. NativeWind
+              compiles className into its own `style` prop, which overwrites any
+              `style` passed beside it -- the same collision documented in
+              PressableScale. Passed as a style, this flex was silently dropped
+              and the title overflowed straight across the avatar at
+              accessibility text sizes. */}
+          <HStack className="flex-1 min-w-0 items-center gap-2">
+            {!onOpenFolders ? (
+              // WIDE LAYOUT: the split-view toggle, inline beside the title.
+              // Correct here and only here -- it means "show/hide the pane
+              // next to this one", which is a true statement when there IS a
+              // pane next to this one.
+              <Pressable
+                onPress={onToggleSidebar}
+                hitSlop={8}
+                className="hidden md:flex"
+                style={{
+                  minHeight: 44,
+                  minWidth: 44,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Toggle folder sidebar"
+              >
+                <Icon as={PanelLeft} className="w-6 h-6 text-foreground" />
+              </Pressable>
+            ) : null}
+
+            <VStack className="flex-1 min-w-0">
+              <RNText
+                className="text-3xl font-bold text-foreground"
+                numberOfLines={1}
+                // adjustsFontSizeToFit would be the wrong fix here -- it defeats
+                // the whole point of Dynamic Type by shrinking text the user
+                // asked to be bigger. Truncating a folder name is the honest
+                // failure; the full name is one tap away in the sidebar.
+                ellipsizeMode="tail"
+              >
+                {isSearching ? 'Search' : folderTitle}
+              </RNText>
+              <RNText className="text-xs text-muted-foreground font-medium mt-0.5">
+                {isSearching
+                  ? `${filteredNotes.length} ${filteredNotes.length === 1 ? 'Result' : 'Results'}`
+                  : `${filteredNotes.length} ${filteredNotes.length === 1 ? 'Note' : 'Notes'}`}
+              </RNText>
+            </VStack>
+          </HStack>
         </HStack>
-
-        {/* Mobile/List Avatar. shrink-0 is load-bearing at accessibility text
-            sizes: without it the title -- which is text-3xl and therefore
-            enormous once Dynamic Type scales it -- squeezes the avatar to zero
-            width and then draws straight over it. */}
-        <AvatarMenuTrigger className="md:hidden shrink-0" />
-      </HStack>
+      </VStack>
 
       {/* Notes Scroll Area */}
       <FlatList
