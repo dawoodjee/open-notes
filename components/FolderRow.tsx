@@ -10,7 +10,7 @@ import * as Haptics from 'expo-haptics';
 import { Pressable } from '@/components/ui/pressable';
 import { Icon } from '@/components/ui/icon';
 import { PressableScale } from './PressableScale';
-import { ChevronRight, ChevronUp, ChevronDown, Folder as FolderIcon, Trash2, Notebook, Cog } from 'lucide-react-native';
+import { ChevronRight, ChevronUp, ChevronDown, Folder as FolderIcon, Trash2, Notebook, Scroll } from 'lucide-react-native';
 import { DURATION, EASE, SPRING_EXPAND, spring } from '@/lib/theme/motion';
 import type { FolderSelection } from '@/types/folder';
 
@@ -106,7 +106,7 @@ export function FolderRow({
         }
       : {};
 
-  const GlyphFor = { all: Notebook, trash: Trash2, skills: Cog, user: FolderIcon }[variant];
+  const GlyphFor = { all: Notebook, trash: Trash2, skills: Scroll, user: FolderIcon }[variant];
   const iconSize = iconSizeForDepth(depth);
 
   return (

@@ -5,9 +5,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Pressable } from '@/components/ui/pressable';
 import { Icon } from '@/components/ui/icon';
 import { Menu, MenuItem, MenuItemLabel, MenuSeparator } from '@/components/ui/menu';
-import { FolderPlus, MoreHorizontal, Power } from 'lucide-react-native';
+import { FolderPlus, MoreHorizontal, Scroll } from 'lucide-react-native';
 
 import { FolderRow } from './FolderRow';
+import { HeaderCircleButton } from './HeaderCircleButton';
 import { FolderContextMenu, FolderMenuTarget } from './FolderContextMenu';
 import { DeleteFolderDialog, FolderNameDialog } from './DeleteFolderDialog';
 import {
@@ -188,15 +189,11 @@ export function FolderSidebar({
       offset={8}
       className="rounded-2xl p-0 overflow-hidden min-w-[260px]"
       trigger={({ ...triggerProps }) => (
-        <Pressable
+        <HeaderCircleButton
           {...triggerProps}
-          hitSlop={8}
-          style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}
-          accessibilityRole="button"
+          icon={MoreHorizontal}
           accessibilityLabel="Folder options"
-        >
-          <Icon as={MoreHorizontal} className="w-6 h-6 text-lime-600 dark:text-lime-400" />
-        </Pressable>
+        />
       )}
     >
       <MenuItem
@@ -223,7 +220,7 @@ export function FolderSidebar({
         }}
         className="px-4 py-3 flex-row items-center gap-3"
       >
-        <Icon as={Power} className="text-muted-foreground w-[18px] h-[18px]" />
+        <Icon as={Scroll} className="text-muted-foreground w-[18px] h-[18px]" />
         <MenuItemLabel className="text-base text-foreground">
           {skillsFolder?.isEnabled ? 'Disable Skills Folder' : 'Enable Skills Folder'}
         </MenuItemLabel>
@@ -246,28 +243,31 @@ export function FolderSidebar({
       }`}
     >
       {/*
-        Edit on the left, overflow on the right, on both layouts. New Folder
-        lives inside the overflow rather than beside it -- a header with one
-        action in it and one action next to it invites the question of why, and
-        there is no answer.
+        Edit and overflow trail the title on BOTH layouts, one row -- phones
+        used to stack them above the title on their own row, which read as a
+        tablet header transplanted onto a phone. New Folder lives inside the
+        overflow rather than beside it -- a header with one action in it and
+        one action next to it invites the question of why, and there is no
+        answer.
 
-        The two layouts differ only in where the controls sit relative to the
-        title: phones stack them above it, wide layouts run them inline. Same
-        controls, same order, so nothing has to be learned twice.
+        The two layouts differ only in title size/alignment (phones keep the
+        large left title, wide layouts use the smaller centered one) -- same
+        controls, same order, same row, so nothing has to be learned twice.
       */}
       {useCompactHeader ? (
-        <View className="px-4 pt-4 pb-2">
-          <View className="flex-row items-center justify-between mb-2">
-            <EditButton isEditing={isEditing} onPress={() => setIsEditing((v) => !v)} />
-            {overflowMenu}
-          </View>
+        <View className="flex-row items-center justify-between px-4 pt-4 pb-2 gap-2">
+          {/* Truncates rather than clipping -- see the note on the wide
+              layout's title below; the same Dynamic Type failure applies
+              here now that the title shares a row with the controls. */}
           <RNText
-            className="text-3xl font-bold text-foreground"
+            className="text-3xl font-bold text-foreground flex-1 min-w-0"
             numberOfLines={1}
             ellipsizeMode="tail"
           >
             Folders
           </RNText>
+          <EditButton isEditing={isEditing} onPress={() => setIsEditing((v) => !v)} />
+          {overflowMenu}
         </View>
       ) : (
         <View className="flex-row items-center justify-between px-4 pt-4 pb-2 gap-2">
