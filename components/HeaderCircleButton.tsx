@@ -1,4 +1,5 @@
 import React from 'react';
+import type { View, PressableProps } from 'react-native';
 import { Icon } from '@/components/ui/icon';
 import { PressableScale } from './PressableScale';
 
@@ -22,19 +23,26 @@ import { PressableScale } from './PressableScale';
  * in both, and no new palette entry. Stage 9's contrast audit documents
  * translucent values as the allowed exception to the pure-value ban, and this
  * is the case that exception exists for.
+ *
+ * `forwardRef` + spread `...rest` (rather than a fixed `onPress` prop) so
+ * this can ALSO serve as a Gluestack `Menu` trigger -- a menu hands its
+ * trigger a `ref` (to measure where to draw the popover) and its own
+ * `onPress` bundled together in one props object, so the component has to
+ * accept and forward both rather than assuming a single named `onPress`.
+ * Plain callers (a back button with `onPress={...}`) work exactly as before;
+ * `PressableScale` needs the same `forwardRef` treatment underneath for the
+ * ref to actually reach the native node instead of stopping here.
  */
-export function HeaderCircleButton({
-  icon,
-  accessibilityLabel,
-  onPress,
-}: {
-  icon: React.ComponentType<any>;
-  accessibilityLabel: string;
-  onPress: () => void;
-}) {
+export const HeaderCircleButton = React.forwardRef<
+  View,
+  {
+    icon: React.ComponentType<any>;
+    accessibilityLabel: string;
+  } & Omit<PressableProps, 'children' | 'style'>
+>(function HeaderCircleButton({ icon, accessibilityLabel, ...rest }, ref) {
   return (
     <PressableScale
-      onPress={onPress}
+      ref={ref}
       // 44x44 exactly, which is both the HIG minimum touch target and the
       // size the reference draws these at -- no padding-based approximation,
       // since RN does not grow a hit area from padding alone.
@@ -43,8 +51,11 @@ export function HeaderCircleButton({
       className="rounded-full bg-foreground/10 items-center justify-center"
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
+      {...rest}
     >
       <Icon as={icon} className="w-6 h-6 text-foreground" />
     </PressableScale>
   );
-}
+});
+
+HeaderCircleButton.displayName = 'HeaderCircleButton';

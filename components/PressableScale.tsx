@@ -31,16 +31,7 @@ import { PRESS_SCALE, SPRING_PRESS, spring } from '@/lib/theme/motion';
  * on the parent, so the whole painted box scales -- background and border
  * included -- rather than just the contents shrinking inside a fixed card.
  */
-export function PressableScale({
-  children,
-  className,
-  style,
-  containerStyle,
-  onPressIn,
-  onPressOut,
-  scaleTo = PRESS_SCALE,
-  ...pressableProps
-}: Omit<PressableProps, 'children' | 'style'> & {
+type PressableScaleProps = Omit<PressableProps, 'children' | 'style'> & {
   /** Plain nodes only. Pressable's render-prop children form is deliberately
    *  not supported: the pressed state it reports is exactly what this
    *  component already expresses through the spring. */
@@ -65,7 +56,30 @@ export function PressableScale({
   containerStyle?: ViewStyle;
   /** Override the resting-while-held scale. Defaults to the shared token. */
   scaleTo?: number;
-}) {
+};
+
+/**
+ * `forwardRef` so this can double as a Gluestack `Menu` trigger, which needs
+ * a ref to the real native node to measure where to draw the popover. A
+ * plain function component drops an incoming `ref` silently -- React treats
+ * it as a reserved prop, not a regular one -- so without this the ref would
+ * just be `null` and the menu would have nothing to position itself against.
+ * None of this component's existing callers pass a ref, so it changes
+ * nothing for them.
+ */
+export const PressableScale = React.forwardRef<View, PressableScaleProps>(function PressableScale(
+  {
+    children,
+    className,
+    style,
+    containerStyle,
+    onPressIn,
+    onPressOut,
+    scaleTo = PRESS_SCALE,
+    ...pressableProps
+  },
+  ref
+) {
   const scale = useSharedValue(1);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -90,6 +104,7 @@ export function PressableScale({
 
   return (
     <Pressable
+      ref={ref}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       style={containerStyle}
@@ -105,4 +120,6 @@ export function PressableScale({
       </Animated.View>
     </Pressable>
   );
-}
+});
+
+PressableScale.displayName = 'PressableScale';
