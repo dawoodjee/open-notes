@@ -43,9 +43,9 @@ export function PlaintextConsentDialog() {
 
         <Pressable
           onPress={approve}
-          className="rounded-2xl h-12 items-center justify-center bg-black active:opacity-70 mb-2"
+          className="rounded-2xl h-12 items-center justify-center bg-primary active:opacity-70 mb-2"
         >
-          <RNText className="text-white font-semibold">Send</RNText>
+          <RNText className="text-primary-foreground font-semibold">Send</RNText>
         </Pressable>
         <Pressable
           onPress={deny}

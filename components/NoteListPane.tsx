@@ -15,6 +15,7 @@ import { Search, SquarePen } from 'lucide-react-native';
 // Custom Types & Helpers
 import { Note, parseNoteContent, formatNoteDate } from '@/types/note';
 import AvatarMenuTrigger from './AvatarMenuTrigger';
+import { PressableScale } from './PressableScale';
 import { useTheme } from '@/contexts/ThemeContext';
 
 export interface NoteListPaneProps {
@@ -129,9 +130,9 @@ export default function NoteListPane({
           const isSelected = note.id === selectedNoteId;
 
           return (
-            <Pressable
+            <PressableScale
               onPress={() => onSelectNote(note.id)}
-              className={`p-3 mb-2 rounded-xl transition-colors ${
+              className={`p-3 mb-2 rounded-xl ${
                 isSelected
                   ? 'bg-lime-100/80 dark:bg-lime-900/40'
                   : 'bg-card border border-border'
@@ -167,7 +168,7 @@ export default function NoteListPane({
                   {preview}
                 </RNText>
               </View>
-            </Pressable>
+            </PressableScale>
           );
         }}
       />
@@ -202,7 +203,7 @@ export default function NoteListPane({
           onPress={onCreateNote}
           className="w-10 h-10 rounded-full bg-lime-500 items-center justify-center active:bg-lime-600 shadow-sm shrink-0"
         >
-          <Icon as={SquarePen} className="text-white w-5 h-5" />
+          <Icon as={SquarePen} className="text-on-accent w-5 h-5" />
         </Pressable>
       </View>
     </VStack>

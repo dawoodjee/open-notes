@@ -160,7 +160,7 @@ export function SettingsToggle({
       } ${disabled ? 'opacity-40' : ''}`}
     >
       <View
-        className={`w-[27px] h-[27px] rounded-full bg-white dark:bg-neutral-100 ${value ? 'self-end' : 'self-start'}`}
+        className={`w-[27px] h-[27px] rounded-full bg-on-accent ${value ? 'self-end' : 'self-start'}`}
       />
     </Pressable>
   );

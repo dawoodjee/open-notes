@@ -73,7 +73,21 @@ const BULLET_KEY = 'notes.bulletStyle.v1';
  * than a className. Kept in step with --background in global.css by hand,
  * which is exactly why the list is kept this short.
  */
-export const BACKGROUND = { light: '#ffffff', dark: '#0a0a0a' } as const;
+export const BACKGROUND = { light: '#fbfbfd', dark: '#0a0a0c' } as const;
+
+/**
+ * The label colour for anything sitting on a fixed accent fill -- the lime
+ * primary buttons and the red destructive ones.
+ *
+ * Same escape hatch as BACKGROUND above, for the same reason: ActivityIndicator
+ * takes a `color` prop, not a className, so `text-on-accent` cannot reach it.
+ * Kept in step with --on-accent in global.css by hand.
+ *
+ * Deliberately NOT scheme-keyed. The accent fills underneath it are fixed
+ * colours that do not flip with the theme, so a label that flipped would end up
+ * near-black on lime in dark mode.
+ */
+export const ON_ACCENT = '#fbfbfd';
 
 /**
  * The launch screen's background, which is NOT the app's.

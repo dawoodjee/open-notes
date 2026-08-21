@@ -131,7 +131,7 @@ export default function AccountField({
                 canCommit ? 'bg-lime-500 active:bg-lime-600' : 'bg-muted'
               }`}
             >
-              <Icon as={canCommit ? Check : X} className="text-white w-4 h-4" />
+              <Icon as={canCommit ? Check : X} className="text-on-accent w-4 h-4" />
             </InputSlot>
           )}
         </Input>

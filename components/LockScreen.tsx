@@ -66,10 +66,10 @@ export function LockScreen() {
         onPress={() => void attempt()}
         disabled={busy}
         className={`rounded-2xl h-12 px-8 items-center justify-center ${
-          busy ? 'bg-muted' : 'bg-black active:opacity-70'
+          busy ? 'bg-muted' : 'bg-primary active:opacity-70'
         }`}
       >
-        <Text className={`font-semibold ${busy ? 'text-muted-foreground' : 'text-white'}`}>
+        <Text className={`font-semibold ${busy ? 'text-muted-foreground' : 'text-primary-foreground'}`}>
           {busy ? 'Waiting…' : 'Unlock'}
         </Text>
       </Pressable>

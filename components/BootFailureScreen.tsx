@@ -3,7 +3,7 @@ import { ActivityIndicator, Pressable, ScrollView, Text as RNText, View } from '
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react-native';
 import { Icon } from '@/components/ui/icon';
-import { BACKGROUND, useTheme } from '@/contexts/ThemeContext';
+import { BACKGROUND, ON_ACCENT, useTheme } from '@/contexts/ThemeContext';
 
 /**
  * What the app shows when the vault or the database refuses to open.
@@ -91,9 +91,9 @@ export function BootFailureScreen({
               className="py-3 rounded-xl bg-red-500 items-center active:bg-red-600 disabled:opacity-50"
             >
               {resetting ? (
-                <ActivityIndicator color="white" />
+                <ActivityIndicator color={ON_ACCENT} />
               ) : (
-                <RNText className="text-sm font-semibold text-white">
+                <RNText className="text-sm font-semibold text-on-accent">
                   Delete local data and restart
                 </RNText>
               )}
