@@ -90,7 +90,20 @@ export default function AvatarMenuTrigger({
               } ${className ?? ''}`}
             >
               {isLoggedIn ? (
-                <RNText className="text-xs font-bold text-lime-800">{initials}</RNText>
+                // allowFontScaling={false} on purpose, and it is the narrow
+                // exception rather than the rule. The circle is a fixed 32pt
+                // sitting in a fixed-height header row beside the back button,
+                // so it cannot grow; at accessibility text sizes the initials
+                // scaled past its edge and spilled over the rim. The other
+                // branch of this very control is an ICON at a fixed w-5 h-5 --
+                // this is the same element wearing letters instead of a glyph,
+                // so the two branches should behave the same way. No content is
+                // lost: the initials are an identity marker, and the account
+                // name itself is one tap away in the menu this opens, at full
+                // scale.
+                <RNText allowFontScaling={false} className="text-xs font-bold text-lime-800">
+                  {initials}
+                </RNText>
               ) : (
                 <Icon as={CircleUserRound} className="text-muted-foreground w-5 h-5" />
               )}

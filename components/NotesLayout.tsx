@@ -621,7 +621,11 @@ export default function NotesLayout() {
     }
   }, []);
 
-  const handleMoveNotes = useCallback(async (ids: string[], folderId: string) => {
+  // folderId null is a real destination, not a missing one: it files the notes
+  // under no folder at all, which is what "All Notes" means as a Move target.
+  // setNotesFolder already writes NULL correctly -- notes.folder_id is nullable
+  // by design (Stage 10's migration, `on delete set null`).
+  const handleMoveNotes = useCallback(async (ids: string[], folderId: string | null) => {
     try {
       await setNotesFolder(ids, folderId);
     } catch (err) {

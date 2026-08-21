@@ -2,9 +2,13 @@ import React, { useCallback, useEffect } from 'react';
 import { Platform, Pressable, Text as RNText, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
+  interpolate,
+  useDerivedValue,
+  interpolateColor,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  type SharedValue,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 import { Folder as FolderIcon, Pin, Share as ShareIcon, Trash2 } from 'lucide-react-native';
@@ -15,7 +19,18 @@ import { spring, SPRING_EXPAND } from '@/lib/theme/motion';
 /**
  * Swipe actions on a note row: right reveals Pin, left reveals Move + Delete.
  *
- * WHY THIS IS HAND-ROLLED rather than gesture-handler's `Swipeable`. The
+ * WHY THIS IS HAND-ROLLED -- re-decided 2026-08-22 after actually trying the
+ * alternative. `ReanimatedSwipeable` was built out in full and reverted, because
+ * on Android its LEFT action (Pin) rendered correctly but would not receive a
+ * tap, while the right-hand three worked. The cause is structural: it lays both
+ * action panels out as `StyleSheet.absoluteFillObject` siblings that each cover
+ * the whole row, and it also ignores `activeOffsetX`/`failOffsetY` (those props
+ * land on a View via prop-spreading; the pan is built from its own
+ * `dragOffsetFrom*Edge`), so the scroll-conflict guards below would have been
+ * silently inert too. It additionally has no full-swipe-to-commit, which this
+ * file has had working all along. See the Decisions Log.
+ *
+ * The original reasoning, still true. The
  * reference has a two-stage gesture -- a short swipe REVEALS the buttons and
  * leaves them there, a long swipe COMMITS the outermost action without you
  * ever touching a button -- and the release has to use Stage 9's spring so it
@@ -50,6 +65,34 @@ const REVEAL_THRESHOLD = 44;
  */
 const COMMIT_FRACTION_RIGHT = 0.55;
 const COMMIT_FRACTION_LEFT = 0.9;
+
+/**
+ * The shape starts as a CIRCLE and STRETCHES into a capsule as the drag
+ * deepens. Height and corner radius are fixed, so it stays fully rounded at
+ * every width -- it reads as one shape growing, not a rectangle acquiring
+ * rounded ends.
+ *
+ * MEASURED off mobile-swipe-left-actions.png rather than guessed: in that shot
+ * the slot pitch is 176px on a 976px-wide crop of a 402pt screen (2.43 px/pt),
+ * which is the 72pt ACTION_WIDTH above, and the capsule itself is ~150x105px,
+ * so ~62x43pt at full reveal. 44 is the circle diameter, which doubles as the
+ * minimum touch dimension.
+ */
+const CAPSULE_MIN_WIDTH = 44;
+const CAPSULE_MAX_WIDTH = 62;
+const CAPSULE_HEIGHT = 44;
+
+/**
+ * Tailwind's 500 and 600 steps, spelled as hex because these are ANIMATED.
+ * interpolateColor works on the values themselves, so a NativeWind className
+ * cannot participate -- it compiles down to a static style.
+ */
+const ACTION_COLORS = {
+  pin: ['#84cc16', '#65a30d'], // lime-500 -> lime-600
+  share: ['#3b82f6', '#2563eb'], // blue-500 -> blue-600
+  move: ['#6366f1', '#4f46e5'], // indigo-500 -> indigo-600
+  delete: ['#ef4444', '#dc2626'], // red-500 -> red-600
+} as const;
 
 export interface SwipeableNoteRowProps {
   id: string;
@@ -158,6 +201,20 @@ export function SwipeableNoteRow({
     opacity: Math.min(1, Math.max(0, -translateX.value / REVEAL_THRESHOLD)),
   }));
 
+  /**
+   * How far each side is revealed, as a fraction: 0 closed, 1 fully open, and
+   * ABOVE 1 once the drag is heading for a commit. Derived rather than stored
+   * so there is exactly one source of truth for the gesture -- translateX.
+   *
+   * The >1 region is what the outermost action's colour shift reads, so the
+   * deepening lines up with "keep pulling and this will fire" rather than with
+   * "the buttons are now visible".
+   */
+  const leftReveal = useDerivedValue(() => translateX.value / ACTION_WIDTH);
+  const rightReveal = useDerivedValue(
+    () => -translateX.value / (ACTION_WIDTH * LEFT_ACTION_COUNT)
+  );
+
   if (Platform.OS === 'web') return <>{children}</>;
 
   return (
@@ -179,7 +236,10 @@ export function SwipeableNoteRow({
         <SwipeAction
           label={isPinned ? 'Unpin' : 'Pin'}
           icon={Pin}
-          className="bg-lime-500"
+          colors={ACTION_COLORS.pin}
+          reveal={leftReveal}
+          // The only action on this side, so it is also the outermost one.
+          isOutermost
           onPress={() => runAction(onPin)}
         />
       </Animated.View>
@@ -200,19 +260,24 @@ export function SwipeableNoteRow({
         <SwipeAction
           label="Share"
           icon={ShareIcon}
-          className="bg-blue-500"
+          colors={ACTION_COLORS.share}
+          reveal={rightReveal}
           onPress={() => runAction(onShare)}
         />
         <SwipeAction
           label="Move"
           icon={FolderIcon}
-          className="bg-indigo-500"
+          colors={ACTION_COLORS.move}
+          reveal={rightReveal}
           onPress={() => runAction(onMove)}
         />
         <SwipeAction
           label="Delete"
           icon={Trash2}
-          className="bg-red-500"
+          colors={ACTION_COLORS.delete}
+          reveal={rightReveal}
+          // Outermost on this side: the one a full-swipe commits.
+          isOutermost
           onPress={() => runAction(onDelete)}
         />
       </Animated.View>
@@ -225,22 +290,42 @@ export function SwipeableNoteRow({
 }
 
 /**
- * A capsule with its label underneath, per the reference -- the text is NOT
- * inside the coloured shape. Painted at 60x40, which is smaller than 44pt in
- * one dimension on purpose; the Pressable around it fills the whole slot, so
- * the real touch target is 76 wide by the full row height.
+ * One action slot: a coloured shape with its label underneath -- the text is
+ * NOT inside the shape, per the reference.
+ *
+ * TWO THINGS ANIMATE OFF `reveal` (0 closed, 1 fully open, >1 heading for a
+ * commit):
+ *   - WIDTH, so the shape starts as a circle and stretches into a capsule as
+ *     the swipe deepens.
+ *   - COLOUR, but only on the outermost action, and only ABOVE 1 -- the region
+ *     where releasing will fire that action rather than just leave the row
+ *     open. That is what makes it an ARMED indicator rather than a decoration.
+ *
+ * The Pressable fills the whole 72-wide slot, so the touch target is the full
+ * row height by 72 even though the painted shape is at most 62 wide.
  */
 function SwipeAction({
   label,
   icon,
-  className,
+  colors,
+  reveal,
+  isOutermost = false,
   onPress,
 }: {
   label: string;
   icon: React.ComponentType<any>;
-  className: string;
+  colors: readonly [string, string];
+  reveal: SharedValue<number>;
+  isOutermost?: boolean;
   onPress: () => void;
 }) {
+  const shapeStyle = useAnimatedStyle(() => ({
+    width: interpolate(reveal.value, [0, 1], [CAPSULE_MIN_WIDTH, CAPSULE_MAX_WIDTH], 'clamp'),
+    backgroundColor: isOutermost
+      ? interpolateColor(reveal.value, [1, 1.35], [colors[0], colors[1]], 'RGB', { gamma: 1 })
+      : colors[0],
+  }));
+
   return (
     <Pressable
       onPress={onPress}
@@ -248,12 +333,19 @@ function SwipeAction({
       accessibilityRole="button"
       accessibilityLabel={label}
     >
-      <View
-        className={`${className} items-center justify-center rounded-full`}
-        style={{ width: 60, height: 40 }}
+      <Animated.View
+        style={[
+          {
+            height: CAPSULE_HEIGHT,
+            borderRadius: CAPSULE_HEIGHT / 2,
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+          shapeStyle,
+        ]}
       >
         <Icon as={icon} className="w-5 h-5 text-on-accent" />
-      </View>
+      </Animated.View>
       <RNText className="text-xs text-muted-foreground" numberOfLines={1}>
         {label}
       </RNText>

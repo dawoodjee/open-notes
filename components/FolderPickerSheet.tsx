@@ -1,6 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { ScrollView, Text as RNText, View } from 'react-native';
-import { ChevronDown, ChevronRight, FolderPlus, Folder as FolderIcon, X } from 'lucide-react-native';
+import {
+  ChevronDown,
+  ChevronRight,
+  FolderPlus,
+  Folder as FolderIcon,
+  Notebook,
+  X,
+} from 'lucide-react-native';
 
 import { Modal, ModalBackdrop, ModalContent } from '@/components/ui/modal';
 import { Icon } from '@/components/ui/icon';
@@ -42,10 +49,16 @@ export interface FolderPickerSheetProps {
   noteCount: number;
   folders: Folder[];
   /** Greyed out and inert -- a note cannot move into where it already is.
-   *  null when the notes don't share one folder, in which case nothing is. */
-  currentFolderId: string | null;
+   *
+   *  THREE STATES, and the third is the reason this isn't just `string | null`.
+   *  A folder id means every note is in that folder. `null` means every note is
+   *  UNFILED, which is now a real destination ("All Notes") and so has to be
+   *  disabled like any other current folder. `undefined` means the notes are
+   *  spread across different folders, in which case nothing is disabled. */
+  currentFolderId: string | null | undefined;
   onClose: () => void;
-  onSelect: (folderId: string) => void;
+  /** null moves the notes OUT of any folder -- see the All Notes row. */
+  onSelect: (folderId: string | null) => void;
   onCreateFolder: (parentId: string | null, name: string) => void | Promise<void>;
 }
 
@@ -155,6 +168,39 @@ export function FolderPickerSheet({
 
         <ScrollView className="flex-1 px-4 bg-background" contentContainerStyle={{ paddingBottom: 24 }}>
           <View className="rounded-xl bg-card overflow-hidden">
+            {/* ALL NOTES -- the way back OUT of a folder. Unfiled is a real
+                state in this app (notes predating folders, notes whose folder
+                was deleted), so "no folder" has to be reachable deliberately
+                and not only by accident. Sits above New Folder because it is
+                a destination that already exists, not one being created. */}
+            <PressableScale
+              onPress={
+                currentFolderId === null
+                  ? undefined
+                  : () => {
+                      onSelect(null);
+                      onClose();
+                    }
+              }
+              disabled={currentFolderId === null}
+              style={{
+                minHeight: 48,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 12,
+                paddingHorizontal: 14,
+                opacity: currentFolderId === null ? 0.4 : 1,
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="All Notes"
+              accessibilityState={{ disabled: currentFolderId === null }}
+            >
+              <Icon as={Notebook} className="w-5 h-5 text-lime-600 dark:text-lime-400" />
+              <RNText className="text-base text-foreground">All Notes</RNText>
+            </PressableScale>
+
+            <View className="h-px bg-border ml-12" />
+
             <PressableScale
               onPress={() => setNaming(true)}
               style={{

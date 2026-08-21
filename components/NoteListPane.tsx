@@ -52,7 +52,8 @@ export interface NoteListPaneProps {
   onCreateNote: () => void;
   onSearchChange: (query: string) => void;
   onTogglePin: (id: string, pinned: boolean) => void;
-  onMoveNotes: (ids: string[], folderId: string) => void;
+  /** folderId null moves the notes out of any folder, into All Notes. */
+  onMoveNotes: (ids: string[], folderId: string | null) => void;
   onTrashNotes: (ids: string[]) => void;
   onDuplicateNote: (id: string) => void;
   onShareNote: (id: string) => void;
@@ -198,7 +199,7 @@ export default function NoteListPane({
   );
 
   const finishMove = useCallback(
-    (folderId: string) => {
+    (folderId: string | null) => {
       onMoveNotes(moveTargets, folderId);
       setMoveTargets([]);
       setMoveFlyoutAnchor(null);
@@ -597,14 +598,30 @@ export default function NoteListPane({
  * merely some of them are in would block a move that is perfectly valid for
  * the rest.
  */
-function sharedFolderId(ids: string[], lookup: (id: string) => Note | null): string | null {
+/**
+ * The one folder every one of these notes is in, or `undefined` if they differ.
+ *
+ * THE UNDEFINED MATTERS. This used to return `null` for two different facts --
+ * "these notes disagree" and "these notes are all unfiled" -- which was
+ * harmless only while `null` could never be a Move destination. All Notes made
+ * it one. Collapsing them again would enable All Notes for a set of notes that
+ * are already unfiled, and disable it for a mixed set where it is exactly the
+ * right answer. Three states, three values.
+ */
+function sharedFolderId(
+  ids: string[],
+  lookup: (id: string) => Note | null
+): string | null | undefined {
   let shared: string | null | undefined;
+  let seen = false;
   for (const id of ids) {
     const folderId = lookup(id)?.folderId ?? null;
-    if (shared === undefined) shared = folderId;
-    else if (shared !== folderId) return null;
+    if (!seen) {
+      shared = folderId;
+      seen = true;
+    } else if (shared !== folderId) return undefined;
   }
-  return shared ?? null;
+  return seen ? shared : undefined;
 }
 
 /**
@@ -720,9 +737,9 @@ function DesktopMoveFlyout({
 }: {
   anchor: { x: number; y: number };
   folders: Folder[];
-  currentFolderId: string | null;
+  currentFolderId: string | null | undefined;
   onClose: () => void;
-  onSelect: (folderId: string) => void;
+  onSelect: (folderId: string | null) => void;
 }) {
   const ordered: { folder: Folder; depth: number }[] = [];
   const byParent = new Map<string | null, Folder[]>();
@@ -752,6 +769,30 @@ function DesktopMoveFlyout({
         />
       )}
     >
+      {/* All Notes: the way back out of a folder. Same reasoning as the
+          sheet's row -- see FolderPickerSheet. */}
+      <MenuItem
+        key="__all__"
+        textValue="All Notes"
+        onPress={
+          currentFolderId === null
+            ? undefined
+            : () => {
+                onClose();
+                onSelect(null);
+              }
+        }
+        className="px-4 py-2.5"
+      >
+        <MenuItemLabel
+          className={`text-base ${
+            currentFolderId === null ? 'text-muted-foreground opacity-50' : 'text-foreground'
+          }`}
+        >
+          All Notes
+        </MenuItemLabel>
+      </MenuItem>
+
       {ordered.map(({ folder, depth }) => {
         const disabled = folder.id === currentFolderId || folder.kind === 'skills';
         return (
