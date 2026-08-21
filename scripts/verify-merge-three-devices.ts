@@ -23,7 +23,7 @@
  * account created and deleted by this script. It never touches a real account.
  *
  * Usage: npx tsx scripts/verify-merge-three-devices.ts
- * Needs: SUPABASE_SERVICE_ROLE_KEY in .env.live.local
+ * Needs: SUPABASE_SERVICE_ROLE_KEY in scripts/.live-secrets.env
  */
 import { PowerSyncDatabase } from '@powersync/node';
 import { AbstractPowerSyncDatabase, CrudEntry } from '@powersync/common';
@@ -52,16 +52,16 @@ const POWERSYNC_URL = easLive.EXPO_PUBLIC_POWERSYNC_URL;
 const ANON_KEY = easLive.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 function readServiceKey(): string {
-  const path = '.env.live.local';
+  const path = 'scripts/.live-secrets.env';
   if (!existsSync(path)) {
     throw new Error(
-      '.env.live.local not found. It must contain SUPABASE_SERVICE_ROLE_KEY=<key from the Supabase dashboard>.'
+      'scripts/.live-secrets.env not found. It must contain SUPABASE_SERVICE_ROLE_KEY=<key from the Supabase dashboard>.'
     );
   }
   const line = readFileSync(path, 'utf-8')
     .split('\n')
     .find((l) => l.trim().startsWith('SUPABASE_SERVICE_ROLE_KEY='));
-  if (!line) throw new Error('SUPABASE_SERVICE_ROLE_KEY missing from .env.live.local');
+  if (!line) throw new Error('SUPABASE_SERVICE_ROLE_KEY missing from scripts/.live-secrets.env');
   return line.slice(line.indexOf('=') + 1).trim();
 }
 

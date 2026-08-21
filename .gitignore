@@ -35,6 +35,13 @@ yarn-error.*
 .env.local
 .env
 
+# Live-stack secrets for the scripts/ probes. Deliberately NOT named .env.*
+# at the project root: Expo's env loader claims anything matching that
+# pattern and hands it to Metro, which then tries to parse the file as
+# JavaScript and fails the whole bundle with "Unexpected token (1:0)".
+# See scripts/probe-live-account.mjs for what reads this.
+scripts/.live-secrets.env
+
 # typescript
 *.tsbuildinfo
 
@@ -55,4 +62,5 @@ supabase/backups/
 
 # build docs
 mvp-build-plan.md
+iteration-2-build-plan.md
 prd.md

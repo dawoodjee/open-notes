@@ -19,7 +19,7 @@
  * that dumps your notes into a terminal transcript is its own leak.
  *
  * Usage: node scripts/probe-live-account.mjs <email>
- * Needs: SUPABASE_SERVICE_ROLE_KEY in .env.live.local
+ * Needs: SUPABASE_SERVICE_ROLE_KEY in scripts/.live-secrets.env
  */
 import { readFileSync, existsSync } from 'node:fs';
 
@@ -27,16 +27,16 @@ const easLive = JSON.parse(readFileSync(new URL('../eas.json', import.meta.url),
   .env;
 const SUPABASE_URL = easLive.EXPO_PUBLIC_SUPABASE_URL;
 
-const envPath = new URL('../.env.live.local', import.meta.url);
+const envPath = new URL('./.live-secrets.env', import.meta.url);
 if (!existsSync(envPath)) {
-  console.error('.env.live.local not found -- it must contain SUPABASE_SERVICE_ROLE_KEY=<key>');
+  console.error('scripts/.live-secrets.env not found -- it must contain SUPABASE_SERVICE_ROLE_KEY=<key>');
   process.exit(1);
 }
 const line = readFileSync(envPath, 'utf-8')
   .split('\n')
   .find((l) => l.trim().startsWith('SUPABASE_SERVICE_ROLE_KEY='));
 if (!line) {
-  console.error('SUPABASE_SERVICE_ROLE_KEY missing from .env.live.local');
+  console.error('SUPABASE_SERVICE_ROLE_KEY missing from scripts/.live-secrets.env');
   process.exit(1);
 }
 const SERVICE_KEY = line.slice(line.indexOf('=') + 1).trim();

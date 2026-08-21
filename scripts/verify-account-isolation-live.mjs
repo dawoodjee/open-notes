@@ -12,7 +12,7 @@
  * exercises isolation between accounts at all.
  *
  * Usage: node scripts/verify-account-isolation-live.mjs
- * Needs: SUPABASE_SERVICE_ROLE_KEY in .env.live.local
+ * Needs: SUPABASE_SERVICE_ROLE_KEY in scripts/.live-secrets.env
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -21,16 +21,16 @@ const easLive = JSON.parse(readFileSync('eas.json', 'utf-8')).build.live.env;
 const SUPABASE_URL = easLive.EXPO_PUBLIC_SUPABASE_URL;
 const ANON_KEY = easLive.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
-const envPath = '.env.live.local';
+const envPath = 'scripts/.live-secrets.env';
 if (!existsSync(envPath)) {
-  console.error('.env.live.local not found -- it must contain SUPABASE_SERVICE_ROLE_KEY=<key>');
+  console.error('scripts/.live-secrets.env not found -- it must contain SUPABASE_SERVICE_ROLE_KEY=<key>');
   process.exit(1);
 }
 const line = readFileSync(envPath, 'utf-8')
   .split('\n')
   .find((l) => l.trim().startsWith('SUPABASE_SERVICE_ROLE_KEY='));
 if (!line) {
-  console.error('SUPABASE_SERVICE_ROLE_KEY missing from .env.live.local');
+  console.error('SUPABASE_SERVICE_ROLE_KEY missing from scripts/.live-secrets.env');
   process.exit(1);
 }
 const SERVICE_KEY = line.slice(line.indexOf('=') + 1).trim();
