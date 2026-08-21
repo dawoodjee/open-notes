@@ -42,6 +42,14 @@ const SIDE: Record<ActionName, 'left' | 'right'> = {
 };
 
 export default function DevSwipe() {
+  // Route files are bundled in release builds too, so without this the harness
+  // would be reachable in a shipped app via the notes://dev-swipe deep link.
+  // __DEV__ is compile-time, so the whole thing drops out of a release bundle.
+  if (!__DEV__) return null;
+  return <Harness />;
+}
+
+function Harness() {
   const [fired, setFired] = useState<Fired>({});
   const [open, setOpen] = useState<'left' | 'right' | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);

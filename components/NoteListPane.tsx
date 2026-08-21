@@ -512,7 +512,18 @@ export default function NoteListPane({
           width: '100%',
         }}
       >
-        <Input className="flex-1 rounded-full bg-background border-border h-10 px-3">
+        {/* minHeight, not a fixed h-10. The placeholder and value scale with
+            Dynamic Type, and at accessibility sizes a fixed 40pt box clipped
+            the text through the middle -- visible in the Android font_scale
+            1.6 screenshot. The New Note button beside it KEEPS its fixed 40pt
+            circle on purpose: it holds an icon, and icons do not scale, so
+            growing it would just make a bigger circle around the same glyph.
+            alignItems:'center' on the row keeps the two optically aligned as
+            the field grows. */}
+        <Input
+          className="flex-1 rounded-full bg-background border-border px-3"
+          style={{ minHeight: 40 }}
+        >
           <InputSlot>
             <InputIcon as={Search} className="text-muted-foreground ml-1 shrink-0" />
           </InputSlot>
