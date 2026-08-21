@@ -1,8 +1,16 @@
-import React, { useReducer, useState, useRef, useEffect, useCallback } from 'react';
-import { Platform, AppState, BackHandler, View } from 'react-native';
+import React, { useReducer, useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import {
+  Platform,
+  AppState,
+  BackHandler,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import NoteListPane from './NoteListPane';
 import NoteEditorPane from './NoteEditorPane';
 import DesktopResizeHandle from './DesktopResizeHandle';
+import { FolderSidebar } from './FolderSidebar';
+import { RecentlyDeletedPane } from './RecentlyDeletedPane';
 
 // Gluestack UI Primitives
 import { HStack } from '@/components/ui/hstack';
@@ -19,10 +27,31 @@ import {
   setNoteHiddenFromApi,
   updateNoteInDB,
   trashNoteInDB,
+  restoreNoteInDB,
+  emptyTrashInDB,
   getUiState,
   saveUiState,
   isPowerSyncReady,
 } from '@/lib/powersync/db';
+import {
+  createFolderInDB,
+  deleteFolderInDB,
+  mapRowToFolder,
+  moveTopLevelFolder,
+  renameFolderInDB,
+  seedSkillsFolderIfSettled,
+  setFolderGroupByDate,
+  setFolderIncludeInNotes,
+  FOLDER_COLUMNS,
+} from '@/lib/powersync/folders';
+import {
+  ALL_NOTES_SELECTION,
+  Folder,
+  FolderSelection,
+  buildFolderTree,
+  collectSubtreeIds,
+  findNode,
+} from '@/types/folder';
 import { isBlankNote } from '@/types/note';
 import { BootSpinner } from '@/components/BootSpinner';
 import { BACKGROUND, useTheme } from '@/contexts/ThemeContext';
@@ -44,6 +73,30 @@ export default function NotesLayout() {
   const { notes, selectedNoteId, searchQuery } = state;
 
   const [isSidebarTucked, setIsSidebarTucked] = useState<boolean>(false);
+
+  // --- Folders -------------------------------------------------------------
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [selection, setSelection] = useState<FolderSelection>(ALL_NOTES_SELECTION);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  // Mobile only: the folder pane is a separate screen rather than a third
+  // column, so it needs its own visibility. Desktop/tablet ignore this.
+  const [isFolderPaneOpen, setIsFolderPaneOpen] = useState<boolean>(false);
+
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  // 768 is the `md:` breakpoint the rest of the app already uses. Above it,
+  // both the folder pane and the list are on screen together.
+  const isWideLayout = windowWidth >= 768;
+  const isLandscape = windowWidth > windowHeight;
+
+  /**
+   * iPad: a persistent split-view pane in landscape, an overlay in portrait.
+   *
+   * Derived from the window rather than from a device check, deliberately --
+   * a Split View or Slide Over iPad is genuinely narrow and should behave
+   * like the narrow layout, and asking "how much room is there" answers that
+   * correctly where asking "is this an iPad" does not.
+   */
+  const foldersArePersistent = isWideLayout && (Platform.OS !== 'ios' || isLandscape);
 
   // Desktop Resizable Panel Logic
   const [sidebarWidth, setSidebarWidth] = useState<number>(320);
@@ -80,6 +133,13 @@ export default function NotesLayout() {
   const authRef = useRef({ isLoading: true, signedIn: false });
   authRef.current = { isLoading: authLoading, signedIn: session !== null };
 
+  // Same problem, same fix: handleCreateNote is held in a ref by the watch
+  // callback, so reading `selection` from its closure would pin it to whatever
+  // was selected on the first render -- and new notes would file themselves
+  // into a folder the user left ten minutes ago.
+  const selectionRef = useRef<FolderSelection>(ALL_NOTES_SELECTION);
+  selectionRef.current = selection;
+
   /**
    * False until this launch has decided what to show, which is not the same as
    * "the database has answered".
@@ -104,7 +164,12 @@ export default function NotesLayout() {
 
   const handleCreateNote = useCallback(async () => {
     try {
-      const newNote = await createNoteInDB();
+      // A new note is filed where you are. From All Notes or Recently Deleted
+      // -- neither of which is a container -- it is unfiled, which is exactly
+      // what All Notes then shows.
+      const newNote = await createNoteInDB(
+        selectionRef.current.kind === 'folder' ? selectionRef.current.id : null
+      );
       dispatch({ type: 'SELECT_NOTE', payload: { id: newNote.id } });
       return newNote;
     } catch (err) {
@@ -196,6 +261,15 @@ export default function NotesLayout() {
     void autoCreateIfTrulyEmpty().catch((err) =>
       console.error('Auto-create check failed:', err)
     );
+    // Same three-state question as autoCreateIfTrulyEmpty, and answered in the
+    // same place for the same reason: an empty folders table only means "this
+    // account has no Skills folder" once nothing is still in flight. Seeding
+    // early produces a duplicate that then syncs.
+    void seedSkillsFolderIfSettled({
+      authLoading,
+      signedIn: session !== null,
+      hasSynced: getPowerSync().currentStatus.hasSynced === true,
+    }).catch((err) => console.error('Skills seed failed:', err));
 
     if (!session) return;
     const ac = new AbortController();
@@ -203,6 +277,11 @@ export default function NotesLayout() {
       .waitForFirstSync(ac.signal)
       .then(() => {
         if (ac.signal.aborted) return;
+        void seedSkillsFolderIfSettled({
+          authLoading: false,
+          signedIn: true,
+          hasSynced: true,
+        }).catch((err) => console.error('Skills seed failed:', err));
         return autoCreateIfTrulyEmpty();
       })
       .catch(() => {
@@ -241,6 +320,19 @@ export default function NotesLayout() {
             dispatch({ type: 'SELECT_NOTE', payload: { id: uiState.lastOpenedNoteId } });
           }
         }
+
+        // Folders get their own watch rather than being read once: a folder
+        // created on another device has to appear here without a relaunch,
+        // exactly as a note does.
+        getPowerSync().watch(
+          `SELECT ${FOLDER_COLUMNS} FROM folders ORDER BY sort_order ASC, created_at ASC`,
+          [],
+          {
+            onResult: (result) => setFolders(result.array.map(mapRowToFolder)),
+            onError: (err) => console.error('PowerSync folder watch error:', err),
+          },
+          { signal: abortController.signal }
+        );
 
         getPowerSync().watch(
           'SELECT * FROM notes ORDER BY updated_at DESC',
@@ -426,6 +518,171 @@ export default function NotesLayout() {
     if (leaving && created && leaving !== created.id) void discardIfEmpty(leaving);
   }, [selectedNoteId, handleCreateNote, discardIfEmpty]);
 
+  // --- Derived folder state -------------------------------------------------
+
+  const activeNotes = useMemo(() => notes.filter((n) => !n.isTrashed), [notes]);
+  const trashedNotes = useMemo(
+    () =>
+      notes
+        .filter((n) => n.isTrashed)
+        // Most recently deleted first: this list is read newest-down, and it
+        // is also the order the 30-day clock runs out in, from the bottom up.
+        .sort((a, b) => (b.trashedAt ?? '').localeCompare(a.trashedAt ?? '')),
+    [notes]
+  );
+
+  const folderCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const note of activeNotes) {
+      if (!note.folderId) continue;
+      counts.set(note.folderId, (counts.get(note.folderId) ?? 0) + 1);
+    }
+    return counts;
+  }, [activeNotes]);
+
+  const folderTree = useMemo(
+    () => buildFolderTree(folders, folderCounts),
+    [folders, folderCounts]
+  );
+
+  const excludedFolderIds = useMemo(
+    () => new Set(folders.filter((f) => !f.includeInNotes).map((f) => f.id)),
+    [folders]
+  );
+
+  /** The selected folder AND its descendants -- selecting a parent shows
+   *  everything underneath it. Null when a virtual view is selected. */
+  const visibleFolderIds = useMemo(() => {
+    if (selection.kind !== 'folder') return null;
+    return new Set(collectSubtreeIds(folderTree, selection.id));
+  }, [selection, folderTree]);
+
+  const allNotesCount = useMemo(
+    () =>
+      activeNotes.filter((n) => n.folderId === null || !excludedFolderIds.has(n.folderId))
+        .length,
+    [activeNotes, excludedFolderIds]
+  );
+
+  const folderTitle = useMemo(() => {
+    if (selection.kind === 'all') return 'All Notes';
+    if (selection.kind === 'trash') return 'Recently Deleted';
+    const node = findNode(folderTree, selection.id);
+    if (!node) return 'Folder';
+    return node.folder.decryptFailed ? 'Unreadable folder' : node.folder.name || 'New Folder';
+  }, [selection, folderTree]);
+
+  /**
+   * A folder that disappears -- deleted here, or deleted on another device and
+   * synced in -- must not leave the list pane pointing at nothing. Falling back
+   * to All Notes is the only selection guaranteed to exist.
+   *
+   * Waits for `folders` to be non-empty before acting: at launch the watch
+   * fires once with an empty array before any row arrives, and reacting to
+   * that would reset a perfectly valid restored selection.
+   */
+  useEffect(() => {
+    if (selection.kind !== 'folder' || folders.length === 0) return;
+    if (!folders.some((f) => f.id === selection.id)) {
+      setSelection(ALL_NOTES_SELECTION);
+    }
+  }, [folders, selection]);
+
+  const handleSelectFolder = useCallback((next: FolderSelection) => {
+    setSelection(next);
+    // On mobile the folder pane is a screen, so choosing something is also
+    // leaving it. On desktop it stays put -- there is nothing to close.
+    setIsFolderPaneOpen(false);
+  }, []);
+
+  const handleToggleExpanded = useCallback((folderId: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(folderId)) next.delete(folderId);
+      else next.add(folderId);
+      return next;
+    });
+  }, []);
+
+  const handleCreateFolder = useCallback(
+    async (parentId: string | null, name: string) => {
+      try {
+        await createFolderInDB({ name, parentId });
+        // Open the parent so the new folder is visible rather than created
+        // into a collapsed branch, where it looks like nothing happened.
+        if (parentId) setExpandedIds((prev) => new Set(prev).add(parentId));
+      } catch (err) {
+        console.error('Failed to create folder:', err);
+      }
+    },
+    []
+  );
+
+  const handleRenameFolder = useCallback(async (folderId: string, name: string) => {
+    try {
+      await renameFolderInDB(folderId, name);
+    } catch (err) {
+      console.error('Failed to rename folder:', err);
+    }
+  }, []);
+
+  const handleDeleteFolder = useCallback(
+    async (folderId: string) => {
+      try {
+        await deleteFolderInDB(folderId);
+        // The effect above would catch this once the watch ticks, but doing it
+        // here too means the list pane never paints a frame showing a folder
+        // that no longer exists.
+        if (selection.kind === 'folder' && selection.id === folderId) {
+          setSelection(ALL_NOTES_SELECTION);
+        }
+      } catch (err) {
+        console.error('Failed to delete folder:', err);
+      }
+    },
+    [selection]
+  );
+
+  const handleToggleIncludeInNotes = useCallback(async (folderId: string, next: boolean) => {
+    try {
+      await setFolderIncludeInNotes(folderId, next);
+    } catch (err) {
+      console.error('Failed to change Include in Notes:', err);
+    }
+  }, []);
+
+  const handleToggleGroupByDate = useCallback(async (folderId: string, next: boolean) => {
+    try {
+      await setFolderGroupByDate(folderId, next);
+    } catch (err) {
+      console.error('Failed to change Group By Date:', err);
+    }
+  }, []);
+
+  const handleMoveFolder = useCallback(async (folderId: string, direction: -1 | 1) => {
+    try {
+      await moveTopLevelFolder(folderId, direction);
+    } catch (err) {
+      console.error('Failed to reorder folder:', err);
+    }
+  }, []);
+
+  const handleRestoreNote = useCallback(async (id: string) => {
+    try {
+      await restoreNoteInDB(id);
+    } catch (err) {
+      console.error('Failed to restore note:', err);
+    }
+  }, []);
+
+  const handleEmptyTrash = useCallback(async () => {
+    try {
+      await emptyTrashInDB();
+    } catch (err) {
+      console.error('Failed to empty trash:', err);
+    }
+  }, []);
+
   const handleSetHiddenFromApi = useCallback(async (id: string, hidden: boolean) => {
     try {
       await setNoteHiddenFromApi(id, hidden);
@@ -487,10 +744,17 @@ export default function NotesLayout() {
         leaveNote(null);
         return true;
       }
+      // The folder pane is a screen on narrow layouts, so back has to leave it
+      // -- otherwise opening folders and pressing back exits the app, which
+      // reads as the app crashing.
+      if (isFolderPaneOpen && !foldersArePersistent) {
+        setIsFolderPaneOpen(false);
+        return true;
+      }
       return false;
     });
     return () => subscription.remove();
-  }, [selectedNoteId, leaveNote]);
+  }, [selectedNoteId, leaveNote, isFolderPaneOpen, foldersArePersistent]);
 
   // Sending the app to the background is leaving the note too -- otherwise an
   // untouched new note survives simply because you switched apps instead of
@@ -568,20 +832,78 @@ export default function NotesLayout() {
           : {})}
       >
         {/* ========================================================= */}
-        {/* LEFT PANE: Note List Component                            */}
+        {/* FOLDER PANE                                               */}
+        {/*                                                           */}
+        {/* Wide layouts show it beside the list permanently. Narrow  */}
+        {/* ones treat it as a screen you go to and come back from,   */}
+        {/* which is how the mobile reference behaves -- and it is    */}
+        {/* the same conditional-pane approach the list/editor split  */}
+        {/* already uses, rather than introducing a router stack for  */}
+        {/* one destination.                                          */}
         {/* ========================================================= */}
-        <NoteListPane
-          notes={notes}
-          selectedNoteId={selectedNoteId}
-          searchQuery={searchQuery}
-          isSidebarTucked={isSidebarTucked}
-          sidebarWidth={sidebarWidth}
-          onSelectNote={(id) => leaveNote(id)}
-          onCreateNote={handleCreateNotePressed}
-          onSearchChange={(query) =>
-            dispatch({ type: 'SET_SEARCH_QUERY', payload: { query } })
+        <FolderSidebar
+          tree={folderTree}
+          selection={selection}
+          allNotesCount={allNotesCount}
+          trashCount={trashedNotes.length}
+          expandedIds={expandedIds}
+          isVisible={foldersArePersistent || (isFolderPaneOpen && !selectedNoteId)}
+          isPersistent={foldersArePersistent}
+          width={
+            Platform.OS === 'web' && foldersArePersistent ? 288 : undefined
           }
+          onSelect={handleSelectFolder}
+          onToggleExpanded={handleToggleExpanded}
+          onCreateFolder={handleCreateFolder}
+          onRenameFolder={handleRenameFolder}
+          onDeleteFolder={handleDeleteFolder}
+          onToggleIncludeInNotes={handleToggleIncludeInNotes}
+          onToggleGroupByDate={handleToggleGroupByDate}
+          onMoveFolder={handleMoveFolder}
         />
+
+        {/* ========================================================= */}
+        {/* LEFT PANE: the note list, or Recently Deleted             */}
+        {/* ========================================================= */}
+        {isFolderPaneOpen && !foldersArePersistent && !selectedNoteId ? null : selection.kind ===
+          'trash' ? (
+          <View
+            className={`border-r border-border shrink-0 ${
+              selectedNoteId ? 'hidden md:flex' : 'w-full flex-1'
+            } ${isSidebarTucked ? 'md:hidden' : 'md:w-80'}`}
+          >
+            <RecentlyDeletedPane
+              notes={trashedNotes}
+              selectedNoteId={selectedNoteId}
+              onSelectNote={(id) => leaveNote(id)}
+              onRestoreNote={handleRestoreNote}
+              onEmptyTrash={handleEmptyTrash}
+              onOpenFolders={
+                foldersArePersistent ? undefined : () => setIsFolderPaneOpen(true)
+              }
+            />
+          </View>
+        ) : (
+          <NoteListPane
+            notes={notes}
+            selectedNoteId={selectedNoteId}
+            searchQuery={searchQuery}
+            isSidebarTucked={isSidebarTucked}
+            sidebarWidth={sidebarWidth}
+            selection={selection}
+            folderTitle={folderTitle}
+            excludedFolderIds={excludedFolderIds}
+            visibleFolderIds={visibleFolderIds}
+            onSelectNote={(id) => leaveNote(id)}
+            onCreateNote={handleCreateNotePressed}
+            onSearchChange={(query) =>
+              dispatch({ type: 'SET_SEARCH_QUERY', payload: { query } })
+            }
+            onOpenFolders={
+              foldersArePersistent ? undefined : () => setIsFolderPaneOpen(true)
+            }
+          />
+        )}
 
         {/* ========================================================= */}
         {/* DESKTOP RESIZE HANDLE BAR                                 */}

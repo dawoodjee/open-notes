@@ -35,17 +35,34 @@ export function PressableScale({
   children,
   className,
   style,
+  containerStyle,
   onPressIn,
   onPressOut,
   scaleTo = PRESS_SCALE,
   ...pressableProps
-}: Omit<PressableProps, 'children'> & {
+}: Omit<PressableProps, 'children' | 'style'> & {
   /** Plain nodes only. Pressable's render-prop children form is deliberately
    *  not supported: the pressed state it reports is exactly what this
    *  component already expresses through the spring. */
   children?: React.ReactNode;
   className?: string;
+  /** Styling INSIDE the pressable -- padding, min-height, background. */
   style?: ViewStyle;
+  /**
+   * How this pressable sits in ITS PARENT: `flex`, `width`, `alignSelf`.
+   *
+   * Separate from `style` because of the three-view structure below. `style`
+   * lands on the innermost View, and a `flex: 1` there is measured against the
+   * Animated.View above it -- which is itself content-sized, so the flex
+   * resolves against nothing and the whole stack collapses to its content.
+   *
+   * Invisible in a COLUMN parent, where the default align-stretch gives full
+   * width anyway. It bites in a ROW parent: the folder sidebar's rows sized
+   * themselves to their icon and count, and the label -- `flex-1` inside a
+   * container with no width to divide -- rendered at zero width and vanished
+   * entirely. No error, no warning, just no text.
+   */
+  containerStyle?: ViewStyle;
   /** Override the resting-while-held scale. Defaults to the shared token. */
   scaleTo?: number;
 }) {
@@ -72,8 +89,16 @@ export function PressableScale({
   );
 
   return (
-    <Pressable onPressIn={handlePressIn} onPressOut={handlePressOut} {...pressableProps}>
-      <Animated.View style={animatedStyle}>
+    <Pressable
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      style={containerStyle}
+      {...pressableProps}
+    >
+      {/* alignSelf: 'stretch' keeps the transform wrapper transparent to
+          layout. Without it this view is content-sized, so anything below it
+          measuring against a width has nothing to measure. */}
+      <Animated.View style={[{ alignSelf: 'stretch' }, animatedStyle]}>
         <View className={className} style={style}>
           {children}
         </View>

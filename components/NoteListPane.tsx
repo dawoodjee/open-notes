@@ -10,13 +10,14 @@ import { Input, InputField, InputSlot, InputIcon } from '@/components/ui/input';
 import { Icon } from '@/components/ui/icon';
 
 // Lucide Icons
-import { Search, SquarePen } from 'lucide-react-native';
+import { Search, SquarePen, PanelLeft } from 'lucide-react-native';
 
 // Custom Types & Helpers
 import { Note, parseNoteContent, formatNoteDate } from '@/types/note';
 import AvatarMenuTrigger from './AvatarMenuTrigger';
 import { PressableScale } from './PressableScale';
 import { useTheme } from '@/contexts/ThemeContext';
+import type { FolderSelection } from '@/types/folder';
 
 export interface NoteListPaneProps {
   notes: Note[];
@@ -24,9 +25,21 @@ export interface NoteListPaneProps {
   searchQuery: string;
   isSidebarTucked: boolean;
   sidebarWidth: number;
+  /** What the folder sidebar has selected. Decides the title and the filter. */
+  selection: FolderSelection;
+  /** Title for the current folder -- decrypted upstream, since names are
+   *  ciphertext at rest and this pane never touches the key. */
+  folderTitle: string;
+  /** Folders with Include in Notes off. Excluded from All Notes, and from
+   *  nothing else -- notably NOT from search. */
+  excludedFolderIds: Set<string>;
+  /** The selected folder plus all of its descendants. Selecting a folder shows
+   *  everything underneath it, which is why this is a set rather than one id. */
+  visibleFolderIds: Set<string> | null;
   onSelectNote: (id: string) => void;
   onCreateNote: () => void;
   onSearchChange: (query: string) => void;
+  onOpenFolders?: () => void;
 }
 
 export default function NoteListPane({
@@ -35,9 +48,14 @@ export default function NoteListPane({
   searchQuery,
   isSidebarTucked,
   sidebarWidth,
+  selection,
+  folderTitle,
+  excludedFolderIds,
+  visibleFolderIds,
   onSelectNote,
   onCreateNote,
   onSearchChange,
+  onOpenFolders,
 }: NoteListPaneProps) {
   // The bottom bar is one of the few places styled with inline `style` rather
   // than classes (it predates the settings primitives), so its colours can't
@@ -53,14 +71,40 @@ export default function NoteListPane({
   // edge of the screen instead of stopping at a differently-coloured strip.
   const insets = useSafeAreaInsets();
 
-  // Filter Active Notes (Excludes Trashed Notes)
   const activeNotes = notes.filter((n) => !n.isTrashed);
 
-  const filteredNotes = activeNotes.filter(
-    (n) =>
-      n.body.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      n.title.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  /**
+   * SEARCHING AND BROWSING ARE DIFFERENT QUESTIONS, and this is where they
+   * part company.
+   *
+   * Browsing asks "what is filed here", so it honours the folder selection and
+   * the Include-in-Notes exclusions. Searching asks "where is the note that
+   * says X", and a note the user cannot find by searching for it is a lost
+   * note -- so search deliberately ignores BOTH filters and looks at every
+   * non-trashed note, wherever it lives.
+   *
+   * That is the recorded decision ("Include in Notes excludes from All Notes
+   * only, not search") and it is the reason this is two expressions rather
+   * than one chained filter.
+   */
+  const isSearching = searchQuery.trim().length > 0;
+
+  const browsableNotes = activeNotes.filter((n) => {
+    if (selection.kind === 'folder') {
+      return n.folderId !== null && visibleFolderIds?.has(n.folderId) === true;
+    }
+    // All Notes: unfiled notes always show; filed ones only if their folder
+    // is included.
+    return n.folderId === null || !excludedFolderIds.has(n.folderId);
+  });
+
+  const needle = searchQuery.toLowerCase();
+  const filteredNotes = isSearching
+    ? activeNotes.filter(
+        (n) =>
+          n.body.toLowerCase().includes(needle) || n.title.toLowerCase().includes(needle)
+      )
+    : browsableNotes;
 
   const listRef = useRef<FlatList<Note>>(null);
   const hasRestoredScroll = useRef<boolean>(false);
@@ -97,15 +141,54 @@ export default function NoteListPane({
         className="justify-between items-start p-4 pb-2"
         style={{ paddingTop: insets.top + 16 }}
       >
-        <VStack>
-          <RNText className="text-3xl font-bold text-foreground">All Notes</RNText>
-          <RNText className="text-xs text-muted-foreground font-medium mt-0.5">
-            {filteredNotes.length} {filteredNotes.length === 1 ? 'Note' : 'Notes'}
-          </RNText>
-        </VStack>
+        {/* flex-1/min-w-0 as CLASSES, not as an inline style. NativeWind
+            compiles className into its own `style` prop, which overwrites any
+            `style` passed beside it -- the same collision documented in
+            PressableScale. Passed as a style, this flex was silently dropped
+            and the title overflowed straight across the avatar at
+            accessibility text sizes. */}
+        <HStack className="flex-1 min-w-0 items-center gap-2">
+          {onOpenFolders ? (
+            // Mobile only: the folder pane is a separate screen there, so the
+            // list needs a way back to it. On desktop both panes are visible
+            // at once and this would be a button to somewhere you already are.
+            <Pressable
+              onPress={onOpenFolders}
+              hitSlop={8}
+              className="md:hidden"
+              style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}
+              accessibilityRole="button"
+              accessibilityLabel="Show folders"
+            >
+              <Icon as={PanelLeft} className="w-6 h-6 text-foreground" />
+            </Pressable>
+          ) : null}
 
-        {/* Mobile/List Avatar */}
-        <AvatarMenuTrigger className="md:hidden" />
+          <VStack className="flex-1 min-w-0">
+            <RNText
+              className="text-3xl font-bold text-foreground"
+              numberOfLines={1}
+              // adjustsFontSizeToFit would be the wrong fix here -- it defeats
+              // the whole point of Dynamic Type by shrinking text the user
+              // asked to be bigger. Truncating a folder name is the honest
+              // failure; the full name is one tap away in the sidebar.
+              ellipsizeMode="tail"
+            >
+              {isSearching ? 'Search' : folderTitle}
+            </RNText>
+            <RNText className="text-xs text-muted-foreground font-medium mt-0.5">
+              {isSearching
+                ? `${filteredNotes.length} ${filteredNotes.length === 1 ? 'Result' : 'Results'}`
+                : `${filteredNotes.length} ${filteredNotes.length === 1 ? 'Note' : 'Notes'}`}
+            </RNText>
+          </VStack>
+        </HStack>
+
+        {/* Mobile/List Avatar. shrink-0 is load-bearing at accessibility text
+            sizes: without it the title -- which is text-3xl and therefore
+            enormous once Dynamic Type scales it -- squeezes the avatar to zero
+            width and then draws straight over it. */}
+        <AvatarMenuTrigger className="md:hidden shrink-0" />
       </HStack>
 
       {/* Notes Scroll Area */}

@@ -3,6 +3,7 @@ import { AppState, AppStateStatus } from 'react-native';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
 import { getPowerSync, connectPowerSync, claimUnownedNotes } from '@/lib/powersync/db';
+import { claimUnownedFolders } from '@/lib/powersync/folders';
 import { getCurrentSession, setCurrentSession } from '@/lib/auth/currentUser';
 import { runSerialized } from '@/lib/auth/serializeAuthWork';
 import { setPendingAdoption } from '@/lib/crypto/adoption';
@@ -128,6 +129,12 @@ async function reconcileAccountKey(
  */
 async function claimAndConnect(userId: string): Promise<void> {
   await claimUnownedNotes(userId);
+  // Folders have the identical problem and therefore the identical fix: an
+  // unowned folder row can never satisfy `owners insert their folders`
+  // (auth.uid() = NULL is NULL, not true), so it would be rejected on upload
+  // and erased at the first checkpoint -- taking the user's folder structure
+  // with it. Claimed here, before connecting, on every path that connects.
+  await claimUnownedFolders(userId);
   await connectPowerSync();
 }
 

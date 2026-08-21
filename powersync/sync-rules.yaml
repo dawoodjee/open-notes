@@ -13,3 +13,15 @@ bucket_definitions:
     parameters: select request.user_id() as user_id
     data:
       - select * from notes where user_id = bucket.user_id
+
+  # Folders, keyed the same way notes are. A separate bucket rather than extra
+  # rows in user_notes: buckets are per-table, and the client schema declares
+  # `folders` as its own table.
+  #
+  # `select *` includes `name`, which is an enc:v1 envelope. The service
+  # replicates it as opaque text -- it has no idea it is ciphertext and does
+  # not need to, which is the whole point.
+  user_folders:
+    parameters: select request.user_id() as user_id
+    data:
+      - select * from folders where user_id = bucket.user_id

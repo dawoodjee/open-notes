@@ -15,6 +15,44 @@ export const notesTable = new Table({
   // Syncs like any other column: hiding a note from apps is a property of the
   // note, not of one device, so a second device has to honour it.
   is_hidden_from_api: column.integer,
+  // Which folder this note is in. NULL = unfiled, which is a real state, not a
+  // missing one: notes created before folders existed, and notes whose folder
+  // was deleted (the FK is `on delete set null` -- see the Stage 10 migration
+  // for why that is not a cascade).
+  folder_id: column.text,
+  // When this note was trashed. NULL exactly when is_trashed is 0 -- a check
+  // constraint enforces that server-side, so the pair can never disagree.
+  // Exists because the 30-day purge needs an age, and updated_at is not one:
+  // an inbound merge rewrites it and would restart the clock. ISO-8601 text.
+  trashed_at: column.text,
+});
+
+/**
+ * The folder tree. Synced, owner-scoped, and encrypted in exactly one column.
+ *
+ * `name` holds an `enc:v1:` envelope -- same key, same code path as a note's
+ * title. Everything else is plaintext structure, because the server has to be
+ * able to filter and order by it and cannot read ciphertext. That split is the
+ * same one the notes row already makes; nothing new is introduced here.
+ *
+ * Consequence to keep in mind while writing queries: any sort or filter
+ * involving a folder's NAME has to happen in JavaScript after decryption. SQL
+ * can order by sort_order, depth and parent_id, and nothing else that a person
+ * would recognise.
+ */
+export const foldersTable = new Table({
+  user_id: column.text,
+  parent_id: column.text, // NULL = top level
+  name: column.text, // enc:v1 envelope
+  // 'user' | 'skills'. The stable plaintext identity of a default folder --
+  // never match on the name, which is ciphertext and may be localized later.
+  kind: column.text,
+  depth: column.integer, // 0..4, five levels total
+  sort_order: column.integer,
+  include_in_notes: column.integer, // 0/1 -> boolean
+  group_by_date: column.integer, // 0/1 -> boolean
+  created_at: column.text,
+  updated_at: column.text,
 });
 
 // Deliberately localOnly with no user_id and no Postgres counterpart: which note
@@ -35,6 +73,20 @@ export const uiStateTable = new Table(
     // An expiry rather than a plain boolean because a standing permission to
     // send plaintext off the device should have to be renewed deliberately.
     api_gate_expires_at: column.text,
+    // Whether a note CREATED in the Skills folder starts out visible to apps.
+    // 1 (the default) or 0; NULL is read as 1 so a device that predates this
+    // column behaves like a fresh one.
+    //
+    // Beside the gate, and localOnly for the same reason the gate is: it
+    // describes what THIS device is willing to expose. What it actually does
+    // is decide the value written to notes.is_hidden_from_api at creation
+    // time -- and that column is synced, so the effect travels even though the
+    // preference does not.
+    //
+    // Deliberately narrow. It applies at creation only: moving a note into or
+    // out of Skills never changes its visibility, because silently un-hiding
+    // a note the user hid by hand is the one failure this must not have.
+    skills_api_visible: column.integer,
   },
   { localOnly: true }
 );
@@ -142,6 +194,7 @@ export const noteSyncBaseTable = new Table(
 
 export const AppSchema = new Schema({
   notes: notesTable,
+  folders: foldersTable,
   ui_state: uiStateTable,
   sync_issues: syncIssuesTable,
   note_sync_base: noteSyncBaseTable,
