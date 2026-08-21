@@ -445,6 +445,7 @@ export default function NoteListPane({
               openId={openSwipeId}
               onOpenChange={setOpenSwipeId}
               onPin={() => onTogglePin(item.id, !item.isPinned)}
+              onShare={() => onShareNote(item.id)}
               onMove={() => startMove([item.id])}
               onDelete={() => onTrashNotes([item.id])}
             >

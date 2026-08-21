@@ -7,7 +7,7 @@ import Animated, {
   useSharedValue,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
-import { Folder as FolderIcon, Pin, Trash2 } from 'lucide-react-native';
+import { Folder as FolderIcon, Pin, Share as ShareIcon, Trash2 } from 'lucide-react-native';
 
 import { Icon } from '@/components/ui/icon';
 import { spring, SPRING_EXPAND } from '@/lib/theme/motion';
@@ -33,11 +33,23 @@ import { spring, SPRING_EXPAND } from '@/lib/theme/motion';
  */
 
 /** Width of one action slot: the capsule plus room for its label. */
-const ACTION_WIDTH = 76;
+const ACTION_WIDTH = 72;
+/** Swipe-left reveals three actions, swipe-right one. */
+const LEFT_ACTION_COUNT = 3;
 /** Past this, a release snaps open instead of closed. */
 const REVEAL_THRESHOLD = 44;
-/** Fraction of the row's width past which a release fires the action outright. */
-const COMMIT_FRACTION = 0.55;
+/**
+ * Where a release stops revealing and starts ACTING.
+ *
+ * Two different numbers, because the two directions reveal different amounts.
+ * Right shows one button, so committing past a bit over half the row is
+ * comfortably clear of it. Left shows three -- 216pt of a 402pt row, which is
+ * already 54% -- so a single shared fraction would have made "drag far enough
+ * to see Share" and "delete this note" the same gesture. Left therefore has to
+ * be dragged almost the whole way.
+ */
+const COMMIT_FRACTION_RIGHT = 0.55;
+const COMMIT_FRACTION_LEFT = 0.9;
 
 export interface SwipeableNoteRowProps {
   id: string;
@@ -45,6 +57,7 @@ export interface SwipeableNoteRowProps {
   openId: string | null;
   onOpenChange: (id: string | null) => void;
   onPin: () => void;
+  onShare: () => void;
   onMove: () => void;
   onDelete: () => void;
   children: React.ReactNode;
@@ -56,6 +69,7 @@ export function SwipeableNoteRow({
   openId,
   onOpenChange,
   onPin,
+  onShare,
   onMove,
   onDelete,
   children,
@@ -100,19 +114,18 @@ export function SwipeableNoteRow({
       // Clamp the far side of each direction so the row cannot be dragged
       // clean off screen -- there is nothing revealed past the buttons.
       const max = ACTION_WIDTH;
-      const min = -ACTION_WIDTH * 2;
+      const min = -ACTION_WIDTH * LEFT_ACTION_COUNT;
       translateX.value = Math.min(max, Math.max(min, e.translationX));
     })
     .onEnd(() => {
       const tx = translateX.value;
-      const commitAt = rowWidth.value * COMMIT_FRACTION;
 
-      if (tx >= commitAt) {
+      if (tx >= rowWidth.value * COMMIT_FRACTION_RIGHT) {
         translateX.value = spring(0, SPRING_EXPAND);
         runOnJS(commit)('pin');
         return;
       }
-      if (tx <= -commitAt) {
+      if (tx <= -rowWidth.value * COMMIT_FRACTION_LEFT) {
         translateX.value = spring(0, SPRING_EXPAND);
         runOnJS(commit)('delete');
         return;
@@ -123,7 +136,7 @@ export function SwipeableNoteRow({
         return;
       }
       if (tx <= -REVEAL_THRESHOLD) {
-        translateX.value = spring(-ACTION_WIDTH * 2, SPRING_EXPAND);
+        translateX.value = spring(-ACTION_WIDTH * LEFT_ACTION_COUNT, SPRING_EXPAND);
         runOnJS(onOpenChange)(id);
         return;
       }
@@ -178,16 +191,22 @@ export function SwipeableNoteRow({
             right: 0,
             top: 0,
             bottom: 0,
-            width: ACTION_WIDTH * 2,
+            width: ACTION_WIDTH * LEFT_ACTION_COUNT,
             flexDirection: 'row',
           },
           rightStyle,
         ]}
       >
         <SwipeAction
+          label="Share"
+          icon={ShareIcon}
+          className="bg-blue-500"
+          onPress={() => runAction(onShare)}
+        />
+        <SwipeAction
           label="Move"
           icon={FolderIcon}
-          className="bg-blue-500"
+          className="bg-indigo-500"
           onPress={() => runAction(onMove)}
         />
         <SwipeAction
