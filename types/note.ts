@@ -273,8 +273,11 @@ export function parseNoteContent(body: string, titleLimit: number = 120) {
   };
 }
 
-export function formatNoteDate(date: Date): string {
-  const now = new Date();
+export function formatNoteDate(date: Date, now: Date = new Date()): string {
+  // `now` is injectable for the same reason lib/notes/grouping.ts injects it:
+  // every branch below is a CALENDAR BOUNDARY, and a function that reads the
+  // clock itself can only be tested by waiting until midnight. Defaulted, so
+  // no caller changes.
 
   // Normalize both dates to midnight (00:00:00) to accurately compare calendar days
   const targetDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
