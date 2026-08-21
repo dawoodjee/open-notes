@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { LogBox, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
@@ -71,10 +72,20 @@ export default function RootLayout() {
   // ThemeProvider sits outermost: the appearance has to be settled before
   // anything paints, including the boot spinner and the failure screen, both
   // of which render before the database exists.
+  //
+  // GestureHandlerRootView wraps everything, and it has to be the OUTERMOST
+  // view rather than sitting somewhere near the list that needs it. Every
+  // gesture-handler recognizer in the tree resolves against the nearest root;
+  // without one the swipe actions on a note row do nothing at all on Android
+  // and behave inconsistently on iOS, with no error to explain why. `flex: 1`
+  // is not optional either -- it defaults to shrinking to its content and the
+  // whole app collapses to zero height.
   return (
-    <ThemeProvider>
-      <ThemedRoot />
-    </ThemeProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider>
+        <ThemedRoot />
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }
 

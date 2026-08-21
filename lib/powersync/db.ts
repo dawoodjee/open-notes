@@ -340,6 +340,10 @@ export function mapRowToNote(row: any): Note {
     trashedAt: row.trashed_at ?? null,
     folderId: row.folder_id ?? null,
     isHiddenFromApi: Boolean(row.is_hidden_from_api),
+    // Null-tolerant rather than a bare Boolean(): rows that predate this
+    // column exist locally on any device that synced before Stage 11, and
+    // they carry NULL, not 0. Same treatment as folders.is_enabled.
+    isPinned: row.is_pinned == null ? false : Boolean(row.is_pinned),
     // Surfaced rather than swallowed. An undecryptable note must not look
     // like an empty note: the editor would happily save over it, turning a
     // temporary key problem into permanent data loss. updateNoteInDB refuses
@@ -392,8 +396,8 @@ export async function createNoteInDB(folderId: string | null = null): Promise<No
   // any sync bucket). The note vanishes seconds after being created.
   const userId = getCurrentUserId();
   await getPowerSync().execute(
-    `INSERT INTO notes (id, user_id, body, title, created_at, updated_at, is_trashed, trashed_at, is_hidden_from_api, folder_id)
-     VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)`,
+    `INSERT INTO notes (id, user_id, body, title, created_at, updated_at, is_trashed, trashed_at, is_hidden_from_api, folder_id, is_pinned)
+     VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, 0)`,
     [id, userId, encryptField(body), encryptField(title), now, now, hiddenFromApi ? 1 : 0, folderId]
   );
 
@@ -408,6 +412,7 @@ export async function createNoteInDB(folderId: string | null = null): Promise<No
     trashedAt: null,
     folderId,
     isHiddenFromApi: hiddenFromApi,
+    isPinned: false,
   };
 }
 
@@ -509,6 +514,75 @@ export async function setNoteHiddenFromApi(id: string, hidden: boolean): Promise
     hidden ? 1 : 0,
     id,
   ]);
+}
+
+/**
+ * Pin or unpin a note.
+ *
+ * DOES NOT TOUCH updated_at, for exactly the reason setNoteHiddenFromApi
+ * gives above: the list is ordered by `updated_at desc`, and pinning a note
+ * is not editing it. Bumping the timestamp would also reorder the note inside
+ * whatever date bucket it lands in when it is later unpinned, which is a
+ * strange thing for a pin to do.
+ */
+export async function setNotePinned(id: string, pinned: boolean): Promise<void> {
+  await getPowerSync().execute(`UPDATE notes SET is_pinned = ? WHERE id = ?`, [
+    pinned ? 1 : 0,
+    id,
+  ]);
+}
+
+/**
+ * Bulk move. One transaction rather than N awaited executes, so a failure
+ * part-way cannot leave half a selection filed somewhere new.
+ *
+ * Deliberately mirrors setNoteFolder's semantics per note -- no updated_at,
+ * no is_hidden_from_api -- rather than inventing different rules for the
+ * plural case.
+ */
+export async function setNotesFolder(ids: string[], folderId: string | null): Promise<void> {
+  if (ids.length === 0) return;
+  await getPowerSync().writeTransaction(async (tx) => {
+    for (const id of ids) {
+      await tx.execute(`UPDATE notes SET folder_id = ? WHERE id = ?`, [folderId, id]);
+    }
+  });
+}
+
+/** Bulk trash. Same statement as trashNoteInDB, one transaction. */
+export async function trashNotesInDB(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const now = new Date().toISOString();
+  await getPowerSync().writeTransaction(async (tx) => {
+    for (const id of ids) {
+      await tx.execute(
+        `UPDATE notes SET is_trashed = 1, trashed_at = ?, updated_at = ? WHERE id = ?`,
+        [now, now, id]
+      );
+    }
+  });
+}
+
+/**
+ * Duplicate a note into the same folder.
+ *
+ * Composed from createNoteInDB + updateNoteInDB rather than an INSERT..SELECT,
+ * and that is the whole point: the body is CIPHERTEXT at rest, so copying the
+ * row would copy an envelope encrypted under whatever key wrote it. Going
+ * through the two existing functions decrypts and re-encrypts under the
+ * current key, and inherits updateNoteInDB's refusal to write over content it
+ * could not decrypt -- so duplicating an unreadable note fails loudly instead
+ * of silently producing an empty one.
+ */
+export async function duplicateNoteInDB(source: Note): Promise<Note> {
+  if (source.decryptFailed) {
+    throw new Error('Refusing to duplicate a note whose contents could not be decrypted.');
+  }
+  const copy = await createNoteInDB(source.folderId);
+  if (source.body.length > 0) {
+    await updateNoteInDB(copy.id, source.body);
+  }
+  return { ...copy, body: source.body, title: source.title };
 }
 
 export async function restoreNoteInDB(id: string): Promise<void> {

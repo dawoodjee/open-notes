@@ -5,7 +5,7 @@ import { useRouter } from 'expo-router';
 import { Pressable } from '@/components/ui/pressable';
 import { Icon } from '@/components/ui/icon';
 import { Menu, MenuItem, MenuItemLabel, MenuSeparator } from '@/components/ui/menu';
-import { Settings, CircleUserRound, MoreHorizontal } from 'lucide-react-native';
+import { Settings, CircleUserRound, MoreHorizontal, CircleCheck } from 'lucide-react-native';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/lib/auth/useProfile';
@@ -29,6 +29,12 @@ export interface AvatarMenuTriggerProps {
    *               end of the list header and will grow list actions in Stage 11.
    */
   variant?: 'avatar' | 'overflow';
+  /**
+   * Enter multi-select mode. Supplied by the note list only -- the editor
+   * pane renders the same menu and has nothing to select, so the item is
+   * absent there rather than present and inert.
+   */
+  onSelectNotes?: () => void;
 }
 
 // Single entry point for both Settings and account/sync state -- rendered in
@@ -39,6 +45,7 @@ export interface AvatarMenuTriggerProps {
 export default function AvatarMenuTrigger({
   className,
   variant = 'avatar',
+  onSelectNotes,
 }: AvatarMenuTriggerProps) {
   const router = useRouter();
   const { session } = useAuth();
@@ -83,7 +90,20 @@ export default function AvatarMenuTrigger({
               } ${className ?? ''}`}
             >
               {isLoggedIn ? (
-                <RNText className="text-xs font-bold text-lime-800">{initials}</RNText>
+                // allowFontScaling={false} on purpose, and it is the narrow
+                // exception rather than the rule. The circle is a fixed 32pt
+                // sitting in a fixed-height header row beside the back button,
+                // so it cannot grow; at accessibility text sizes the initials
+                // scaled past its edge and spilled over the rim. The other
+                // branch of this very control is an ICON at a fixed w-5 h-5 --
+                // this is the same element wearing letters instead of a glyph,
+                // so the two branches should behave the same way. No content is
+                // lost: the initials are an identity marker, and the account
+                // name itself is one tap away in the menu this opens, at full
+                // scale.
+                <RNText allowFontScaling={false} className="text-xs font-bold text-lime-800">
+                  {initials}
+                </RNText>
               ) : (
                 <Icon as={CircleUserRound} className="text-muted-foreground w-5 h-5" />
               )}
@@ -91,10 +111,24 @@ export default function AvatarMenuTrigger({
           )
         }
       >
-        {/* Stage 11's list actions -- Select, Sort, Group By Date -- land above
-            this separator, which is why the account items are grouped below it
-            rather than sitting at the top of the menu. Leaving the seam here
-            now means Stage 11 adds items rather than rearranging them. */}
+        {/* Stage 11's list actions land above the separator, in the seam Stage
+            9 left for them. Sort and Group By Date are not here: Group By Date
+            already lives on the folder's own context menu, and adding a second
+            control for one setting is how the two end up disagreeing. */}
+        {onSelectNotes ? (
+          <MenuItem
+            key="select-notes"
+            textValue="Select Notes"
+            onPress={onSelectNotes}
+            className="px-4 py-3 flex-row items-center gap-3"
+          >
+            <Icon as={CircleCheck} className="text-muted-foreground w-[18px] h-[18px]" />
+            <MenuItemLabel className="text-base text-foreground">Select Notes</MenuItemLabel>
+          </MenuItem>
+        ) : null}
+
+        {onSelectNotes ? <MenuSeparator key="sep-select" /> : null}
+
         <MenuItem
           key="settings"
           textValue="Settings"
