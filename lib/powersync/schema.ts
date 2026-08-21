@@ -25,6 +25,11 @@ export const notesTable = new Table({
   // Exists because the 30-day purge needs an age, and updated_at is not one:
   // an inbound merge rewrites it and would restart the clock. ISO-8601 text.
   trashed_at: column.text,
+  // Pinned to the top of the list. 0/1 -> boolean, same as is_trashed, and
+  // plaintext for the same reason: it is structure the server orders by, not
+  // content. Syncs, because a note pinned on the phone reading as unpinned on
+  // the iPad would look like a sync bug rather than a per-device preference.
+  is_pinned: column.integer,
 });
 
 /**

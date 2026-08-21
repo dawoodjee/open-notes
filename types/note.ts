@@ -35,6 +35,11 @@ export interface Note {
   // lib/plaintext/ will hand to an outside caller, content and metadata alike.
   isHiddenFromApi: boolean;
 
+  // Pinned to the top of the list, in its own section above the first date
+  // group. Structure, not content, so it is plaintext and syncs -- pinning is
+  // a statement about the note, not about the device you pinned it on.
+  isPinned: boolean;
+
   // True when the stored ciphertext could not be decrypted with the current
   // data key -- a locked vault, or content written under a different key.
   // Distinguishes "this note is empty" from "this note is unreadable right
@@ -298,6 +303,17 @@ export function formatNoteDate(date: Date): string {
     return 'Yesterday';
   }
 
-  // 3. If it's older -> Show short date format (e.g., "Oct 15" or "15 Oct" depending on locale)
+  // 3. Within the last week -> the weekday name ("Monday").
+  //
+  // Added in Stage 11 to match the reference, and it is not just decoration:
+  // the list now groups rows under a "Previous 7 Days" header, and repeating
+  // "15 Aug" on every row under it says nothing the header hasn't. A weekday
+  // is the one label that adds information at that range -- people remember
+  // "Monday", not the date.
+  if (diffDays < 7) {
+    return date.toLocaleDateString([], { weekday: 'long' });
+  }
+
+  // 4. If it's older -> Show short date format (e.g., "Oct 15" or "15 Oct" depending on locale)
   return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }

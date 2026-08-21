@@ -1,5 +1,5 @@
-import React, { useRef, useEffect } from 'react';
-import { FlatList, Text as RNText, View, Platform } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { SectionList, Text as RNText, View, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Gluestack UI Primitives
@@ -8,17 +8,23 @@ import { VStack } from '@/components/ui/vstack';
 import { Pressable } from '@/components/ui/pressable';
 import { Input, InputField, InputSlot, InputIcon } from '@/components/ui/input';
 import { Icon } from '@/components/ui/icon';
+import { Menu, MenuItem, MenuItemLabel } from '@/components/ui/menu';
 
 // Lucide Icons
-import { Search, SquarePen, PanelLeft, ChevronLeft } from 'lucide-react-native';
+import { Search, SquarePen, PanelLeft, ChevronLeft, Check } from 'lucide-react-native';
 
 // Custom Types & Helpers
-import { Note, parseNoteContent, formatNoteDate } from '@/types/note';
+import { Note, parseNoteContent } from '@/types/note';
 import AvatarMenuTrigger from './AvatarMenuTrigger';
 import { PressableScale } from './PressableScale';
 import { HeaderCircleButton } from './HeaderCircleButton';
+import { NoteRow } from './NoteRow';
+import { SwipeableNoteRow } from './SwipeableNoteRow';
+import { NoteContextMenu, type NoteMenuTarget } from './NoteContextMenu';
+import { FolderPickerSheet } from './FolderPickerSheet';
+import { buildNoteSections, type NoteSection } from '@/lib/notes/grouping';
 import { useTheme } from '@/contexts/ThemeContext';
-import type { FolderSelection } from '@/types/folder';
+import type { Folder, FolderSelection } from '@/types/folder';
 
 export interface NoteListPaneProps {
   notes: Note[];
@@ -37,9 +43,20 @@ export interface NoteListPaneProps {
   /** The selected folder plus all of its descendants. Selecting a folder shows
    *  everything underneath it, which is why this is a set rather than one id. */
   visibleFolderIds: Set<string> | null;
+  /** Every folder, decrypted. Feeds the per-row folder line and the picker --
+   *  folders.name is ciphertext, so neither can come from SQL. */
+  folders: Folder[];
+  /** The current surface's Group By Date setting, resolved upstream. */
+  groupByDate: boolean;
   onSelectNote: (id: string) => void;
   onCreateNote: () => void;
   onSearchChange: (query: string) => void;
+  onTogglePin: (id: string, pinned: boolean) => void;
+  onMoveNotes: (ids: string[], folderId: string) => void;
+  onTrashNotes: (ids: string[]) => void;
+  onDuplicateNote: (id: string) => void;
+  onShareNote: (id: string) => void;
+  onCreateFolder: (parentId: string | null, name: string) => void | Promise<void>;
   /** Supplied on narrow layouts only. Its presence IS the "am I a phone?"
    *  signal for the header shape above. */
   onOpenFolders?: () => void;
@@ -59,9 +76,17 @@ export default function NoteListPane({
   folderTitle,
   excludedFolderIds,
   visibleFolderIds,
+  folders,
+  groupByDate,
   onSelectNote,
   onCreateNote,
   onSearchChange,
+  onTogglePin,
+  onMoveNotes,
+  onTrashNotes,
+  onDuplicateNote,
+  onShareNote,
+  onCreateFolder,
   onOpenFolders,
   onToggleSidebar,
   useCompactHeader,
@@ -75,12 +100,8 @@ export default function NoteListPane({
 
   // The pane runs edge to edge (NotesLayout no longer insets anything), so the
   // safe area is this pane's own responsibility: the header pads itself past
-  // the notch and the bottom bar past the home indicator. The payoff is that
-  // this pane's bg-secondary and the bar's own colour now reach the physical
-  // edge of the screen instead of stopping at a differently-coloured strip.
+  // the notch and the bottom bar past the home indicator.
   const insets = useSafeAreaInsets();
-
-  const activeNotes = notes.filter((n) => !n.isTrashed);
 
   /**
    * SEARCHING AND BROWSING ARE DIFFERENT QUESTIONS, and this is where they
@@ -91,46 +112,156 @@ export default function NoteListPane({
    * says X", and a note the user cannot find by searching for it is a lost
    * note -- so search deliberately ignores BOTH filters and looks at every
    * non-trashed note, wherever it lives.
-   *
-   * That is the recorded decision ("Include in Notes excludes from All Notes
-   * only, not search") and it is the reason this is two expressions rather
-   * than one chained filter.
    */
   const isSearching = searchQuery.trim().length > 0;
 
-  const browsableNotes = activeNotes.filter((n) => {
-    if (selection.kind === 'folder') {
-      return n.folderId !== null && visibleFolderIds?.has(n.folderId) === true;
-    }
-    // All Notes: unfiled notes always show; filed ones only if their folder
-    // is included.
-    return n.folderId === null || !excludedFolderIds.has(n.folderId);
-  });
-
-  const needle = searchQuery.toLowerCase();
-  const filteredNotes = isSearching
-    ? activeNotes.filter(
+  // Memoised as a block in Stage 11. This used to run unmemoised on every
+  // render, which was affordable when the result was fed straight to a
+  // FlatList; it is not once grouping, folder-name resolution and a selection
+  // set all hang off it and a keystroke re-renders the pane.
+  const filteredNotes = useMemo(() => {
+    const activeNotes = notes.filter((n) => !n.isTrashed);
+    if (isSearching) {
+      const needle = searchQuery.toLowerCase();
+      return activeNotes.filter(
         (n) =>
           n.body.toLowerCase().includes(needle) || n.title.toLowerCase().includes(needle)
-      )
-    : browsableNotes;
+      );
+    }
+    return activeNotes.filter((n) => {
+      if (selection.kind === 'folder') {
+        return n.folderId !== null && visibleFolderIds?.has(n.folderId) === true;
+      }
+      // All Notes: unfiled notes always show; filed ones only if their folder
+      // is included.
+      return n.folderId === null || !excludedFolderIds.has(n.folderId);
+    });
+  }, [notes, isSearching, searchQuery, selection, visibleFolderIds, excludedFolderIds]);
 
-  const listRef = useRef<FlatList<Note>>(null);
+  // Search results are a flat list, matching the reference: buckets answer
+  // "when did I write this", and someone who has just typed a word is asking
+  // something else entirely.
+  const sections = useMemo(
+    () => buildNoteSections(filteredNotes, { groupByDate: groupByDate && !isSearching }),
+    [filteredNotes, groupByDate, isSearching]
+  );
+
+  const folderNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const f of folders) map.set(f.id, f.name);
+    return map;
+  }, [folders]);
+
+  // The folder line answers "which folder is this in", which is only a
+  // question in All Notes -- inside a folder every row gives the same answer,
+  // and during a search the answer is genuinely useful again.
+  const showFolderLine = selection.kind === 'all' || isSearching;
+
+  // --- Interaction state ---------------------------------------------------
+
+  const [openSwipeId, setOpenSwipeId] = useState<string | null>(null);
+  const [menuTarget, setMenuTarget] = useState<NoteMenuTarget | null>(null);
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  /** Which note ids a pending Move is for. Empty = the picker is closed. */
+  const [moveTargets, setMoveTargets] = useState<string[]>([]);
+  /** Desktop only: the Move flyout's anchor, once Move is picked. */
+  const [moveFlyoutAnchor, setMoveFlyoutAnchor] = useState<{ x: number; y: number } | null>(null);
+
+  const isDesktop = Platform.OS === 'web';
+
+  // Leaving select mode has to drop the selection too. Keeping it "in case
+  // they come back" means re-entering select mode silently arrives with notes
+  // already ticked, and the first bulk Delete takes more than the user chose.
+  const exitSelectMode = useCallback(() => {
+    setIsSelectMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  const toggleChecked = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const startMove = useCallback(
+    (ids: string[], anchor?: { x: number; y: number }) => {
+      if (ids.length === 0) return;
+      if (isDesktop && anchor) setMoveFlyoutAnchor(anchor);
+      setMoveTargets(ids);
+    },
+    [isDesktop]
+  );
+
+  const finishMove = useCallback(
+    (folderId: string) => {
+      onMoveNotes(moveTargets, folderId);
+      setMoveTargets([]);
+      setMoveFlyoutAnchor(null);
+      exitSelectMode();
+    },
+    [moveTargets, onMoveNotes, exitSelectMode]
+  );
+
+  const cancelMove = useCallback(() => {
+    setMoveTargets([]);
+    setMoveFlyoutAnchor(null);
+  }, []);
+
+  const noteById = useCallback(
+    (id: string) => filteredNotes.find((n) => n.id === id) ?? null,
+    [filteredNotes]
+  );
+
+  // --- Scroll restore ------------------------------------------------------
+
+  const listRef = useRef<SectionList<Note, NoteSection>>(null);
   const hasRestoredScroll = useRef<boolean>(false);
 
-  // Scroll the restored note into view once, on first load only — afterwards the
-  // user's own scrolling is left alone.
+  // Scroll the restored note into view once, on first load only. Moved from
+  // scrollToIndex to scrollToLocation with the section list -- and note the
+  // itemIndex is deliberately NOT offset by one: SectionList counts the header
+  // as item 0 only when a header is rendered, which is why this goes through
+  // the same section array the list does rather than a flattened copy.
   useEffect(() => {
-    if (hasRestoredScroll.current || !selectedNoteId || filteredNotes.length === 0) {
+    if (hasRestoredScroll.current || !selectedNoteId || sections.length === 0) return;
+
+    for (let s = 0; s < sections.length; s += 1) {
+      const i = sections[s].data.findIndex((n) => n.id === selectedNoteId);
+      if (i < 0) continue;
+      hasRestoredScroll.current = true;
+      listRef.current?.scrollToLocation({
+        sectionIndex: s,
+        itemIndex: i,
+        viewPosition: 0.5,
+        animated: false,
+      });
       return;
     }
+  }, [selectedNoteId, sections]);
 
-    const index = filteredNotes.findIndex((n) => n.id === selectedNoteId);
-    if (index < 0) return;
+  // --- Header --------------------------------------------------------------
 
-    hasRestoredScroll.current = true;
-    listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false });
-  }, [selectedNoteId, filteredNotes]);
+  const selectedCount = selectedIds.size;
+  const headline = isSelectMode
+    ? selectedCount > 0
+      ? `${selectedCount} Selected`
+      : folderTitle
+    : isSearching
+      ? 'Search'
+      : folderTitle;
+
+  // The subtitle is ALWAYS the total, even while selecting -- both reference
+  // shots show "179 Notes" underneath, whether nothing or something is
+  // selected. It is the size of the pile you are choosing from, and swapping
+  // it for the selection count would say the same thing twice.
+  const subtitle = isSearching
+    ? `${filteredNotes.length} ${filteredNotes.length === 1 ? 'Result' : 'Results'}`
+    : `${filteredNotes.length} ${filteredNotes.length === 1 ? 'Note' : 'Notes'}`;
 
   return (
     <VStack
@@ -151,42 +282,39 @@ export default function NoteListPane({
 
         `onOpenFolders` is only supplied when the folder pane is NOT persistent
         -- i.e. on a phone, and on an iPad in portrait -- so it doubles as the
-        signal for which shape to draw. Where the sidebar is already on screen
-        beside this pane there is nothing to navigate back to, and the control
-        would point at somewhere you already are.
+        signal for which shape to draw.
       */}
       <VStack className="p-4 pb-2" style={{ paddingTop: insets.top + 16 }}>
         {useCompactHeader && onOpenFolders ? (
-          // PHONE: circular back button in its own row, large title beneath.
-          // The reference draws the round controls on their own line and lets
-          // the title own the next one; putting the two on one row is what
-          // made this read as a tablet header on a phone.
           <HStack className="justify-between items-center mb-2">
-            <HeaderCircleButton
-              icon={ChevronLeft}
-              accessibilityLabel="Back to folders"
-              onPress={onOpenFolders}
-            />
-            <AvatarMenuTrigger className="shrink-0" />
+            {/* In select mode the back button would leave a selection stranded
+                behind you, so the row swaps to the Done control instead --
+                which is also where the reference puts it. */}
+            {isSelectMode ? (
+              <View />
+            ) : (
+              <HeaderCircleButton
+                icon={ChevronLeft}
+                accessibilityLabel="Back to folders"
+                onPress={onOpenFolders}
+              />
+            )}
+            {isSelectMode ? (
+              <DoneButton onPress={exitSelectMode} />
+            ) : (
+              <AvatarMenuTrigger
+                className="shrink-0"
+                onSelectNotes={() => setIsSelectMode(true)}
+              />
+            )}
           </HStack>
         ) : null}
 
         <HStack className="items-start justify-between">
-          {/* flex-1/min-w-0 as CLASSES, not as an inline style. NativeWind
-              compiles className into its own `style` prop, which overwrites any
-              `style` passed beside it -- the same collision documented in
-              PressableScale. Passed as a style, this flex was silently dropped
-              and the title overflowed straight across the avatar at
-              accessibility text sizes. */}
           <HStack className="flex-1 min-w-0 items-center gap-2">
             {!useCompactHeader ? (
               // WIDE LAYOUT (iPad both orientations, desktop): the reveal
               // control, INLINE with the title rather than stacked above it.
-              //
-              // Whether it reveals a floating panel or expands a persistent
-              // pane is the parent's business -- from here it is one control
-              // meaning "show me the folders", which is why both cases route
-              // through the same button rather than forking the header again.
               <Pressable
                 onPress={onOpenFolders ?? onToggleSidebar}
                 hitSlop={8}
@@ -207,97 +335,168 @@ export default function NoteListPane({
               <RNText
                 className="text-3xl font-bold text-foreground"
                 numberOfLines={1}
-                // adjustsFontSizeToFit would be the wrong fix here -- it defeats
-                // the whole point of Dynamic Type by shrinking text the user
-                // asked to be bigger. Truncating a folder name is the honest
-                // failure; the full name is one tap away in the sidebar.
                 ellipsizeMode="tail"
               >
-                {isSearching ? 'Search' : folderTitle}
+                {headline}
               </RNText>
               <RNText className="text-xs text-muted-foreground font-medium mt-0.5">
-                {isSearching
-                  ? `${filteredNotes.length} ${filteredNotes.length === 1 ? 'Result' : 'Results'}`
-                  : `${filteredNotes.length} ${filteredNotes.length === 1 ? 'Note' : 'Notes'}`}
+                {subtitle}
               </RNText>
             </VStack>
           </HStack>
 
-          {/* Wide layouts put the account menu here, as an overflow glyph
-              rather than an avatar -- see AvatarMenuTrigger's `variant`. On a
-              phone it lives in the circular-button row above instead. */}
           {!useCompactHeader ? (
-            <AvatarMenuTrigger variant="overflow" className="shrink-0" />
+            isSelectMode ? (
+              <DoneButton onPress={exitSelectMode} />
+            ) : (
+              <AvatarMenuTrigger
+                variant="overflow"
+                className="shrink-0"
+                onSelectNotes={() => setIsSelectMode(true)}
+              />
+            )
           ) : null}
         </HStack>
       </VStack>
 
       {/* Notes Scroll Area */}
-      <FlatList
+      <SectionList
         ref={listRef}
-        data={filteredNotes}
+        sections={sections}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 4 }}
-        // Rows are virtualized, so the target may not be measured yet — nudge
-        // toward it with an estimate, then retry once layout settles.
+        stickySectionHeadersEnabled={false}
+        contentContainerStyle={{
+          paddingHorizontal: 12,
+          paddingVertical: 4,
+          // Room for the floating bulk pills, which sit OVER the list rather
+          // than pushing it up -- without this the last row is unreachable
+          // under them.
+          paddingBottom: isSelectMode ? 88 : 4,
+        }}
+        onScrollBeginDrag={() => setOpenSwipeId(null)}
+        // NOT OPTIONAL, and it is a hard error rather than a warning:
+        // scrollToLocation goes through scrollToIndex underneath, and a
+        // virtualized list refuses to jump to a row it has never measured
+        // unless it is told how to recover. Rows here are variable height
+        // (two lines or three, taller again under Dynamic Type), so
+        // getItemLayout is not available -- this is the other half of that
+        // pair. Same shape as the FlatList handler this replaced.
         onScrollToIndexFailed={({ index, averageItemLength }) => {
-          listRef.current?.scrollToOffset({
-            offset: index * averageItemLength,
+          listRef.current?.getScrollResponder()?.scrollTo({
+            y: index * averageItemLength,
             animated: false,
           });
-          setTimeout(() => {
-            listRef.current?.scrollToIndex({ index, viewPosition: 0.5, animated: false });
-          }, 100);
         }}
-        renderItem={({ item: note }) => {
-          const { title, preview } = parseNoteContent(note.body);
-          const isSelected = note.id === selectedNoteId;
+        renderSectionHeader={({ section }) =>
+          section.title ? (
+            <View style={{ paddingTop: 16, paddingBottom: 6 }}>
+              <RNText className="text-xl font-bold text-foreground">{section.title}</RNText>
+              {/* Desktop draws a rule under the group label that starts at the
+                  LABEL's left edge, further left than the rows' text -- see
+                  desktop-date-group-separator.png. On a phone the group is a
+                  card instead and the header floats above it with no rule. */}
+              {useCompactHeader ? null : <View className="h-px bg-border mt-1.5" />}
+            </View>
+          ) : (
+            <View style={{ height: 4 }} />
+          )
+        }
+        renderItem={({ item, index, section }) => {
+          const isLast = index === section.data.length - 1;
+          const row = (
+            <NoteRow
+              note={item}
+              isOpen={item.id === selectedNoteId}
+              folderName={
+                showFolderLine && item.folderId
+                  ? (folderNameById.get(item.folderId) ?? null)
+                  : null
+              }
+              variant={useCompactHeader ? 'card' : 'flat'}
+              isFirstInSection={index === 0}
+              isLastInSection={isLast}
+              isSelectMode={isSelectMode}
+              isChecked={selectedIds.has(item.id)}
+              onPress={() =>
+                isSelectMode ? toggleChecked(item.id) : onSelectNote(item.id)
+              }
+              onLongPress={
+                isSelectMode
+                  ? undefined
+                  : (anchor) =>
+                      setMenuTarget({
+                        noteId: item.id,
+                        title: parseNoteContent(item.body).title,
+                        isPinned: item.isPinned,
+                        anchor,
+                      })
+              }
+            />
+          );
+
+          // Swipe is suppressed while selecting: the gesture would fight the
+          // tap-to-tick, and Apple drops it in select mode for the same reason.
+          if (isSelectMode) return row;
 
           return (
-            <PressableScale
-              onPress={() => onSelectNote(note.id)}
-              className={`p-3 mb-2 rounded-xl ${
-                isSelected
-                  ? 'bg-lime-100/80 dark:bg-lime-900/40'
-                  : 'bg-card border border-border'
-              }`}
+            <SwipeableNoteRow
+              id={item.id}
+              isPinned={item.isPinned}
+              openId={openSwipeId}
+              onOpenChange={setOpenSwipeId}
+              onPin={() => onTogglePin(item.id, !item.isPinned)}
+              onMove={() => startMove([item.id])}
+              onDelete={() => onTrashNotes([item.id])}
             >
-              <RNText className="font-semibold text-base text-foreground" numberOfLines={1}>
-                {title}
-              </RNText>
-
-              <View
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  marginTop: 4,
-                  width: '100%',
-                  minWidth: 0,
-                }}
-              >
-                <RNText
-                  className="text-xs text-muted-foreground font-medium"
-                  style={{ flexShrink: 0 }}
-                >
-                  {formatNoteDate(new Date(note.updatedAt))}
-                  {"  "}
-                </RNText>
-
-                <RNText
-                  className="text-xs text-muted-foreground"
-                  style={{ flex: 1, minWidth: 0 }}
-                  numberOfLines={1}
-                  ellipsizeMode="tail"
-                >
-                  {preview}
-                </RNText>
-              </View>
-            </PressableScale>
+              {row}
+            </SwipeableNoteRow>
           );
         }}
       />
 
-      {/* Bottom Controls */}
+      {/* Floating bulk actions. Docked over the list, laid out for TWO --
+          Apple's third pill is Tags, which is an iteration-3 feature, so the
+          slot is not backfilled with something else. */}
+      {isSelectMode ? (
+        <View
+          style={{
+            position: 'absolute',
+            left: 16,
+            right: 16,
+            bottom: 16 + insets.bottom,
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+          }}
+          pointerEvents="box-none"
+        >
+          <BulkPill
+            label={selectedCount > 0 ? 'Move' : 'Move All'}
+            onPress={() =>
+              startMove(
+                selectedCount > 0 ? [...selectedIds] : filteredNotes.map((n) => n.id)
+              )
+            }
+          />
+          <BulkPill
+            label={selectedCount > 0 ? 'Delete' : 'Delete All'}
+            onPress={() => setConfirmBulkDelete(true)}
+          />
+        </View>
+      ) : null}
+
+      {/* Bottom Controls.
+          Search and New Note stay here for now on every platform. The
+          reference removes them from wide layouts, but Stage 12 is what
+          relocates them into the editor chrome -- taking them away first would
+          leave desktop and iPad with no way to make a note at all.
+
+          HIDDEN WHILE SELECTING, for two reasons that happen to agree: the
+          floating bulk pills dock to the bottom and would otherwise land on
+          top of this bar, and neither control means anything mid-selection --
+          searching would change the list out from under a selection, and
+          creating a note during one is incoherent. The reference shows no
+          bottom bar in select mode either. */}
+      {isSelectMode ? null : (
       <View
         style={{
           flexDirection: 'row',
@@ -330,6 +529,253 @@ export default function NoteListPane({
           <Icon as={SquarePen} className="text-on-accent w-5 h-5" />
         </Pressable>
       </View>
+      )}
+
+      <NoteContextMenu
+        target={menuTarget}
+        variant={isDesktop ? 'desktop' : 'touch'}
+        onClose={() => setMenuTarget(null)}
+        onShare={(t) => onShareNote(t.noteId)}
+        onMove={(t) => startMove([t.noteId], t.anchor)}
+        onDelete={(t) => onTrashNotes([t.noteId])}
+        onTogglePin={(t) => onTogglePin(t.noteId, !t.isPinned)}
+        onDuplicate={(t) => onDuplicateNote(t.noteId)}
+      />
+
+      {/* TWO PICKERS, ONE FOR EACH INPUT DEVICE. Touch gets the modal sheet;
+          desktop gets a flyout anchored where the click was. They are not the
+          same control resized -- see the two reference shots. */}
+      {moveTargets.length > 0 && isDesktop && moveFlyoutAnchor ? (
+        <DesktopMoveFlyout
+          anchor={moveFlyoutAnchor}
+          folders={folders}
+          currentFolderId={sharedFolderId(moveTargets, noteById)}
+          onClose={cancelMove}
+          onSelect={finishMove}
+        />
+      ) : null}
+
+      {moveTargets.length > 0 && !isDesktop ? (
+        <FolderPickerSheet
+          isOpen
+          label={
+            moveTargets.length === 1
+              ? parseNoteContent(noteById(moveTargets[0])?.body ?? '').title
+              : null
+          }
+          noteCount={moveTargets.length}
+          folders={folders}
+          currentFolderId={sharedFolderId(moveTargets, noteById)}
+          onClose={cancelMove}
+          onSelect={finishMove}
+          onCreateFolder={onCreateFolder}
+        />
+      ) : null}
+
+      {confirmBulkDelete ? (
+        <ConfirmBulkDelete
+          count={selectedCount > 0 ? selectedCount : filteredNotes.length}
+          onCancel={() => setConfirmBulkDelete(false)}
+          onConfirm={() => {
+            onTrashNotes(
+              selectedCount > 0 ? [...selectedIds] : filteredNotes.map((n) => n.id)
+            );
+            setConfirmBulkDelete(false);
+            exitSelectMode();
+          }}
+        />
+      ) : null}
     </VStack>
+  );
+}
+
+/**
+ * The folder every target note is already in, or null if they disagree.
+ *
+ * Only a folder ALL of them share can be greyed out -- greying a folder that
+ * merely some of them are in would block a move that is perfectly valid for
+ * the rest.
+ */
+function sharedFolderId(ids: string[], lookup: (id: string) => Note | null): string | null {
+  let shared: string | null | undefined;
+  for (const id of ids) {
+    const folderId = lookup(id)?.folderId ?? null;
+    if (shared === undefined) shared = folderId;
+    else if (shared !== folderId) return null;
+  }
+  return shared ?? null;
+}
+
+/**
+ * Exit multi-select. A translucent circle with a plain checkmark, NOT an
+ * accent-filled one -- both reference shots draw it the same way the back
+ * button is drawn, and it means "I'm finished here" rather than "confirm".
+ *
+ * Local and disposable by design: Stage 12 owns the shared icon-button
+ * primitive, and this is on its conversion list.
+ */
+function DoneButton({ onPress }: { onPress: () => void }) {
+  return (
+    <PressableScale
+      onPress={onPress}
+      hitSlop={8}
+      containerStyle={{ width: 36, height: 36 }}
+      style={{ width: 36, height: 36 }}
+      className="rounded-full bg-foreground/10 items-center justify-center"
+      accessibilityRole="button"
+      accessibilityLabel="Done selecting"
+    >
+      <Icon as={Check} className="w-5 h-5 text-foreground" />
+    </PressableScale>
+  );
+}
+
+/** A floating bulk-action capsule. Local; Stage 12's conversion list. */
+function BulkPill({ label, onPress }: { label: string; onPress: () => void }) {
+  return (
+    <PressableScale
+      onPress={onPress}
+      style={{ minHeight: 44, paddingHorizontal: 24, justifyContent: 'center' }}
+      // bg-foreground/10, not bg-secondary: `secondary` in dark mode is within
+      // a few points of the pane behind it, so the capsule vanished and the
+      // pills read as bare floating words. A tenth of the text colour is the
+      // same translucent trick HeaderCircleButton uses, and it lands as a
+      // visible capsule against either theme without a new palette entry.
+      className="rounded-full bg-foreground/10 border border-border"
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <RNText className="text-base font-semibold text-foreground">{label}</RNText>
+    </PressableScale>
+  );
+}
+
+/**
+ * Bulk delete confirms; single delete does not.
+ *
+ * That asymmetry is deliberate and matches the spec: one note going to trash
+ * is obvious and one tap from being restored, whereas forty notes disappearing
+ * at once is neither.
+ */
+function ConfirmBulkDelete({
+  count,
+  onCancel,
+  onConfirm,
+}: {
+  count: number;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <View className="absolute inset-0 items-center justify-center px-8 bg-black/40">
+      <View className="w-full max-w-sm rounded-2xl bg-background p-6">
+        <RNText className="text-lg font-semibold text-foreground mb-2">
+          Delete {count} {count === 1 ? 'Note' : 'Notes'}?
+        </RNText>
+        <RNText className="text-sm text-muted-foreground mb-5">
+          They move to Recently Deleted and are removed permanently after 30 days.
+        </RNText>
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          <PressableScale
+            onPress={onCancel}
+            containerStyle={{ flex: 1 }}
+            style={{ minHeight: 48 }}
+            className="rounded-2xl items-center justify-center bg-secondary"
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+          >
+            <RNText className="text-foreground font-medium">Cancel</RNText>
+          </PressableScale>
+          <PressableScale
+            onPress={onConfirm}
+            containerStyle={{ flex: 1 }}
+            style={{ minHeight: 48 }}
+            className="rounded-2xl items-center justify-center bg-red-500"
+            accessibilityRole="button"
+            accessibilityLabel="Delete"
+          >
+            <RNText className="text-on-accent font-semibold">Delete</RNText>
+          </PressableScale>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Desktop's Move target picker: a flyout, not a sheet.
+ *
+ * Flat list with indentation standing in for nesting, exactly as
+ * desktop-move-folder-selection.png draws it -- macOS does not nest a further
+ * submenu per level, it shows the whole tree indented in one panel. Anchored
+ * at the pointer via the same zero-size-anchor trick the context menus use.
+ */
+function DesktopMoveFlyout({
+  anchor,
+  folders,
+  currentFolderId,
+  onClose,
+  onSelect,
+}: {
+  anchor: { x: number; y: number };
+  folders: Folder[];
+  currentFolderId: string | null;
+  onClose: () => void;
+  onSelect: (folderId: string) => void;
+}) {
+  const ordered: { folder: Folder; depth: number }[] = [];
+  const byParent = new Map<string | null, Folder[]>();
+  for (const f of folders) {
+    const list = byParent.get(f.parentId);
+    if (list) list.push(f);
+    else byParent.set(f.parentId, [f]);
+  }
+  const walk = (parentId: string | null, depth: number) => {
+    for (const folder of byParent.get(parentId) ?? []) {
+      ordered.push({ folder, depth });
+      walk(folder.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+
+  return (
+    <Menu
+      isOpen
+      onClose={onClose}
+      placement="bottom left"
+      className="rounded-2xl p-0 overflow-hidden min-w-[240px]"
+      trigger={({ ...triggerProps }) => (
+        <View
+          {...triggerProps}
+          style={{ position: 'absolute', left: anchor.x, top: anchor.y, width: 1, height: 1 }}
+        />
+      )}
+    >
+      {ordered.map(({ folder, depth }) => {
+        const disabled = folder.id === currentFolderId || folder.kind === 'skills';
+        return (
+          <MenuItem
+            key={folder.id}
+            textValue={folder.name}
+            onPress={
+              disabled
+                ? undefined
+                : () => {
+                    onClose();
+                    onSelect(folder.id);
+                  }
+            }
+            className="px-4 py-2.5"
+            style={{ paddingLeft: 16 + depth * 14 }}
+          >
+            <MenuItemLabel
+              className={`text-base ${disabled ? 'text-muted-foreground opacity-50' : 'text-foreground'}`}
+            >
+              {folder.name}
+            </MenuItemLabel>
+          </MenuItem>
+        );
+      })}
+    </Menu>
   );
 }

@@ -1,0 +1,31 @@
+-- =============================================================================
+-- Stage 11 — notes.is_pinned
+--
+-- Pinned notes get their own section at the top of the list, above the first
+-- date group.
+--
+-- WHY THIS IS PLAINTEXT. The encryption split this project has held since
+-- Stage 10 is "user content is ciphertext, structure the server must filter
+-- and order by is plaintext". A pin is a boolean fact about where a note sits
+-- in a list, not something the user wrote, so it lives with is_trashed and
+-- folder_id rather than with body/title. Nothing about the pin leaks content:
+-- the server already knows the note exists and when it changed.
+--
+-- WHY IT SYNCS. A note pinned on the phone and unpinned on the iPad reads as a
+-- sync bug, not as a per-device preference -- the same reasoning that put
+-- folders.include_in_notes and folders.is_enabled on the server rather than in
+-- local ui_state. Pinning is a statement about the note.
+--
+-- NOT NULL DEFAULT false rather than a nullable column: there is no third
+-- state here, and a NULL would force every read site to decide what it meant.
+-- Existing rows are backfilled by the default, so this is additive and safe to
+-- apply to a live database with the current app builds still running -- they
+-- neither read nor write the column.
+--
+-- No sync-rules change is needed. Both powersync/sync-rules.yaml (dev) and
+-- powersync/sync-streams.yaml (live) are `SELECT *`, and the publication was
+-- created table-wide, so the column is picked up without touching either.
+-- =============================================================================
+
+alter table public.notes
+  add column is_pinned boolean not null default false;

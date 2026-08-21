@@ -30,6 +30,7 @@ const NOTES_COLUMNS = [
   'is_hidden_from_api',
   'folder_id',
   'trashed_at',
+  'is_pinned',
 ] as const;
 
 // Same idea for folders. `name` is an enc:v1 envelope and travels as opaque
@@ -75,6 +76,7 @@ function pickNotesColumns(data: Record<string, any> | undefined) {
   // the payload honest about what the columns actually are.
   if ('is_trashed' in out) out.is_trashed = Boolean(out.is_trashed);
   if ('is_hidden_from_api' in out) out.is_hidden_from_api = Boolean(out.is_hidden_from_api);
+  if ('is_pinned' in out) out.is_pinned = Boolean(out.is_pinned);
   return out;
 }
 

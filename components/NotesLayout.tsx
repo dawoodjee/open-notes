@@ -3,6 +3,7 @@ import {
   Platform,
   AppState,
   BackHandler,
+  Share as RNShare,
   View,
   useWindowDimensions,
 } from 'react-native';
@@ -27,6 +28,10 @@ import {
   setNoteHiddenFromApi,
   updateNoteInDB,
   trashNoteInDB,
+  trashNotesInDB,
+  setNotePinned,
+  setNotesFolder,
+  duplicateNoteInDB,
   restoreNoteInDB,
   emptyTrashInDB,
   getUiState,
@@ -56,7 +61,7 @@ import {
   collectSubtreeIds,
   findNode,
 } from '@/types/folder';
-import { isBlankNote } from '@/types/note';
+import { isBlankNote, noteToPlainText } from '@/types/note';
 import { BootSpinner } from '@/components/BootSpinner';
 import { BACKGROUND, useTheme } from '@/contexts/ThemeContext';
 
@@ -595,6 +600,89 @@ export default function NotesLayout() {
   }, [selection, folderTree]);
 
   /**
+   * Whether the list groups by date, resolved for whatever is selected.
+   *
+   * Stage 10 made this a per-folder synced setting, and Stage 11 is the first
+   * thing to read it. ALL NOTES ALWAYS GROUPS: it is not a folder row, so it
+   * has nowhere to put the toggle, and every reference shot of All Notes is
+   * grouped. Giving it a second, global setting to answer the same question is
+   * how a folder and All Notes end up disagreeing about one note.
+   */
+  const listGroupByDate = useMemo(() => {
+    if (selection.kind !== 'folder') return true;
+    return findNode(folderTree, selection.id)?.folder.groupByDate ?? true;
+  }, [selection, folderTree]);
+
+  const handleTogglePin = useCallback(async (id: string, pinned: boolean) => {
+    try {
+      await setNotePinned(id, pinned);
+    } catch (err) {
+      console.error('Failed to pin note:', err);
+    }
+  }, []);
+
+  const handleMoveNotes = useCallback(async (ids: string[], folderId: string) => {
+    try {
+      await setNotesFolder(ids, folderId);
+    } catch (err) {
+      console.error('Failed to move notes:', err);
+    }
+  }, []);
+
+  const handleTrashNotes = useCallback(
+    async (ids: string[]) => {
+      try {
+        await trashNotesInDB(ids);
+        // Trashing the note that is currently open has to close it too, or the
+        // editor keeps editing a note that is no longer in the list.
+        //
+        // Dispatched directly rather than through leaveNote, deliberately:
+        // leaveNote runs discardIfEmpty, which PERMANENTLY deletes a blank
+        // note. Trashing a blank note would then hard-delete it instead of
+        // putting it in Recently Deleted -- so the one note you could not get
+        // back would be the one you deleted by mistake. Delete means trash
+        // here, whatever the note contains.
+        if (selectedNoteId && ids.includes(selectedNoteId)) {
+          dispatch({ type: 'SELECT_NOTE', payload: { id: null } });
+        }
+      } catch (err) {
+        console.error('Failed to trash notes:', err);
+      }
+    },
+    [selectedNoteId]
+  );
+
+  const handleDuplicateNote = useCallback(
+    async (id: string) => {
+      const source = notes.find((n) => n.id === id);
+      if (!source) return;
+      try {
+        await duplicateNoteInDB(source);
+      } catch (err) {
+        console.error('Failed to duplicate note:', err);
+      }
+    },
+    [notes]
+  );
+
+  const handleShareNote = useCallback(
+    async (id: string) => {
+      const note = notes.find((n) => n.id === id);
+      if (!note) return;
+      const body = noteToPlainText(note.body);
+      if (!body) return;
+      try {
+        // Same call and the same silence as the editor's own Share button --
+        // a rejected promise here is nearly always "changed my mind".
+        await RNShare.share({ message: body }, { dialogTitle: 'Share note' });
+      } catch {
+        // Deliberately ignored. See NoteEditorPane.handleShare.
+      }
+    },
+    [notes]
+  );
+
+  /**
    * A folder that disappears -- deleted here, or deleted on another device and
    * synced in -- must not leave the list pane pointing at nothing. Falling back
    * to All Notes is the only selection guaranteed to exist.
@@ -989,8 +1077,16 @@ export default function NotesLayout() {
             folderTitle={folderTitle}
             excludedFolderIds={excludedFolderIds}
             visibleFolderIds={visibleFolderIds}
+            folders={folders}
+            groupByDate={listGroupByDate}
             onSelectNote={(id) => leaveNote(id)}
             onCreateNote={handleCreateNotePressed}
+            onTogglePin={handleTogglePin}
+            onMoveNotes={handleMoveNotes}
+            onTrashNotes={handleTrashNotes}
+            onDuplicateNote={handleDuplicateNote}
+            onShareNote={handleShareNote}
+            onCreateFolder={handleCreateFolder}
             onSearchChange={(query) =>
               dispatch({ type: 'SET_SEARCH_QUERY', payload: { query } })
             }
