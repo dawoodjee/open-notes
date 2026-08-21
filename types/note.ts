@@ -11,9 +11,24 @@ export interface Note {
   updatedAt: string;       // ISO string — matches Postgres timestamptz later
 
   // Trash / Soft Delete.
-  // No separate trashedAt: updatedAt already moves on trash and restore, and a
-  // second field could contradict this one. One field = no illegal states.
   isTrashed: boolean;
+
+  // When it was trashed; null exactly when isTrashed is false.
+  //
+  // Stage 4 deliberately did NOT have this, on the grounds that two fields
+  // describing one fact can contradict each other. Stage 10 added it because
+  // the 30-day auto-purge needs an AGE, and updatedAt is not one -- it moves
+  // whenever an inbound merge rewrites the row, which would restart the clock
+  // on a note deleted weeks ago. The original objection is answered rather
+  // than dropped: a check constraint server-side makes both illegal
+  // combinations unrepresentable, and trashNoteInDB/restoreNoteInDB write the
+  // pair in a single statement so they cannot drift.
+  trashedAt: string | null;
+
+  // Which folder the note is filed in. null = unfiled, shown in All Notes.
+  // A real state, not a missing one -- notes predating folders, and notes
+  // whose folder was deleted, both legitimately have none.
+  folderId: string | null;
 
   // Per-note opt-out of the API access gate. This app reads, edits and syncs
   // the note exactly as before either way -- the flag governs only what

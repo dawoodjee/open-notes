@@ -33,3 +33,12 @@ streams:
   user_notes:
     auto_subscribe: true
     query: SELECT * FROM notes WHERE user_id = auth.user_id()
+
+  # The Sync Streams translation of user_folders in sync-rules.yaml. Both files
+  # are real and are edited together -- see docs/two-stacks.md. auto_subscribe
+  # for the same reason user_notes has it: @powersync/common 2.0.0 predates the
+  # subscribe API, so a non-auto stream would sync nothing and look like a
+  # connection fault.
+  user_folders:
+    auto_subscribe: true
+    query: SELECT * FROM folders WHERE user_id = auth.user_id()

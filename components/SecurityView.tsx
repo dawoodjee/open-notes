@@ -7,7 +7,7 @@ import {
   SettingsSubHeader,
   SettingsToggle,
 } from '@/components/ui/settings-group';
-import { Lock, Plug, ScrollText, ShieldCheck } from 'lucide-react-native';
+import { Cog, Lock, Plug, ScrollText, ShieldCheck } from 'lucide-react-native';
 import { UnlockLabels, getUnlockLabels } from '@/lib/auth/deviceAuth';
 import type { LockSettings } from '@/lib/crypto/vault';
 import {
@@ -19,6 +19,7 @@ import {
   openGate,
 } from '@/lib/plaintext/gates';
 import { Disclosure, listDisclosures } from '@/lib/plaintext/broker';
+import { getSkillsApiVisible, setSkillsApiVisible } from '@/lib/powersync/db';
 
 const LOCK_AFTER_OPTIONS = [
   { label: 'Immediately', value: 0 },
@@ -57,10 +58,12 @@ export function SecurityView({
   const [unlock, setUnlock] = useState<UnlockLabels | null>(null);
   const [gate, setGate] = useState<GateState | null>(null);
   const [disclosures, setDisclosures] = useState<Disclosure[]>([]);
+  const [skillsVisible, setSkillsVisible] = useState(true);
 
   const refreshGates = useCallback(async () => {
     setGate(await getGateState());
     setDisclosures(await listDisclosures(20));
+    setSkillsVisible(await getSkillsApiVisible());
   }, []);
 
   useEffect(() => {
@@ -78,6 +81,25 @@ export function SecurityView({
     if (on) await openGate(window);
     else await closeGate();
     await refreshGates();
+  };
+
+  /**
+   * Optimistic, then persisted. The switch has to move under the finger; a
+   * round trip to SQLite before the UI reacts reads as a dead control.
+   *
+   * NOTE WHAT THIS DOES NOT DO: it does not touch a single existing note.
+   * The value is read once, at creation, by createNoteInDB -- so flipping it
+   * decides what the NEXT skill starts as and never retroactively exposes or
+   * hides one the user has already made a decision about.
+   */
+  const updateSkills = async (next: boolean) => {
+    setSkillsVisible(next);
+    try {
+      await setSkillsApiVisible(next);
+    } catch (err) {
+      console.error('Failed to save the Skills visibility default:', err);
+      await refreshGates();
+    }
   };
 
   // Null means we haven't asked the OS yet. Treating that as 'none' would make
@@ -139,6 +161,23 @@ export function SecurityView({
             label="Allow API access"
             state={gate ?? undefined}
             onToggle={updateGate}
+          />
+          {/* Sits under the gate deliberately: it is a default applied INSIDE a
+              permission the gate has already granted, not a second gate. With
+              API access off it changes nothing at all, which is why it is not
+              disabled -- it is a preference about future notes, and setting it
+              before turning the gate on is a reasonable thing to want to do. */}
+          <SettingsRow
+            icon={Cog}
+            label="New skills visible to apps"
+            sublabel={
+              skillsVisible
+                ? 'Notes you create in Skills start visible, like every other note.'
+                : 'Notes you create in Skills start hidden until you say otherwise.'
+            }
+            right={
+              <SettingsToggle value={skillsVisible} onChange={(next) => void updateSkills(next)} />
+            }
           />
           <SettingsRow icon={Plug} label="Manage endpoints" onPress={onManageEndpoints} />
         </SettingsGroup>

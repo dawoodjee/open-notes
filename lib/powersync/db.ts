@@ -7,6 +7,7 @@ import { getCurrentUserId } from '@/lib/auth/currentUser';
 import { getDatabaseKey } from '@/lib/crypto/vault';
 import { encryptField, tryDecryptField } from '@/lib/crypto/noteCrypto';
 import { ENCRYPTED_DB_FILENAME, migrateToEncrypted } from './migrateToEncrypted';
+import { isSkillsFolder } from './folders';
 
 // Note the "-v2": the encrypted database is a different file from the
 // pre-Stage-6 plaintext one. See migrateToEncrypted.ts for why the format
@@ -87,6 +88,7 @@ export async function initPowerSync(): Promise<void> {
     instance = db;
 
     await encryptLegacyPlaintextNotes(db);
+    await purgeExpiredTrash(db);
   })();
 
   try {
@@ -248,6 +250,48 @@ async function encryptLegacyPlaintextNotes(db: PowerSyncDatabase): Promise<void>
   });
 }
 
+/** How long a trashed note survives before it is destroyed for good. */
+export const TRASH_RETENTION_DAYS = 30;
+
+/**
+ * Destroy notes that have been in the trash longer than the retention window.
+ *
+ * WHY THIS IS CLIENT-DRIVEN AND HAS TO BE. The server can read trashed_at --
+ * it is plaintext, precisely so that sync and RLS can filter on it -- so a
+ * server-side cron is technically possible. It is still wrong: it would have
+ * the server destroying rows it cannot read, on a schedule the client never
+ * agreed to, with no way for a user holding the only copy of the key to
+ * inspect what was lost. Deletion of content is a decision that belongs on the
+ * side that can actually see the content.
+ *
+ * WHAT HAPPENS TO A DEVICE THAT HASN'T OPENED IN MONTHS: nothing, until it
+ * opens -- its local copy still holds notes long past 30 days. In practice it
+ * almost never has to do the work itself: whichever device swept first emitted
+ * real DELETEs, and those propagate, so the stale device receives the
+ * deletions on reconnect and finds nothing left to purge. This sweep is the
+ * backstop for the case where NO device has opened inside the window, which is
+ * also the only case where nothing has been destroyed prematurely.
+ *
+ * Runs at init beside the other two once-per-launch passes, and deliberately
+ * after them: encryptLegacyPlaintextNotes must not spend work re-encrypting
+ * notes that are about to be deleted.
+ */
+async function purgeExpiredTrash(db: PowerSyncDatabase): Promise<void> {
+  const cutoff = new Date(
+    Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000
+  ).toISOString();
+
+  // trashed_at IS NOT NULL is redundant against the server's check constraint
+  // but not against local SQLite, which has no such constraint -- and a NULL
+  // comparison would silently match nothing rather than erroring, so the guard
+  // is cheaper than the debugging session.
+  await db.execute(
+    `DELETE FROM notes
+     WHERE is_trashed = 1 AND trashed_at IS NOT NULL AND trashed_at < ?`,
+    [cutoff]
+  );
+}
+
 /**
  * Attach a newly-signed-in user to every local note that doesn't have an
  * owner yet -- the notes they wrote before enabling sync.
@@ -293,6 +337,8 @@ export function mapRowToNote(row: any): Note {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     isTrashed: Boolean(row.is_trashed),
+    trashedAt: row.trashed_at ?? null,
+    folderId: row.folder_id ?? null,
     isHiddenFromApi: Boolean(row.is_hidden_from_api),
     // Surfaced rather than swallowed. An undecryptable note must not look
     // like an empty note: the editor would happily save over it, turning a
@@ -302,11 +348,37 @@ export function mapRowToNote(row: any): Note {
   };
 }
 
-export async function createNoteInDB(): Promise<Note> {
+/**
+ * Create a note, optionally filed into a folder.
+ *
+ * THE ONE SECURITY-RELEVANT LINE IN HERE is the api-visibility default, so it
+ * is spelled out rather than left to be inferred:
+ *
+ *   - Everywhere in the app, a new note is created VISIBLE to apps
+ *     (is_hidden_from_api = 0). That is unchanged from Stage 6.5 and is not
+ *     the permissive choice it sounds like -- the API gate itself is off by
+ *     default and is the real control; this flag is a per-note exception
+ *     INSIDE a permission the user has already granted.
+ *
+ *   - Inside Skills, the "Keep Skills visible to apps" setting decides. On (the
+ *     default) matches the app-wide behaviour above; off creates the note
+ *     hidden, so a user who wants skills inert until they say otherwise can
+ *     have that.
+ *
+ * What this deliberately does NOT do is touch an existing note's visibility.
+ * Moving a note into or out of Skills leaves the flag exactly as it was --
+ * silently un-hiding a note somebody hid by hand is the one behaviour this
+ * must never have.
+ */
+export async function createNoteInDB(folderId: string | null = null): Promise<Note> {
   const id = Crypto.randomUUID();
   const body = '';
   const { title } = parseNoteContent(body);
   const now = new Date().toISOString();
+
+  const hiddenFromApi = (await isSkillsFolder(folderId))
+    ? !(await getSkillsApiVisible())
+    : false;
 
   // Stamped with the current owner at creation, NULL only when genuinely
   // signed out (those get claimed at login -- see claimUnownedNotes below).
@@ -320,9 +392,9 @@ export async function createNoteInDB(): Promise<Note> {
   // any sync bucket). The note vanishes seconds after being created.
   const userId = getCurrentUserId();
   await getPowerSync().execute(
-    `INSERT INTO notes (id, user_id, body, title, created_at, updated_at, is_trashed, is_hidden_from_api)
-     VALUES (?, ?, ?, ?, ?, ?, 0, 0)`,
-    [id, userId, encryptField(body), encryptField(title), now, now]
+    `INSERT INTO notes (id, user_id, body, title, created_at, updated_at, is_trashed, trashed_at, is_hidden_from_api, folder_id)
+     VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?)`,
+    [id, userId, encryptField(body), encryptField(title), now, now, hiddenFromApi ? 1 : 0, folderId]
   );
 
   return {
@@ -333,8 +405,23 @@ export async function createNoteInDB(): Promise<Note> {
     createdAt: now,
     updatedAt: now,
     isTrashed: false,
-    isHiddenFromApi: false,
+    trashedAt: null,
+    folderId,
+    isHiddenFromApi: hiddenFromApi,
   };
+}
+
+/**
+ * Move a note between folders. NULL means unfiled (All Notes).
+ *
+ * Does not touch updated_at, and does not touch is_hidden_from_api. The first
+ * for the reason setNoteHiddenFromApi gives -- filing a note is not editing
+ * it, and the list is ordered by updated_at. The second because visibility is
+ * the note's own property: it followed the folder once, at creation, and
+ * re-deciding it here would mean moving a note could silently expose it.
+ */
+export async function setNoteFolder(id: string, folderId: string | null): Promise<void> {
+  await getPowerSync().execute(`UPDATE notes SET folder_id = ? WHERE id = ?`, [folderId, id]);
 }
 
 /**
@@ -381,12 +468,23 @@ export async function updateNoteInDB(id: string, body: string): Promise<void> {
   );
 }
 
-// updated_at doubles as "when was this trashed" — see types/note.ts.
+/**
+ * Soft-delete. Sets trashed_at in the SAME statement that sets is_trashed, and
+ * restore clears both together -- which is what makes the pair impossible to
+ * desynchronise in practice, independently of the check constraint that makes
+ * it impossible in principle.
+ *
+ * folder_id is deliberately left alone, so restore can put the note back where
+ * it came from. (The exception is a note trashed by deleting its folder: the
+ * folder row is gone, so the FK's `on delete set null` unfiles it and it
+ * restores to All Notes. There is no better answer -- the folder no longer
+ * exists.)
+ */
 export async function trashNoteInDB(id: string): Promise<void> {
   const now = new Date().toISOString();
   await getPowerSync().execute(
-    `UPDATE notes SET is_trashed = 1, updated_at = ? WHERE id = ?`,
-    [now, id]
+    `UPDATE notes SET is_trashed = 1, trashed_at = ?, updated_at = ? WHERE id = ?`,
+    [now, now, id]
   );
 }
 
@@ -416,7 +514,7 @@ export async function setNoteHiddenFromApi(id: string, hidden: boolean): Promise
 export async function restoreNoteInDB(id: string): Promise<void> {
   const now = new Date().toISOString();
   await getPowerSync().execute(
-    `UPDATE notes SET is_trashed = 0, updated_at = ? WHERE id = ?`,
+    `UPDATE notes SET is_trashed = 0, trashed_at = NULL, updated_at = ? WHERE id = ?`,
     [now, id]
   );
 }
@@ -434,9 +532,33 @@ export interface UiState {
   editorScrollOffset: number;
   /** NULL = off, 'never' = no expiry, otherwise ISO-8601. See schema.ts. */
   apiGateExpiresAt: string | null;
+  /** Whether a note created in Skills starts visible to apps. Defaults true. */
+  skillsApiVisible: boolean;
 }
 
-const UI_STATE_COLUMNS = 'last_opened_note_id, editor_scroll_offset, api_gate_expires_at';
+const UI_STATE_COLUMNS =
+  'last_opened_note_id, editor_scroll_offset, api_gate_expires_at, skills_api_visible';
+
+/**
+ * Read on its own rather than through getUiState() because createNoteInDB
+ * calls it on every note creation and has no use for the other three fields.
+ *
+ * Absent (NULL) reads as TRUE. A device that predates this column has to
+ * behave like a fresh install, and a fresh install's answer is "on" -- the
+ * same value the app-wide default already produces, so the column's existence
+ * changes nothing until somebody turns it off.
+ */
+export async function getSkillsApiVisible(): Promise<boolean> {
+  const row = await getPowerSync().getOptional<{ skills_api_visible: number | null }>(
+    'SELECT skills_api_visible FROM ui_state WHERE id = ?',
+    ['singleton']
+  );
+  return row?.skills_api_visible == null ? true : row.skills_api_visible === 1;
+}
+
+export async function setSkillsApiVisible(visible: boolean): Promise<void> {
+  await saveUiState({ skillsApiVisible: visible });
+}
 
 export async function getUiState(): Promise<UiState> {
   const row = await getPowerSync().getOptional<any>(
@@ -448,6 +570,7 @@ export async function getUiState(): Promise<UiState> {
     lastOpenedNoteId: row?.last_opened_note_id ?? null,
     editorScrollOffset: row?.editor_scroll_offset ?? 0,
     apiGateExpiresAt: row?.api_gate_expires_at ?? null,
+    skillsApiVisible: row?.skills_api_visible == null ? true : row.skills_api_visible === 1,
   };
 }
 
@@ -471,19 +594,40 @@ export async function saveUiState(partial: Partial<UiState>): Promise<void> {
       'apiGateExpiresAt' in partial
         ? partial.apiGateExpiresAt
         : (existing?.api_gate_expires_at ?? null);
+    // Same 'in partial' treatment as the gate, and for a related reason: false
+    // is a meaningful value here, and `?? existing` would make turning this
+    // OFF impossible.
+    const skillsApiVisible =
+      'skillsApiVisible' in partial
+        ? partial.skillsApiVisible
+        : existing?.skills_api_visible == null
+          ? true
+          : existing.skills_api_visible === 1;
 
     if (existing) {
       await tx.execute(
         `UPDATE ui_state SET last_opened_note_id = ?, editor_scroll_offset = ?,
-                             api_gate_expires_at = ? WHERE id = ?`,
-        [lastOpenedNoteId, editorScrollOffset, apiGateExpiresAt, 'singleton']
+                             api_gate_expires_at = ?, skills_api_visible = ? WHERE id = ?`,
+        [
+          lastOpenedNoteId,
+          editorScrollOffset,
+          apiGateExpiresAt,
+          skillsApiVisible ? 1 : 0,
+          'singleton',
+        ]
       );
     } else {
       await tx.execute(
         `INSERT INTO ui_state (id, last_opened_note_id, editor_scroll_offset,
-                               api_gate_expires_at)
-         VALUES (?, ?, ?, ?)`,
-        ['singleton', lastOpenedNoteId, editorScrollOffset, apiGateExpiresAt]
+                               api_gate_expires_at, skills_api_visible)
+         VALUES (?, ?, ?, ?, ?)`,
+        [
+          'singleton',
+          lastOpenedNoteId,
+          editorScrollOffset,
+          apiGateExpiresAt,
+          skillsApiVisible ? 1 : 0,
+        ]
       );
     }
   });

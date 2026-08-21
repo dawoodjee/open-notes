@@ -13,6 +13,7 @@ import { parseNoteContent } from '@/types/note';
 import * as Crypto from 'expo-crypto';
 
 const NOTES_TABLE = 'notes';
+const FOLDERS_TABLE = 'folders';
 const SYNC_ISSUE_MAX_AGE_MS = 60 * 24 * 60 * 60 * 1000; // 2 months
 
 // Row shape notes actually has server-side -- see
@@ -27,7 +28,39 @@ const NOTES_COLUMNS = [
   'updated_at',
   'is_trashed',
   'is_hidden_from_api',
+  'folder_id',
+  'trashed_at',
 ] as const;
+
+// Same idea for folders. `name` is an enc:v1 envelope and travels as opaque
+// text -- Postgres neither knows nor needs to know that it is ciphertext.
+//
+// `depth` is deliberately ABSENT. The server computes it from parent_id in a
+// trigger (see the Stage 10 migration), so sending a client-supplied value
+// would either be ignored or, worse, be trusted. The local copy is still
+// correct because createFolderInDB derives it the same way.
+const FOLDERS_COLUMNS = [
+  'user_id',
+  'parent_id',
+  'name',
+  'kind',
+  'sort_order',
+  'include_in_notes',
+  'group_by_date',
+  'created_at',
+  'updated_at',
+] as const;
+
+function pickFoldersColumns(data: Record<string, any> | undefined) {
+  const out: Record<string, any> = {};
+  if (!data) return out;
+  for (const col of FOLDERS_COLUMNS) {
+    if (col in data) out[col] = data[col];
+  }
+  if ('include_in_notes' in out) out.include_in_notes = Boolean(out.include_in_notes);
+  if ('group_by_date' in out) out.group_by_date = Boolean(out.group_by_date);
+  return out;
+}
 
 function pickNotesColumns(data: Record<string, any> | undefined) {
   const out: Record<string, any> = {};
@@ -132,7 +165,79 @@ async function clearSyncBase(database: AbstractPowerSyncDatabase, noteId: string
   await database.execute('DELETE FROM note_sync_base WHERE note_id = ?', [noteId]);
 }
 
+/**
+ * Route an op to the table it actually belongs to.
+ *
+ * THIS DISPATCH IS NEW IN STAGE 10 AND WAS LOAD-BEARING FROM THE FIRST FOLDER
+ * ROW. Before it, uploadEntry opened `supabase.from('notes')` unconditionally
+ * and ignored entry.table entirely -- correct only while `notes` was the sole
+ * synced table. A folder op would have been sent to the notes table as a note,
+ * where it would either 400 on unknown columns or, if PostgREST were feeling
+ * generous, insert a garbage note row. Neither failure mentions folders.
+ *
+ * Anything not recognised is skipped rather than guessed at. A new synced
+ * table added later gets a loud dev warning here instead of silently
+ * uploading itself into `notes`.
+ */
 async function uploadEntry(database: AbstractPowerSyncDatabase, entry: CrudEntry) {
+  switch (entry.table) {
+    case NOTES_TABLE:
+      return uploadNoteEntry(database, entry);
+    case FOLDERS_TABLE:
+      return uploadFolderEntry(database, entry);
+    default:
+      if (__DEV__) {
+        console.warn(
+          `[powersync] no upload handler for table "${entry.table}" -- op skipped.`
+        );
+      }
+      return;
+  }
+}
+
+/**
+ * Folders upload plainly: no merge, no ancestor, no note_sync_base.
+ *
+ * That asymmetry with notes is deliberate rather than unfinished. The 3-way
+ * merge exists because two devices can edit different paragraphs of the same
+ * body and both edits must survive. A folder has no body -- its mutable fields
+ * are a name, a flag, and a sort position, each of which is a single value
+ * where the later write genuinely is the answer. Running diff-match-patch over
+ * a folder name would let two devices produce a spliced third name that
+ * neither user typed.
+ *
+ * Reads current local state rather than entry.opData, for exactly the reason
+ * the notes path does: a folder created before sign-in is queued with no
+ * user_id, and replaying that verbatim fails the RLS check forever while
+ * blocking every op behind it.
+ */
+async function uploadFolderEntry(database: AbstractPowerSyncDatabase, entry: CrudEntry) {
+  const table = supabase.from(FOLDERS_TABLE);
+
+  switch (entry.op) {
+    case UpdateType.PUT:
+    case UpdateType.PATCH: {
+      const row = await database.getOptional<Record<string, any>>(
+        'SELECT * FROM folders WHERE id = ?',
+        [entry.id]
+      );
+      // Deleted locally since this op was queued; the DELETE behind it is the
+      // authoritative instruction. Skip rather than resurrect it server-side.
+      if (!row) break;
+
+      const { error } = await table.upsert({ id: entry.id, ...pickFoldersColumns(row) });
+      if (error) throw error;
+      break;
+    }
+    case UpdateType.DELETE: {
+      const { error } = await table.delete().eq('id', entry.id);
+      if (error) throw error;
+      break;
+    }
+  }
+}
+
+async function uploadNoteEntry(database: AbstractPowerSyncDatabase, entry: CrudEntry) {
   const table = supabase.from(NOTES_TABLE);
 
   switch (entry.op) {
@@ -317,18 +422,28 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
     if (!transaction) return;
 
     for (const entry of transaction.crud) {
+      // sync_issues is keyed by note_id and is surfaced in Settings > Advanced
+      // as a problem with a NOTE. Recording a folder failure there would show
+      // the user a note that doesn't exist. Folder failures still retry and
+      // still log in dev -- they just don't claim to be about a note.
+      const tracksIssues = entry.table === NOTES_TABLE;
       try {
         await uploadEntry(database, entry);
-        await clearSyncIssue(database, entry.id);
+        if (tracksIssues) await clearSyncIssue(database, entry.id);
       } catch (error: any) {
         if (isStructuralError(error)) {
           // Not retryable -- retrying forever would block every op queued
           // after this one. Log it durably (sync_issues, not just __DEV__)
           // and move on to the next entry in this transaction.
           if (__DEV__) {
-            console.warn(`[powersync] dropping op for note ${entry.id}:`, error?.message ?? error);
+            console.warn(
+              `[powersync] dropping op for ${entry.table} ${entry.id}:`,
+              error?.message ?? error
+            );
           }
-          await recordSyncIssue(database, entry.id, error?.message ?? 'Sync failed');
+          if (tracksIssues) {
+            await recordSyncIssue(database, entry.id, error?.message ?? 'Sync failed');
+          }
           continue;
         }
         // Retryable -- rethrow so PowerSync retries the whole transaction
@@ -342,7 +457,9 @@ export class SupabaseConnector implements PowerSyncBackendConnector {
         // isn't on their other device. The row is keyed by note_id and
         // cleared on the next success, so a genuinely transient blip leaves
         // nothing behind.
-        await recordSyncIssue(database, entry.id, error?.message ?? 'Sync failed');
+        if (tracksIssues) {
+          await recordSyncIssue(database, entry.id, error?.message ?? 'Sync failed');
+        }
         throw error;
       }
     }
