@@ -47,6 +47,7 @@ const FOLDERS_COLUMNS = [
   'sort_order',
   'include_in_notes',
   'group_by_date',
+  'is_enabled',
   'created_at',
   'updated_at',
 ] as const;
@@ -59,6 +60,7 @@ function pickFoldersColumns(data: Record<string, any> | undefined) {
   }
   if ('include_in_notes' in out) out.include_in_notes = Boolean(out.include_in_notes);
   if ('group_by_date' in out) out.group_by_date = Boolean(out.group_by_date);
+  if ('is_enabled' in out) out.is_enabled = Boolean(out.is_enabled);
   return out;
 }
 

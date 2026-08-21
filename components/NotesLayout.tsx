@@ -42,8 +42,12 @@ import {
   seedSkillsFolderIfSettled,
   setFolderGroupByDate,
   setFolderIncludeInNotes,
+  setFolderEnabled,
+  setSubtreeApiVisibility,
+  subtreeApiVisibility,
   FOLDER_COLUMNS,
 } from '@/lib/powersync/folders';
+import type { SubtreeApiVisibility } from '@/lib/powersync/folders';
 import {
   ALL_NOTES_SELECTION,
   Folder,
@@ -94,14 +98,27 @@ export default function NotesLayout() {
   const isLandscape = windowWidth > windowHeight;
 
   /**
-   * iPad: a persistent split-view pane in landscape, an overlay in portrait.
+   * TWO QUESTIONS, NOT ONE. These used to be a single flag, and that was the
+   * bug: it forced the header shape and the folder pane's presentation to
+   * agree, when the iPad needs them to disagree.
    *
-   * Derived from the window rather than from a device check, deliberately --
-   * a Split View or Slide Over iPad is genuinely narrow and should behave
-   * like the narrow layout, and asking "how much room is there" answers that
-   * correctly where asking "is this an iPad" does not.
+   *   useCompactHeader   is this a PHONE? Drives the header -- circular back
+   *                      button stacked above the large title, versus a reveal
+   *                      icon inline with it.
+   *   foldersArePersistent  does the folder pane PUSH content, or float over
+   *                      it? True on desktop and a landscape iPad.
+   *
+   * iPad portrait therefore lands where the reference puts it: the wide header,
+   * with the folder panel floating over the content rather than replacing it.
+   *
+   * Both derive from the window rather than a device check -- an iPad in Split
+   * View is genuinely narrow and should behave like one, which asking "is this
+   * an iPad" gets wrong.
    */
+  const useCompactHeader = !isWideLayout;
   const foldersArePersistent = isWideLayout && (Platform.OS !== 'ios' || isLandscape);
+  /** Wide but not persistent: the floating-panel case (iPad portrait). */
+  const foldersOverlay = isWideLayout && !foldersArePersistent;
 
   // Desktop Resizable Panel Logic
   const [sidebarWidth, setSidebarWidth] = useState<number>(320);
@@ -664,6 +681,58 @@ export default function NotesLayout() {
     }
   }, []);
 
+  const [skillsApiVisibility, setSkillsApiVisibility] =
+    useState<SubtreeApiVisibility | undefined>(undefined);
+
+  const skillsFolderId = useMemo(
+    () => folders.find((f) => f.kind === 'skills')?.id ?? null,
+    [folders]
+  );
+
+  // Recomputed whenever the notes change, because the aggregate is a fact about
+  // the notes and the context menu must not offer a bulk write based on a stale
+  // reading of what it is about to overwrite.
+  useEffect(() => {
+    if (!dbReady || !skillsFolderId) return;
+    let cancelled = false;
+    void subtreeApiVisibility(skillsFolderId)
+      .then((state) => {
+        if (!cancelled) setSkillsApiVisibility(state);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [dbReady, skillsFolderId, notes]);
+
+  const handleSetFolderEnabled = useCallback(
+    async (folderId: string, enabled: boolean) => {
+      try {
+        await setFolderEnabled(folderId, enabled);
+        // A disabled folder leaves the sidebar, so a selection pointing into it
+        // would strand the list pane on a folder the user can no longer see.
+        if (!enabled && selection.kind === 'folder') {
+          const disabled = collectSubtreeIds(folderTree, folderId);
+          if (disabled.includes(selection.id)) setSelection(ALL_NOTES_SELECTION);
+        }
+      } catch (err) {
+        console.error('Failed to change folder enabled state:', err);
+      }
+    },
+    [selection, folderTree]
+  );
+
+  const handleSetSubtreeApiVisibility = useCallback(
+    async (folderId: string, visible: boolean) => {
+      try {
+        await setSubtreeApiVisibility(folderId, visible);
+      } catch (err) {
+        console.error('Failed to change folder API visibility:', err);
+      }
+    },
+    []
+  );
+
   const handleMoveFolder = useCallback(async (folderId: string, direction: -1 | 1) => {
     try {
       await moveTopLevelFolder(folderId, direction);
@@ -846,6 +915,14 @@ export default function NotesLayout() {
         {/* already uses, rather than introducing a router stack for  */}
         {/* one destination.                                          */}
         {/* ========================================================= */}
+        {/*
+          THE `!selectedNoteId` GUARD USED TO LIVE HERE AND WAS THE iPAD BUG.
+          It is correct on a phone -- the folder list and an open note are the
+          same screen there, so showing folders over a note is ambiguous. On an
+          iPad the panes coexist and the editor ALWAYS has a note open, so that
+          condition was never true and the reveal control did nothing at all.
+          Gated on the compact layout now, which is what it always meant.
+        */}
         <FolderSidebar
           tree={folderTree}
           selection={selection}
@@ -855,9 +932,15 @@ export default function NotesLayout() {
           isVisible={
             foldersArePersistent
               ? !isFolderSidebarCollapsed
-              : isFolderPaneOpen && !selectedNoteId
+              : isFolderPaneOpen && (!useCompactHeader || !selectedNoteId)
           }
           isPersistent={foldersArePersistent}
+          isOverlay={foldersOverlay}
+          useCompactHeader={useCompactHeader}
+          skillsApiVisibility={skillsApiVisibility}
+          onSetFolderEnabled={handleSetFolderEnabled}
+          onSetSubtreeApiVisibility={handleSetSubtreeApiVisibility}
+          onDismiss={() => setIsFolderPaneOpen(false)}
           width={
             Platform.OS === 'web' && foldersArePersistent ? 288 : undefined
           }
@@ -874,7 +957,9 @@ export default function NotesLayout() {
         {/* ========================================================= */}
         {/* LEFT PANE: the note list, or Recently Deleted             */}
         {/* ========================================================= */}
-        {isFolderPaneOpen && !foldersArePersistent && !selectedNoteId ? null : selection.kind ===
+        {/* Only a PHONE replaces the list with the folder screen. On an iPad
+            the panel floats over it, so the list stays mounted underneath. */}
+        {isFolderPaneOpen && useCompactHeader && !selectedNoteId ? null : selection.kind ===
           'trash' ? (
           <View
             className={`border-r border-border shrink-0 ${
@@ -890,6 +975,7 @@ export default function NotesLayout() {
               onOpenFolders={
                 foldersArePersistent ? undefined : () => setIsFolderPaneOpen(true)
               }
+              useCompactHeader={useCompactHeader}
             />
           </View>
         ) : (
@@ -911,6 +997,7 @@ export default function NotesLayout() {
             onOpenFolders={
               foldersArePersistent ? undefined : () => setIsFolderPaneOpen(true)
             }
+            useCompactHeader={useCompactHeader}
             onToggleSidebar={() => setIsFolderSidebarCollapsed((v) => !v)}
           />
         )}

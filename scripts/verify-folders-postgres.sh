@@ -170,6 +170,16 @@ ERR=$(err_of "$(q "insert into public.folders (id,user_id,name,kind) values ('$S
 check "B may still have its own Skills folder" "$([[ -z "$ERR" ]] && echo 1 || echo 0)" "$ERR"
 
 echo
+echo "=== 6b. is_enabled ==="
+EN=$(q "select is_enabled from public.folders where id='$S1'")
+check "a new folder defaults to enabled" "$([[ "$EN" == "t" ]] && echo 1 || echo 0)" "got '$EN'"
+q "update public.folders set is_enabled = false where id='$S1'" >/dev/null
+OFF=$(q "select is_enabled from public.folders where id='$S1'")
+check "it can be switched off" "$([[ "$OFF" == "f" ]] && echo 1 || echo 0)" "got '$OFF'"
+NOTNULL=$(q "select is_nullable from information_schema.columns where table_name='folders' and column_name='is_enabled'")
+check "the column is NOT NULL, so there is no third state" "$([[ "$NOTNULL" == "NO" ]] && echo 1 || echo 0)" "is_nullable=$NOTNULL"
+
+echo
 echo "=== 7. Replication ==="
 PUB=$(q "select count(*) from pg_publication_tables where pubname='powersync' and tablename='folders'")
 check "folders is in the powersync publication" "$([[ "$PUB" == "1" ]] && echo 1 || echo 0)" "found $PUB"

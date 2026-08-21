@@ -19,6 +19,9 @@ export interface Folder {
   /** Whether this folder's notes appear in All Notes. Never affects search. */
   includeInNotes: boolean;
   groupByDate: boolean;
+  /** Switched on? A disabled folder is hidden from the sidebar and its notes
+   *  are excluded from everything the plaintext broker will hand out. */
+  isEnabled: boolean;
   createdAt: string;
   updatedAt: string;
 

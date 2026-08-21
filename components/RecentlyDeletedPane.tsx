@@ -29,14 +29,17 @@ export function RecentlyDeletedPane({
   onRestoreNote,
   onEmptyTrash,
   onOpenFolders,
+  useCompactHeader,
 }: {
   notes: Note[];
   selectedNoteId: string | null;
   onSelectNote: (id: string) => void;
   onRestoreNote: (id: string) => void;
   onEmptyTrash: () => void;
-  /** Mobile only. Undefined on wide layouts, where the sidebar is always up. */
+  /** Undefined only where the folder pane is already permanently on screen. */
   onOpenFolders?: () => void;
+  /** True on phones. Decides the header shape, same as NoteListPane. */
+  useCompactHeader: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const [confirmingEmpty, setConfirmingEmpty] = useState(false);
@@ -48,7 +51,7 @@ export function RecentlyDeletedPane({
             see the long note there. Without a back control at all this screen
             was a dead end on a phone: the folder button lives in the list
             pane's header, and this pane replaces that pane outright. */}
-        {onOpenFolders ? (
+        {useCompactHeader && onOpenFolders ? (
           <View className="flex-row justify-between items-center mb-2">
             <HeaderCircleButton
               icon={ChevronLeft}

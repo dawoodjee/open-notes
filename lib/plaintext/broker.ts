@@ -1,6 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import { getPowerSync } from '@/lib/powersync/db';
 import { tryDecryptField } from '@/lib/crypto/noteCrypto';
+import { DISABLED_FOLDER_SUBTREE_CTE, NOT_IN_DISABLED_FOLDER } from '@/lib/powersync/folderQueries';
 import { getGateState } from './gates';
 import { DenialReason, decideAccess } from './policy';
 import {
@@ -107,10 +108,22 @@ export async function requestPlaintext(req: PlaintextRequest): Promise<BrokerRes
   // Hidden notes are silently omitted rather than failing the whole request:
   // the caller gets what it is allowed to have. If everything it asked for is
   // hidden, the no-notes denial below covers it.
+  //
+  // A DISABLED FOLDER IS A THIRD EXCLUSION, ADDED THE SAME WAY AND FOR THE SAME
+  // REASON: it filters in the QUERY, so a note inside a switched-off folder is
+  // never decrypted on an outside caller's behalf at all.
+  //
+  // Note what this is and is not. It is a STRICTER predicate on the query that
+  // was already here -- it can only ever remove rows, never add them -- so it
+  // cannot widen access and there is still exactly one path to plaintext. It is
+  // not a second grant mechanism, and nothing about it lets a caller reach
+  // content the per-note flag would have withheld.
   const placeholders = req.noteIds.map(() => '?').join(',');
   const rows = await getPowerSync().getAll<any>(
-    `SELECT id, title, body FROM notes
-     WHERE id IN (${placeholders}) AND is_trashed = 0 AND is_hidden_from_api = 0`,
+    `${DISABLED_FOLDER_SUBTREE_CTE}
+     SELECT id, title, body FROM notes
+     WHERE id IN (${placeholders}) AND is_trashed = 0 AND is_hidden_from_api = 0
+       AND ${NOT_IN_DISABLED_FOLDER}`,
     req.noteIds
   );
   if (rows.length === 0) return { ok: false, denied: 'no-notes' };

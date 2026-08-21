@@ -1,10 +1,11 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ScrollView, Text as RNText, View } from 'react-native';
+import { ScrollView, StyleSheet, Text as RNText, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Pressable } from '@/components/ui/pressable';
 import { Icon } from '@/components/ui/icon';
-import { FolderPlus } from 'lucide-react-native';
+import { Menu, MenuItem, MenuItemLabel, MenuSeparator } from '@/components/ui/menu';
+import { FolderPlus, MoreHorizontal, Power } from 'lucide-react-native';
 
 import { FolderRow } from './FolderRow';
 import { FolderContextMenu, FolderMenuTarget } from './FolderContextMenu';
@@ -48,6 +49,11 @@ export interface FolderSidebarProps {
    * the sidebar appears as a half-width strip.
    */
   isPersistent: boolean;
+  /** Wide but not persistent -- the iPad-portrait case, where the panel floats
+   *  over the content rather than pushing it aside. */
+  isOverlay: boolean;
+  /** Overlay only: tapping the scrim behind the panel closes it. */
+  onDismiss?: () => void;
   /** Web/desktop only: the pane's pixel width. */
   width?: number;
   onSelect: (selection: FolderSelection) => void;
@@ -58,6 +64,13 @@ export interface FolderSidebarProps {
   onToggleIncludeInNotes: (folderId: string, next: boolean) => void;
   onToggleGroupByDate: (folderId: string, next: boolean) => void;
   onMoveFolder: (folderId: string, direction: -1 | 1) => void;
+  onSetFolderEnabled: (folderId: string, enabled: boolean) => void;
+  onSetSubtreeApiVisibility: (folderId: string, visible: boolean) => void;
+  /** Resolved by the parent, which owns the note data the aggregate reads. */
+  skillsApiVisibility?: import('@/lib/powersync/folders').SubtreeApiVisibility;
+  /** Phones stack the controls above the large title; wide layouts put them
+   *  inline with it. See the note on the header below. */
+  useCompactHeader: boolean;
 }
 
 type PendingDialog =
@@ -74,6 +87,8 @@ export function FolderSidebar({
   expandedIds,
   isVisible,
   isPersistent,
+  isOverlay,
+  onDismiss,
   width,
   onSelect,
   onToggleExpanded,
@@ -83,13 +98,44 @@ export function FolderSidebar({
   onToggleIncludeInNotes,
   onToggleGroupByDate,
   onMoveFolder,
+  onSetFolderEnabled,
+  onSetSubtreeApiVisibility,
+  skillsApiVisibility,
+  useCompactHeader,
 }: FolderSidebarProps) {
   const insets = useSafeAreaInsets();
   const [menuTarget, setMenuTarget] = useState<FolderMenuTarget | null>(null);
   const [dialog, setDialog] = useState<PendingDialog>(null);
   const [isEditing, setIsEditing] = useState(false);
 
-  const topLevelIds = useMemo(() => tree.map((n) => n.folder.id), [tree]);
+  const [isOverflowOpen, setIsOverflowOpen] = useState(false);
+
+  /**
+   * Skills is pinned; everything else is the reorderable list.
+   *
+   * Split here rather than sorted, because "pinned" and "sorted first" are not
+   * the same claim: a sort puts it first until a user folder's sort_order
+   * happens to beat it, and this must hold regardless of what is in the column.
+   * Recently Deleted is pinned the same way -- outside the list entirely rather
+   * than by a sort_order the user could edit past.
+   *
+   * A DISABLED folder drops out of the sidebar here. Its notes are untouched;
+   * only the row goes.
+   */
+  const visibleTree = useMemo(() => tree.filter((n) => n.folder.isEnabled), [tree]);
+  const skillsNode = useMemo(
+    () => visibleTree.find((n) => n.folder.kind === 'skills') ?? null,
+    [visibleTree]
+  );
+  const reorderable = useMemo(
+    () => visibleTree.filter((n) => n.folder.kind !== 'skills'),
+    [visibleTree]
+  );
+
+  const skillsFolder = useMemo(
+    () => tree.find((n) => n.folder.kind === 'skills')?.folder ?? null,
+    [tree]
+  );
 
   const openMenuFor = useCallback(
     (target: FolderMenuTarget) => setMenuTarget(target),
@@ -125,52 +171,120 @@ export function FolderSidebar({
 
   if (!isVisible) return null;
 
-  return (
+  /**
+   * New Folder plus the Skills switch.
+   *
+   * Enable/Disable is here rather than in the Skills row's own context menu on
+   * purpose: it is a statement about whether the FEATURE is in use, not about
+   * that folder's properties -- and once disabled the row is gone, so a control
+   * living on the row would have no way back.
+   */
+  const overflowMenu = (
+    <Menu
+      isOpen={isOverflowOpen}
+      onOpen={() => setIsOverflowOpen(true)}
+      onClose={() => setIsOverflowOpen(false)}
+      placement="bottom right"
+      offset={8}
+      className="rounded-2xl p-0 overflow-hidden min-w-[260px]"
+      trigger={({ ...triggerProps }) => (
+        <Pressable
+          {...triggerProps}
+          hitSlop={8}
+          style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}
+          accessibilityRole="button"
+          accessibilityLabel="Folder options"
+        >
+          <Icon as={MoreHorizontal} className="w-6 h-6 text-lime-600 dark:text-lime-400" />
+        </Pressable>
+      )}
+    >
+      <MenuItem
+        key="new-folder"
+        textValue="New Folder"
+        onPress={() => {
+          setIsOverflowOpen(false);
+          setDialog({ kind: 'create', parentId: null, parentLabel: 'Folders' });
+        }}
+        className="px-4 py-3 flex-row items-center gap-3"
+      >
+        <Icon as={FolderPlus} className="text-muted-foreground w-[18px] h-[18px]" />
+        <MenuItemLabel className="text-base text-foreground">New Folder</MenuItemLabel>
+      </MenuItem>
+
+      <MenuSeparator key="sep" />
+
+      <MenuItem
+        key="skills-enabled"
+        textValue="Skills Folder"
+        onPress={() => {
+          setIsOverflowOpen(false);
+          if (skillsFolder) onSetFolderEnabled(skillsFolder.id, !skillsFolder.isEnabled);
+        }}
+        className="px-4 py-3 flex-row items-center gap-3"
+      >
+        <Icon as={Power} className="text-muted-foreground w-[18px] h-[18px]" />
+        <MenuItemLabel className="text-base text-foreground">
+          {skillsFolder?.isEnabled ? 'Disable Skills Folder' : 'Enable Skills Folder'}
+        </MenuItemLabel>
+      </MenuItem>
+    </Menu>
+  );
+
+  const body = (
     <View
-      style={{ paddingTop: insets.top, ...(width ? { width } : {}) }}
-      className={`bg-secondary h-full ${
-        isPersistent ? 'border-r border-border shrink-0 md:w-72' : 'w-full flex-1'
+      style={{
+        paddingTop: isOverlay ? 8 : insets.top,
+        ...(width ? { width } : {}),
+      }}
+      className={`bg-secondary ${
+        isOverlay
+          ? 'flex-1 rounded-2xl overflow-hidden'
+          : isPersistent
+            ? 'h-full border-r border-border shrink-0 md:w-72'
+            : 'h-full w-full flex-1'
       }`}
     >
-      <View className="flex-row items-center justify-between px-4 pt-4 pb-2">
-        {/* Truncates rather than clipping. At Android font_scale 1.6 this
-            title and the Edit button were both hard-clipped mid-word
-            ("Folder", "E") because nothing told either one how to yield. */}
-        <RNText
-          className="text-3xl font-bold text-foreground flex-1 min-w-0"
-          numberOfLines={1}
-          ellipsizeMode="tail"
-        >
-          Folders
-        </RNText>
+      {/*
+        Edit on the left, overflow on the right, on both layouts. New Folder
+        lives inside the overflow rather than beside it -- a header with one
+        action in it and one action next to it invites the question of why, and
+        there is no answer.
 
-        <View className="flex-row items-center gap-1 shrink-0">
-          <Pressable
-            onPress={() => setDialog({ kind: 'create', parentId: null, parentLabel: 'Folders' })}
-            hitSlop={8}
-            style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}
-            accessibilityRole="button"
-            accessibilityLabel="New folder"
+        The two layouts differ only in where the controls sit relative to the
+        title: phones stack them above it, wide layouts run them inline. Same
+        controls, same order, so nothing has to be learned twice.
+      */}
+      {useCompactHeader ? (
+        <View className="px-4 pt-4 pb-2">
+          <View className="flex-row items-center justify-between mb-2">
+            <EditButton isEditing={isEditing} onPress={() => setIsEditing((v) => !v)} />
+            {overflowMenu}
+          </View>
+          <RNText
+            className="text-3xl font-bold text-foreground"
+            numberOfLines={1}
+            ellipsizeMode="tail"
           >
-            <Icon as={FolderPlus} className="w-6 h-6 text-lime-600 dark:text-lime-400" />
-          </Pressable>
-
-          <Pressable
-            onPress={() => setIsEditing((v) => !v)}
-            hitSlop={8}
-            style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}
-            accessibilityRole="button"
-            accessibilityLabel={isEditing ? 'Done reordering folders' : 'Reorder folders'}
-          >
-            <RNText
-              className="text-base text-lime-600 dark:text-lime-400 font-medium"
-              numberOfLines={1}
-            >
-              {isEditing ? 'Done' : 'Edit'}
-            </RNText>
-          </Pressable>
+            Folders
+          </RNText>
         </View>
-      </View>
+      ) : (
+        <View className="flex-row items-center justify-between px-4 pt-4 pb-2 gap-2">
+          <EditButton isEditing={isEditing} onPress={() => setIsEditing((v) => !v)} />
+          {/* Truncates rather than clipping. At Android font_scale 1.6 this
+              title and the Edit button were both hard-clipped mid-word
+              ("Folder", "E") because nothing told either one how to yield. */}
+          <RNText
+            className="text-lg font-semibold text-foreground flex-1 min-w-0 text-center"
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            Folders
+          </RNText>
+          {overflowMenu}
+        </View>
+      )}
 
       <ScrollView
         contentContainerStyle={{
@@ -200,7 +314,25 @@ export function FolderSidebar({
           }
         />
 
-        {tree.map((node, index) => (
+        {/* Pinned: never reorderable, always directly under All Notes. */}
+        {skillsNode ? (
+          <FolderSubtree
+            key={skillsNode.folder.id}
+            node={skillsNode}
+            selection={selection}
+            expandedIds={expandedIds}
+            isEditing={false}
+            canMoveUp={false}
+            canMoveDown={false}
+            skillsApiVisibility={skillsApiVisibility}
+            onSelect={onSelect}
+            onToggleExpanded={onToggleExpanded}
+            onRequestMenu={openMenuFor}
+            onMove={onMoveFolder}
+          />
+        ) : null}
+
+        {reorderable.map((node, index) => (
           <FolderSubtree
             key={node.folder.id}
             node={node}
@@ -208,7 +340,7 @@ export function FolderSidebar({
             expandedIds={expandedIds}
             isEditing={isEditing}
             canMoveUp={index > 0}
-            canMoveDown={index < topLevelIds.length - 1}
+            canMoveDown={index < reorderable.length - 1}
             onSelect={onSelect}
             onToggleExpanded={onToggleExpanded}
             onRequestMenu={openMenuFor}
@@ -255,6 +387,9 @@ export function FolderSidebar({
           setDialog({ kind: 'create', parentId: t.folderId, parentLabel: t.label })
         }
         onDelete={handleDeleteRequest}
+        onSetSubtreeApiVisibility={(t, visible) =>
+          t.folderId && onSetSubtreeApiVisibility(t.folderId, visible)
+        }
       />
 
       {dialog?.kind === 'create' ? (
@@ -297,6 +432,50 @@ export function FolderSidebar({
       ) : null}
     </View>
   );
+
+  if (!isOverlay) return body;
+
+  /**
+   * iPad portrait: a floating panel, not a takeover.
+   *
+   * Inset on every side with the content still visible behind it, matching
+   * ipad-portrait-folder-view.jpeg. The scrim is deliberately light -- the
+   * point of this presentation is that you can still see where you were, which
+   * a heavy dim would defeat. Tapping it dismisses, since a floating panel with
+   * no way out but the control that opened it is a trap.
+   */
+  return (
+    <View
+      style={{ ...StyleSheet.absoluteFillObject, zIndex: 20 }}
+      pointerEvents="box-none"
+    >
+      <Pressable
+        style={StyleSheet.absoluteFill}
+        onPress={onDismiss}
+        accessibilityRole="button"
+        accessibilityLabel="Close folders"
+        className="bg-foreground/10"
+      />
+      <View
+        style={{
+          position: 'absolute',
+          top: insets.top + 8,
+          bottom: insets.bottom + 8,
+          left: 8,
+          width: 320,
+          maxWidth: '85%',
+          shadowColor: '#000',
+          shadowOpacity: 0.25,
+          shadowRadius: 24,
+          shadowOffset: { width: 0, height: 8 },
+          elevation: 12,
+        }}
+        className="rounded-2xl overflow-hidden"
+      >
+        {body}
+      </View>
+    </View>
+  );
 }
 
 /**
@@ -313,6 +492,7 @@ function FolderSubtree({
   isEditing,
   canMoveUp,
   canMoveDown,
+  skillsApiVisibility,
   onSelect,
   onToggleExpanded,
   onRequestMenu,
@@ -324,6 +504,7 @@ function FolderSubtree({
   isEditing: boolean;
   canMoveUp: boolean;
   canMoveDown: boolean;
+  skillsApiVisibility?: import('@/lib/powersync/folders').SubtreeApiVisibility;
   onSelect: (selection: FolderSelection) => void;
   onToggleExpanded: (folderId: string) => void;
   onRequestMenu: (target: FolderMenuTarget) => void;
@@ -359,6 +540,7 @@ function FolderSubtree({
             depth: folder.depth,
             includeInNotes: folder.includeInNotes,
             groupByDate: folder.groupByDate,
+            apiVisibility: skillsApiVisibility,
             anchor,
           })
         }
@@ -398,3 +580,23 @@ function sumNotes(node: FolderNode): number {
 }
 
 export { MAX_FOLDER_DEPTH };
+
+/** Shared so the two header layouts cannot drift in label or hit area. */
+function EditButton({ isEditing, onPress }: { isEditing: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={8}
+      style={{ minHeight: 44, minWidth: 44, justifyContent: 'center' }}
+      accessibilityRole="button"
+      accessibilityLabel={isEditing ? 'Done reordering folders' : 'Reorder folders'}
+    >
+      <RNText
+        className="text-base text-lime-600 dark:text-lime-400 font-medium"
+        numberOfLines={1}
+      >
+        {isEditing ? 'Done' : 'Edit'}
+      </RNText>
+    </Pressable>
+  );
+}
