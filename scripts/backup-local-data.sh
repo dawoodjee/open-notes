@@ -20,11 +20,14 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTAINER="supabase_db_notes"
 
-# Only the four tables that hold identity and content. Deliberately NOT
-# auth.sessions or auth.refresh_tokens: a reset invalidates them anyway, and
-# signing in again on each device is a five-second cost that isn't worth the
-# risk of restoring a token that points at a row we didn't keep.
-TABLES=(auth.users auth.identities public.profiles public.notes)
+# Only the five tables that hold identity, content, and key material.
+# Deliberately NOT auth.sessions or auth.refresh_tokens: a reset invalidates
+# them anyway, and signing in again on each device is a five-second cost that
+# isn't worth the risk of restoring a token that points at a row we didn't
+# keep. user_keys IS included -- it holds each account's recovery-wrapped
+# data key, and without it a reset silently strands any device that hasn't
+# already cached the key (see AdoptKeyScreen / lib/crypto/adoption.ts).
+TABLES=(auth.users auth.identities public.profiles public.notes public.user_keys)
 
 OUT="${1:-$ROOT/supabase/backups/$(date +%Y%m%d-%H%M%S).sql}"
 mkdir -p "$(dirname "$OUT")"

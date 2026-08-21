@@ -35,7 +35,7 @@ echo "Restoring $DUMP"
 # stderr and ON_ERROR_STOP still aborts the whole load.
 docker exec -i "$CONTAINER" psql -U supabase_admin -d postgres -v ON_ERROR_STOP=1 --quiet < "$DUMP" > /dev/null
 
-for t in auth.users auth.identities public.profiles public.notes; do
+for t in auth.users auth.identities public.profiles public.notes public.user_keys; do
   count=$(docker exec -i "$CONTAINER" psql -U supabase_admin -d postgres -tAc "select count(*) from $t")
   printf '  %-20s %s rows\n' "$t" "$count"
 done
