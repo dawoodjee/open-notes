@@ -103,6 +103,22 @@ export interface SwipeableNoteRowProps {
   onShare: () => void;
   onMove: () => void;
   onDelete: () => void;
+  /**
+   * TEST SEAM. Drives the row open without a gesture, so the revealed actions
+   * can be exercised by an ordinary tap.
+   *
+   * WHY THIS EXISTS AS PRODUCTION CODE. Synthesised touches reach React
+   * Native's own touch handling but never fire `UIGestureRecognizer`s, so on
+   * the iOS Simulator a swipe cannot be automated at all -- which is how the
+   * Pin action shipped broken once and was only caught by hand. Injected TAPS
+   * do work on both platforms, so the only thing automation cannot do for
+   * itself is the opening. This prop supplies exactly that and nothing more:
+   * no behaviour, no state, no bypass of the real hit-testing that the bug
+   * lived in.
+   *
+   * `NoteListPane` never passes it. `app/dev-swipe.tsx` is the only caller.
+   */
+  testOpen?: 'left' | 'right' | null;
   children: React.ReactNode;
 }
 
@@ -115,6 +131,7 @@ export function SwipeableNoteRow({
   onShare,
   onMove,
   onDelete,
+  testOpen = null,
   children,
 }: SwipeableNoteRowProps) {
   const translateX = useSharedValue(0);
@@ -128,6 +145,19 @@ export function SwipeableNoteRow({
   useEffect(() => {
     if (openId !== id) close();
   }, [openId, id, close]);
+
+  // Test seam -- see `testOpen` on the props. Deliberately drives the SAME
+  // shared value the gesture drives, so what a test opens is the same state a
+  // finger opens, not a lookalike.
+  useEffect(() => {
+    if (testOpen === 'left') {
+      translateX.value = spring(ACTION_WIDTH, SPRING_EXPAND);
+    } else if (testOpen === 'right') {
+      translateX.value = spring(-ACTION_WIDTH * LEFT_ACTION_COUNT, SPRING_EXPAND);
+    } else if (testOpen === null) {
+      translateX.value = spring(0, SPRING_EXPAND);
+    }
+  }, [testOpen, translateX]);
 
   const commit = useCallback(
     (action: 'pin' | 'delete') => {
