@@ -103,7 +103,13 @@ export function FolderContextMenu({
         />
       )}
     >
-      {!isTrash ? (
+      {/* Real folder rows only. Both virtual surfaces are excluded, for the
+          same underlying reason rather than two different ones: neither is a
+          row, so there is no include_in_notes to toggle and the item was inert
+          on both. Recently Deleted additionally makes no sense as something
+          "included in Notes"; All Notes IS the list the flag filters, so
+          asking it to exclude itself is incoherent. */}
+      {isRealFolder ? (
         <MenuItem
           key="include"
           textValue="Include in Notes"

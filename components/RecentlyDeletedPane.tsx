@@ -3,9 +3,9 @@ import { FlatList, Text as RNText, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/ui/icon';
-import { Pressable } from '@/components/ui/pressable';
-import { RotateCcw, PanelLeft } from 'lucide-react-native';
+import { RotateCcw, ChevronLeft } from 'lucide-react-native';
 import { PressableScale } from './PressableScale';
+import { HeaderCircleButton } from './HeaderCircleButton';
 import { Note, formatNoteDate, parseNoteContent } from '@/types/note';
 import { TRASH_RETENTION_DAYS } from '@/lib/powersync/db';
 
@@ -44,24 +44,21 @@ export function RecentlyDeletedPane({
   return (
     <View className="flex-1 bg-secondary" style={{ paddingTop: insets.top }}>
       <View className="px-4 pt-4 pb-2">
-        <View className="flex-row items-start justify-between">
-          {onOpenFolders ? (
-            // Without this, opening Recently Deleted on a phone was a dead end:
-            // the folder button lives in NoteListPane's header, and this pane
-            // replaces that pane entirely. Found by walking the flow on the
-            // simulator, not by reading the code.
-            <Pressable
+        {/* Same two-shape header as NoteListPane, and for the same reason --
+            see the long note there. Without a back control at all this screen
+            was a dead end on a phone: the folder button lives in the list
+            pane's header, and this pane replaces that pane outright. */}
+        {onOpenFolders ? (
+          <View className="flex-row justify-between items-center mb-2">
+            <HeaderCircleButton
+              icon={ChevronLeft}
+              accessibilityLabel="Back to folders"
               onPress={onOpenFolders}
-              hitSlop={8}
-              className="md:hidden shrink-0"
-              style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}
-              accessibilityRole="button"
-              accessibilityLabel="Show folders"
-            >
-              <Icon as={PanelLeft} className="w-6 h-6 text-foreground" />
-            </Pressable>
-          ) : null}
+            />
+          </View>
+        ) : null}
 
+        <View className="flex-row items-start justify-between">
           <View className="flex-1 min-w-0">
             <RNText
               className="text-3xl font-bold text-foreground"
