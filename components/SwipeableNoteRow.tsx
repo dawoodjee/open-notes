@@ -3,6 +3,7 @@ import { Platform, Pressable, Text as RNText, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   interpolate,
+  useAnimatedReaction,
   useDerivedValue,
   interpolateColor,
   runOnJS,
@@ -64,7 +65,23 @@ const REVEAL_THRESHOLD = 44;
  * be dragged almost the whole way.
  */
 const COMMIT_FRACTION_RIGHT = 0.55;
-const COMMIT_FRACTION_LEFT = 0.9;
+/**
+ * Was 0.9, which needed 334pt of TRANSLATION on a 371pt row. With the
+ * overshoot easing below, that costs more finger travel than the screen has,
+ * so it was unreachable even after the clamp was fixed. 0.75 lands the commit
+ * at ~278pt of translation, about 289pt of travel -- comfortably reachable,
+ * and still far enough past the 216pt reveal that "look at Share" and "delete
+ * this note" stay obviously different gestures.
+ */
+const COMMIT_FRACTION_LEFT = 0.75;
+
+/**
+ * How much of each pixel of finger movement past the revealed strip actually
+ * moves the row. 1 would feel loose and make accidental commits easy; too low
+ * puts the commit past the edge of the screen. 0.85 keeps it reachable while
+ * making the extra distance feel deliberate.
+ */
+const OVERSHOOT_RATE = 0.85;
 
 /**
  * The shape starts as a CIRCLE and STRETCHES into a capsule as the drag
@@ -93,6 +110,11 @@ const ACTION_COLORS = {
   move: ['#6366f1', '#4f46e5'], // indigo-500 -> indigo-600
   delete: ['#ef4444', '#dc2626'], // red-500 -> red-600
 } as const;
+
+/** Fired from a worklet, so it has to be a plain module-scope function. */
+function tick() {
+  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+}
 
 export interface SwipeableNoteRowProps {
   id: string;
@@ -184,11 +206,29 @@ export function SwipeableNoteRow({
     .activeOffsetX([-15, 15])
     .failOffsetY([-12, 12])
     .onUpdate((e) => {
-      // Clamp the far side of each direction so the row cannot be dragged
-      // clean off screen -- there is nothing revealed past the buttons.
-      const max = ACTION_WIDTH;
-      const min = -ACTION_WIDTH * LEFT_ACTION_COUNT;
-      translateX.value = Math.min(max, Math.max(min, e.translationX));
+      /**
+       * Past the revealed strip the row keeps moving, at a reduced rate.
+       *
+       * THIS USED TO CLAMP AT THE STRIP WIDTH, and that quietly disabled the
+       * whole force-swipe feature: translateX could never exceed 216pt on the
+       * left, while onEnd's commit test is a fraction of the ROW width (~334pt
+       * of a 371pt row). The test could not be true, so releasing after a long
+       * drag only ever opened the row. Same on the right, where the clamp was
+       * 72 and the threshold ~204. It read as working in the source and did
+       * nothing on the device -- found by measuring the drag needed to arm the
+       * colour and discovering no drag could.
+       *
+       * OVERSHOOT_RATE is what keeps that from feeling loose: the buttons
+       * arrive at 1:1, and going beyond them costs more finger per pixel, so a
+       * commit has to be meant. The cap is the row width -- there is nothing
+       * to see past the row's own edge.
+       */
+      const raw = e.translationX;
+      const limit = raw > 0 ? ACTION_WIDTH : ACTION_WIDTH * LEFT_ACTION_COUNT;
+      const magnitude = Math.abs(raw);
+      const beyond = Math.max(0, magnitude - limit);
+      const eased = Math.min(limit + beyond * OVERSHOOT_RATE, rowWidth.value || magnitude);
+      translateX.value = raw < 0 ? -eased : eased;
     })
     .onEnd(() => {
       const tx = translateX.value;
@@ -232,17 +272,47 @@ export function SwipeableNoteRow({
   }));
 
   /**
-   * How far each side is revealed, as a fraction: 0 closed, 1 fully open, and
-   * ABOVE 1 once the drag is heading for a commit. Derived rather than stored
-   * so there is exactly one source of truth for the gesture -- translateX.
+   * TWO different fractions, because they answer two different questions, and
+   * conflating them was a real bug in the first cut of this.
    *
-   * The >1 region is what the outermost action's colour shift reads, so the
-   * deepening lines up with "keep pulling and this will fire" rather than with
-   * "the buttons are now visible".
+   * REVEAL is progress toward "the buttons are fully visible" -- 0 closed, 1
+   * when the action strip is entirely uncovered. It drives the capsule stretch.
+   *
+   * ARM is progress toward "let go now and this action fires" -- 1 exactly at
+   * the commit threshold. It drives the outermost action's colour.
+   *
+   * These are far apart. Swiping left reveals three buttons after 216pt, but
+   * committing needs 90% of a 402pt row -- 362pt. Driving the colour off reveal
+   * meant the capsule looked armed from 216pt onward while releasing there just
+   * left the row open. The colour was lying about what the gesture would do.
    */
   const leftReveal = useDerivedValue(() => translateX.value / ACTION_WIDTH);
   const rightReveal = useDerivedValue(
     () => -translateX.value / (ACTION_WIDTH * LEFT_ACTION_COUNT)
+  );
+  // Guarded against a pre-layout rowWidth of 0, which would make every arm
+  // fraction Infinity and light the colour before the first pixel of drag.
+  const leftArm = useDerivedValue(() =>
+    rowWidth.value > 0 ? translateX.value / (rowWidth.value * COMMIT_FRACTION_RIGHT) : 0
+  );
+  const rightArm = useDerivedValue(() =>
+    rowWidth.value > 0 ? -translateX.value / (rowWidth.value * COMMIT_FRACTION_LEFT) : 0
+  );
+
+  /**
+   * One haptic tick the moment a side becomes armed, and nothing on the way
+   * back. This is the part that makes a force-swipe feel committed before you
+   * let go -- without it the colour change is the only signal and it is easy to
+   * miss mid-gesture, with your thumb over the button.
+   */
+  const wasArmed = useSharedValue(false);
+  useAnimatedReaction(
+    () => Math.max(leftArm.value, rightArm.value) >= 1,
+    (armed, previous) => {
+      if (armed === previous) return;
+      wasArmed.value = armed;
+      if (armed) runOnJS(tick)();
+    }
   );
 
   if (Platform.OS === 'web') return <>{children}</>;
@@ -268,6 +338,7 @@ export function SwipeableNoteRow({
           icon={Pin}
           colors={ACTION_COLORS.pin}
           reveal={leftReveal}
+          arm={leftArm}
           // The only action on this side, so it is also the outermost one.
           isOutermost
           onPress={() => runAction(onPin)}
@@ -306,6 +377,7 @@ export function SwipeableNoteRow({
           icon={Trash2}
           colors={ACTION_COLORS.delete}
           reveal={rightReveal}
+          arm={rightArm}
           // Outermost on this side: the one a full-swipe commits.
           isOutermost
           onPress={() => runAction(onDelete)}
@@ -323,13 +395,14 @@ export function SwipeableNoteRow({
  * One action slot: a coloured shape with its label underneath -- the text is
  * NOT inside the shape, per the reference.
  *
- * TWO THINGS ANIMATE OFF `reveal` (0 closed, 1 fully open, >1 heading for a
- * commit):
- *   - WIDTH, so the shape starts as a circle and stretches into a capsule as
- *     the swipe deepens.
- *   - COLOUR, but only on the outermost action, and only ABOVE 1 -- the region
- *     where releasing will fire that action rather than just leave the row
- *     open. That is what makes it an ARMED indicator rather than a decoration.
+ * TWO THINGS ANIMATE, off two DIFFERENT fractions:
+ *   - WIDTH, off `reveal` (0 closed, 1 fully visible), so the shape starts as
+ *     a circle and stretches into a capsule as the swipe deepens.
+ *   - COLOUR, off `arm` (1 exactly at the commit threshold), and only on the
+ *     outermost action. It deepens across the last stretch before release
+ *     would actually fire, so it means "let go now and this happens" -- not
+ *     merely "the buttons are visible", which is a much earlier and different
+ *     moment. See the note where the two fractions are derived.
  *
  * The Pressable fills the whole 72-wide slot, so the touch target is the full
  * row height by 72 even though the painted shape is at most 62 wide.
@@ -339,6 +412,7 @@ function SwipeAction({
   icon,
   colors,
   reveal,
+  arm,
   isOutermost = false,
   onPress,
 }: {
@@ -346,14 +420,28 @@ function SwipeAction({
   icon: React.ComponentType<any>;
   colors: readonly [string, string];
   reveal: SharedValue<number>;
+  /** Only the outermost action on a side is armable, so only it gets this. */
+  arm?: SharedValue<number>;
   isOutermost?: boolean;
   onPress: () => void;
 }) {
   const shapeStyle = useAnimatedStyle(() => ({
     width: interpolate(reveal.value, [0, 1], [CAPSULE_MIN_WIDTH, CAPSULE_MAX_WIDTH], 'clamp'),
-    backgroundColor: isOutermost
-      ? interpolateColor(reveal.value, [1, 1.35], [colors[0], colors[1]], 'RGB', { gamma: 1 })
-      : colors[0],
+    backgroundColor:
+      isOutermost && arm
+        ? interpolateColor(arm.value, [0.75, 1], [colors[0], colors[1]], 'RGB', { gamma: 1 })
+        : colors[0],
+  }));
+
+  /**
+   * The icon leans in slightly as the action arms. Small on purpose -- 1.12 is
+   * enough to register in peripheral vision while a thumb is covering the
+   * capsule, which is exactly when the colour alone is hardest to see.
+   */
+  const iconStyle = useAnimatedStyle(() => ({
+    transform: [
+      { scale: arm ? interpolate(arm.value, [0.75, 1], [1, 1.12], 'clamp') : 1 },
+    ],
   }));
 
   return (
@@ -374,7 +462,9 @@ function SwipeAction({
           shapeStyle,
         ]}
       >
-        <Icon as={icon} className="w-5 h-5 text-on-accent" />
+        <Animated.View style={iconStyle}>
+          <Icon as={icon} className="w-5 h-5 text-on-accent" />
+        </Animated.View>
       </Animated.View>
       <RNText className="text-xs text-muted-foreground" numberOfLines={1}>
         {label}
