@@ -9,6 +9,7 @@ import './grouping.test';
 import './note.test';
 import './swipeMath.test';
 import './htmlMigrate.test';
+import './paneChrome.test';
 import { report } from './harness';
 
 report();

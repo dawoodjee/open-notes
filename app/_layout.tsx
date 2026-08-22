@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { LogBox, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import { AuthProvider } from '@/contexts/AuthContext';
@@ -136,8 +136,40 @@ function ThemedRoot() {
  * Note that with the lock off -- the default -- 'locked' never happens, and
  * this collapses to "show the app".
  */
+/**
+ * Routes that render without a database, and are allowed to when there isn't
+ * one. All three are `__DEV__`-guarded harnesses that own their own fixture
+ * data -- they touch neither the vault nor PowerSync.
+ */
+const DEV_ROUTES = ['/dev-chrome', '/dev-icons', '/dev-swipe'];
+
 function VaultGate() {
   const { status, hasBooted, bootError, resetLocalData } = useVault();
+  const pathname = usePathname();
+
+  /**
+   * WHY THE HARNESSES GET AN ESCAPE HATCH, and only on `failed`.
+   *
+   * On web the vault cannot boot at all: `expo-secure-store` has no web
+   * implementation so there is no device key, and `@powersync/react-native` +
+   * op-sqlite do not exist there either. Both belong to Stage 13. Without this,
+   * every route on web -- including the harness built to verify the desktop
+   * chrome -- is replaced by BootFailureScreen, and the chrome cannot be looked
+   * at on the only platform it targets.
+   *
+   * Scoped to `status === 'failed'` deliberately. On native the vault succeeds,
+   * so this branch never runs and nothing about the normal boot changes. And
+   * AuthProvider is left out on purpose rather than by omission: it restores
+   * the session and calls connectPowerSync(), which is precisely what cannot
+   * work when the database did not open.
+   */
+  if (__DEV__ && status === 'failed' && DEV_ROUTES.includes(pathname)) {
+    return (
+      <View className="flex-1">
+        <Stack screenOptions={{ headerShown: false }} />
+      </View>
+    );
+  }
 
   if (status === 'loading') {
     // NotesLayout renders this same component while it settles on which note
