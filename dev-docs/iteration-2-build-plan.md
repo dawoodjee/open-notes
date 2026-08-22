@@ -1554,9 +1554,20 @@ only in a chat log.
       drag maths assumes every row is one row tall, and an expanded parent is as
       tall as its subtree. Reordering was already top-level-only, so this also
       stops the list offering rows that would refuse to be dragged.
-- [x] **6. Checkpoint.** ✅ `tsc` clean, **167/167 tests** (151 + 16),
-      `expo lint` at the 8-warning / 0-error baseline. Drag proved end to end in
-      the browser (below); edit-mode layout screenshotted on iPhone 17 Pro.
+- [x] **6. Checkpoint.** `tsc` clean, **167/167 tests** (151 + 16), `expo lint`
+      at the 8-warning / 0-error baseline. Both sheets behave as before with no
+      Gluestack workaround left in either file. Skills stays pinned and has no
+      grip — confirmed on iPhone 17 Pro. Drag proved end to end in the browser
+      (table below).
+
+      **One checkpoint line is short of proved, and it is not a formality.**
+      "The new folder order survives a sync round-trip" was not observed. What
+      *was* checked: `sort_order` is `column.integer` in `lib/powersync/schema.ts`
+      and the `user_folders` bucket is `select * from folders`, so the column
+      replicates and a `sort_order` UPDATE enters the CRUD queue exactly as a
+      rename does — and rename's round-trip is proved from Stage 11. That is a
+      sound argument, not an observation. **Adam's hands:** drag a folder on the
+      phone, confirm the order on the iPad. One drag settles it.
 
 **The gesture cannot be tested on a simulator, so it was tested in a browser.**
 Injected `simctl` touches drive React Native's own responder system but never
