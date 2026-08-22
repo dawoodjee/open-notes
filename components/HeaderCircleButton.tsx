@@ -1,7 +1,6 @@
 import React from 'react';
-import type { View, PressableProps } from 'react-native';
-import { Icon } from '@/components/ui/icon';
-import { PressableScale } from './PressableScale';
+import type { View } from 'react-native';
+import { IconButton, type IconButtonProps } from './IconButton';
 
 /**
  * The round header button iOS uses at the top of a pushed screen.
@@ -17,45 +16,26 @@ import { PressableScale } from './PressableScale';
  * So both treatments are kept, each where it is true: wide layouts keep the
  * inline split-view control, phones get this.
  *
- * THE FILL IS TRANSLUCENT ON PURPOSE. `bg-foreground/10` is a tenth of
- * whatever the text colour currently is, so it lands as a light grey circle in
- * light mode and a lifted grey one on a dark background -- one token, correct
- * in both, and no new palette entry. Stage 9's contrast audit documents
- * translucent values as the allowed exception to the pure-value ban, and this
- * is the case that exception exists for.
+ * NOW A THIN WRAPPER over the shared icon-button primitive (Stage 12a). It used
+ * to own its own 44x44 circle, `bg-foreground/10` fill and `w-6 h-6` glyph --
+ * one of the seven container treatments the primitive replaces. Two things
+ * changed as a result and both are deliberate:
  *
- * `forwardRef` + spread `...rest` (rather than a fixed `onPress` prop) so
- * this can ALSO serve as a Gluestack `Menu` trigger -- a menu hands its
- * trigger a `ref` (to measure where to draw the popover) and its own
- * `onPress` bundled together in one props object, so the component has to
- * accept and forward both rather than assuming a single named `onPress`.
- * Plain callers (a back button with `onPress={...}`) work exactly as before;
- * `PressableScale` needs the same `forwardRef` treatment underneath for the
- * ref to actually reach the native node instead of stopping here.
+ *  - **It paints smaller.** 44 was read as the HIG minimum and used as a
+ *    painted size; 44pt is the minimum TOUCH target. The primitive paints 36
+ *    and restores 44 with `hitSlop`, which is the actual fix for "the back
+ *    button container seems too large".
+ *  - **The glyph shrank from 24 to 20**, the app's one glyph size.
+ *
+ * Kept rather than folded into `IconButton` at every call site because the name
+ * is the documentation: it says "this is the pushed-screen back affordance",
+ * which is a decision, not a shape.
  */
 export const HeaderCircleButton = React.forwardRef<
   View,
-  {
-    icon: React.ComponentType<any>;
-    accessibilityLabel: string;
-  } & Omit<PressableProps, 'children' | 'style'>
+  Omit<IconButtonProps, 'label'> & { accessibilityLabel: string }
 >(function HeaderCircleButton({ icon, accessibilityLabel, ...rest }, ref) {
-  return (
-    <PressableScale
-      ref={ref}
-      // 44x44 exactly, which is both the HIG minimum touch target and the
-      // size the reference draws these at -- no padding-based approximation,
-      // since RN does not grow a hit area from padding alone.
-      containerStyle={{ width: 44, height: 44 }}
-      style={{ width: 44, height: 44 }}
-      className="rounded-full bg-foreground/10 items-center justify-center"
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      {...rest}
-    >
-      <Icon as={icon} className="w-6 h-6 text-foreground" />
-    </PressableScale>
-  );
+  return <IconButton ref={ref} icon={icon} label={accessibilityLabel} {...rest} />;
 });
 
 HeaderCircleButton.displayName = 'HeaderCircleButton';

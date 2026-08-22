@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { IconButton, SURFACE } from './IconButton';
 import { Text as RNText } from 'react-native';
 import { useRouter } from 'expo-router';
 
@@ -67,25 +68,19 @@ export default function AvatarMenuTrigger({
         className="rounded-2xl p-0 overflow-hidden min-w-[220px]"
         trigger={({ ...triggerProps }) =>
           variant === 'overflow' ? (
-            <Pressable
-              {...triggerProps}
-              hitSlop={8}
-              style={{
-                minHeight: 44,
-                minWidth: 44,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-              className={className ?? ''}
-              accessibilityRole="button"
-              accessibilityLabel="More options"
-            >
-              <Icon as={MoreHorizontal} className="text-foreground w-6 h-6" />
-            </Pressable>
+            <IconButton {...triggerProps} icon={MoreHorizontal} label="More options" />
           ) : (
             <Pressable
               {...triggerProps}
-              className={`w-8 h-8 rounded-full items-center justify-center border ${
+              // DELIBERATELY NOT an IconButton. This branch is an AVATAR: it
+              // carries identity (initials, a logged-in tint and a rim) rather
+              // than naming an action, and the icon-button system's rest/hover/
+              // press backgrounds would fight its own fill. What it does take
+              // from the system is SURFACE, so it sits on the same optical line
+              // as the real icon buttons beside it -- it used to be 32pt while
+              // they were 44, and now everything on that row is 36.
+              style={{ width: SURFACE, height: SURFACE }}
+              className={`rounded-full items-center justify-center border ${
                 isLoggedIn ? 'bg-lime-100 border-lime-300' : 'bg-transparent border-border'
               } ${className ?? ''}`}
             >

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { IconButton } from './IconButton';
 import { Alert, Pressable, ScrollView, Text as RNText, TextInput, View } from 'react-native';
 import { Trash2 } from 'lucide-react-native';
-import { Icon } from '@/components/ui/icon';
 import { SettingsGroup, SettingsSubHeader } from '@/components/ui/settings-group';
 import {
   Endpoint,
@@ -168,9 +168,8 @@ function EndpointRow({
         ) : (
           <RNText className="text-[10px] text-amber-500 uppercase">Not approved</RNText>
         )}
-        <Pressable onPress={onDelete} className="p-1 -mr-1 active:opacity-60">
-          <Icon as={Trash2} className="w-4 h-4 text-destructive/70" />
-        </Pressable>
+        {/* Bare: it sits on a card's own header row, not in a bar. */}
+        <IconButton icon={Trash2} label="Delete endpoint" surface="none" onPress={onDelete} />
       </View>
 
       <Field value={name} onChangeText={setName} onBlur={commit} placeholder="Untitled" />

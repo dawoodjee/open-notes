@@ -1,9 +1,9 @@
 import React from 'react';
-import { Alert, Pressable, View } from 'react-native';
+import { IconButton } from './IconButton';
+import { Alert, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { X } from 'lucide-react-native';
 import { HStack } from '@/components/ui/hstack';
-import { Icon } from '@/components/ui/icon';
 
 /**
  * Shared chrome for the two screens that can block the whole app after
@@ -55,15 +55,12 @@ export function KeyStepScreen({
     // but an X pinned to the top would sit under the status bar without this.
     <SafeAreaView style={{ flex: 1 }} edges={['top']}>
       <HStack className="justify-end px-4 py-3">
-        <Pressable
-          onPress={onCancel}
+        <IconButton
+          icon={X}
+          label="Sign out and leave setup"
           disabled={cancelDisabled}
-          className="p-1.5 rounded-full active:bg-muted"
-          accessibilityRole="button"
-          accessibilityLabel="Sign out and leave setup"
-        >
-          <Icon as={X} className="text-muted-foreground w-5 h-5" />
-        </Pressable>
+          onPress={onCancel}
+        />
       </HStack>
 
       {/* The centring wrapper lives here rather than in each screen -- it was

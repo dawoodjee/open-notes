@@ -7,14 +7,15 @@ import {
   // The API, not the lucide glyph of the same name imported below. Built into
   // React Native, so sharing needs no new dependency.
   Share as RNShare,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import RichEditor from './RichEditor';
+import { GROUP_GAP, IconButton, IconButtonGroup } from './IconButton';
 
 // Gluestack UI Primitives
 import { HStack } from '@/components/ui/hstack';
 import { VStack } from '@/components/ui/vstack';
-import { Pressable } from '@/components/ui/pressable';
 import { Icon } from '@/components/ui/icon';
 import { Box } from '@/components/ui/box';
 
@@ -185,33 +186,26 @@ export default function NoteEditorPane({
           >
             <HStack className="items-center space-x-1">
               {/* Mobile Back Button */}
-              <Pressable
-                onPress={onBackToList}
-                className="md:hidden flex-row items-center"
-              >
-                <Icon as={ChevronLeft} className="text-muted-foreground w-6 h-6" />
-              </Pressable>
+              <View className="md:hidden">
+                <IconButton icon={ChevronLeft} label="Back to list" onPress={onBackToList} />
+              </View>
 
               {/* Desktop Sidebar Tuck/Untuck Toggle */}
-              <Pressable
-                onPress={onToggleSidebar}
-                className="hidden md:flex p-1.5 rounded-md hover:bg-muted"
-              >
-                <Icon as={Menu} className="text-muted-foreground w-5 h-5" />
-              </Pressable>
+              <View className="hidden md:flex">
+                <IconButton icon={Menu} label="Toggle folder sidebar" onPress={onToggleSidebar} />
+              </View>
             </HStack>
 
-            {/* Header Actions */}
-            <HStack className="items-center space-x-3">
-              {/* Share Action */}
-              <Pressable
-                onPress={handleShare}
-                className="p-1.5 rounded-full hover:bg-muted"
-                accessibilityRole="button"
-                accessibilityLabel="Share this note"
-              >
-                <Icon as={Share} className="text-muted-foreground w-5 h-5" />
-              </Pressable>
+            {/* Header Actions.
+                ONE capsule, not two adjacent circles. Share and the overflow
+                are both "act on this note", which is what merges controls --
+                and `icon-buttons-editor-accent.png` draws exactly this pair as
+                a single capsule beside a lone round Back. Both were
+                `hover:bg-muted` with NO press state before, so on a phone or an
+                iPad they had no visual feedback whatsoever. */}
+            <HStack className="items-center" style={{ gap: GROUP_GAP }}>
+            <IconButtonGroup>
+              <IconButton icon={Share} label="Share this note" onPress={handleShare} />
 
               {/* More Options (...) Menu */}
               <UIComponentsMenu
@@ -230,12 +224,9 @@ export default function NoteEditorPane({
                 // carries data-[disabled=true]:opacity-40 to match.
                 disabledKeys={apiGateOpen ? [] : ['api-visibility']}
                 trigger={({ ...triggerProps }) => (
-                  <Pressable
-                    {...triggerProps}
-                    className="p-1.5 rounded-full hover:bg-muted mr-2"
-                  >
-                    <Icon as={MoreVertical} className="text-muted-foreground w-5 h-5" />
-                  </Pressable>
+                  // IconButton forwards the ref the Menu needs to position
+                  // its popover.
+                  <IconButton {...triggerProps} icon={MoreVertical} label="More options" />
                 )}
               >
                 {/* The label states what the note IS, not what tapping will
@@ -290,10 +281,13 @@ export default function NoteEditorPane({
                   </MenuItemLabel>
                 </MenuItem>
               </UIComponentsMenu>
+            </IconButtonGroup>
 
-              {/* Desktop Avatar */}
-              <AvatarMenuTrigger className="hidden md:flex" />
-            </HStack>
+            {/* Desktop Avatar -- OUTSIDE the capsule. It is identity, not an
+                action on this note, so it does not belong in a group whose
+                meaning is "act on this note". */}
+            <AvatarMenuTrigger className="hidden md:flex" />
+          </HStack>
           </HStack>
 
           {/* Editor Detail Pane */}

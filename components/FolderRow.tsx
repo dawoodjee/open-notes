@@ -1,13 +1,13 @@
 import React, { useCallback } from 'react';
+import { IconButton, SURFACE } from './IconButton';
 import { Text as RNText, View, Platform } from 'react-native';
-import Animated, {
+import {
   useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 
-import { Pressable } from '@/components/ui/pressable';
 import { Icon } from '@/components/ui/icon';
 import { PressableScale } from './PressableScale';
 import { ChevronRight, ChevronUp, ChevronDown, Folder as FolderIcon, Trash2, Notebook, Scroll } from 'lucide-react-native';
@@ -211,22 +211,22 @@ export function FolderRow({
         // folder, tapping the chevron EXPANDS it. Apple Notes makes the same
         // split, and conflating them means you cannot look inside a parent
         // without navigating away from where you are.
-        <Pressable
+        <IconButton
+          icon={ChevronRight}
+          label={`${isExpanded ? 'Collapse' : 'Expand'} ${label}`}
+          // Bare: a filled circle here would read as a button sitting ON the
+          // row rather than part of it. It still gets the press inset, which
+          // it never had before -- this was a plain Pressable with no pressed
+          // state at all.
+          surface="none"
+          glyphStyle={chevronStyle}
           onPress={onToggleExpanded}
-          hitSlop={8}
-          style={{ minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' }}
-          accessibilityRole="button"
-          accessibilityLabel={`${isExpanded ? 'Collapse' : 'Expand'} ${label}`}
-        >
-          <Animated.View style={chevronStyle}>
-            <Icon as={ChevronRight} className="w-4 h-4 text-muted-foreground" />
-          </Animated.View>
-        </Pressable>
+        />
       ) : (
         // Keeps every row's content on the same vertical line whether or not
-        // it has a chevron. Without it, leaf rows' counts sit 44px further
-        // right than their siblings'.
-        <View style={{ width: 44 }} />
+        // it has a chevron. Without it, leaf rows' counts sit a whole control
+        // width further right than their siblings'.
+        <View style={{ width: SURFACE }} />
       )}
     </View>
   );
@@ -253,21 +253,17 @@ function ReorderButton({
   const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
 
   return (
-    <Pressable
-      onPress={disabled ? undefined : onPress}
+    <IconButton
+      icon={direction === -1 ? ChevronUp : ChevronDown}
+      label={label}
+      // Bare for the same reason as the chevron: these live inside the row.
+      surface="none"
+      // The animated fade between enabled and disabled is this control's own
+      // -- IconButton dims a disabled glyph instantly, and these two flip
+      // constantly as rows move, so the crossfade is worth keeping.
+      glyphStyle={style}
       disabled={disabled}
-      hitSlop={4}
-      style={{ minHeight: 44, minWidth: 36, alignItems: 'center', justifyContent: 'center' }}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled }}
-    >
-      <Animated.View style={style}>
-        <Icon
-          as={direction === -1 ? ChevronUp : ChevronDown}
-          className="w-5 h-5 text-foreground"
-        />
-      </Animated.View>
-    </Pressable>
+      onPress={onPress}
+    />
   );
 }

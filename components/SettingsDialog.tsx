@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
+import { IconButton } from './IconButton';
 import { ScrollView, Text as RNText, View } from 'react-native';
 import {
   Modal,
   ModalBackdrop,
   ModalContent,
-  ModalCloseButton,
 } from '@/components/ui/modal';
 import { Pressable } from '@/components/ui/pressable';
 import { HStack } from '@/components/ui/hstack';
@@ -129,9 +129,11 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
               title="Settings"
               icon={SettingsIcon}
               right={
-                <ModalCloseButton>
-                  <Icon as={X} className="text-muted-foreground w-5 h-5" />
-                </ModalCloseButton>
+                // Not ModalCloseButton: that closes through the modal's own
+                // context and would skip handleClose, leaving the settings view
+                // parked on a sub-screen the next time it opens. Same reasoning
+                // as the X in ManageAccountDialog.
+                <IconButton icon={X} label="Close" onPress={handleClose} />
               }
             />
 

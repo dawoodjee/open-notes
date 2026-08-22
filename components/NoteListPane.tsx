@@ -1,13 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { IconButton } from './IconButton';
 import { SectionList, Text as RNText, View, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Gluestack UI Primitives
 import { HStack } from '@/components/ui/hstack';
 import { VStack } from '@/components/ui/vstack';
-import { Pressable } from '@/components/ui/pressable';
 import { Input, InputField, InputSlot, InputIcon } from '@/components/ui/input';
-import { Icon } from '@/components/ui/icon';
 import { Menu, MenuItem, MenuItemLabel } from '@/components/ui/menu';
 
 // Lucide Icons
@@ -317,20 +316,15 @@ export default function NoteListPane({
             {!useCompactHeader ? (
               // WIDE LAYOUT (iPad both orientations, desktop): the reveal
               // control, INLINE with the title rather than stacked above it.
-              <Pressable
+              <IconButton
+                icon={PanelLeft}
+                label="Show folders"
+                // Bare: it sits inline with the large title rather than in a
+                // bar of its own, so a filled circle would read as chrome
+                // dropped into the middle of a heading.
+                surface="none"
                 onPress={onOpenFolders ?? onToggleSidebar}
-                hitSlop={8}
-                style={{
-                  minHeight: 44,
-                  minWidth: 44,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="Show folders"
-              >
-                <Icon as={PanelLeft} className="w-6 h-6 text-foreground" />
-              </Pressable>
+              />
             ) : null}
 
             <VStack className="flex-1 min-w-0">
@@ -536,12 +530,9 @@ export default function NoteListPane({
           />
         </Input>
 
-        <Pressable
-          onPress={onCreateNote}
-          className="w-10 h-10 rounded-full bg-lime-500 items-center justify-center active:bg-lime-600 shadow-sm shrink-0"
-        >
-          <Icon as={SquarePen} className="text-on-accent w-5 h-5" />
-        </Pressable>
+        {/* The one primary action on this screen: a filled accent circle
+            standing alone, never absorbed into a capsule. */}
+        <IconButton icon={SquarePen} label="New note" variant="accent" onPress={onCreateNote} />
       </View>
       )}
 
@@ -645,19 +636,10 @@ function sharedFolderId(
  * primitive, and this is on its conversion list.
  */
 function DoneButton({ onPress }: { onPress: () => void }) {
-  return (
-    <PressableScale
-      onPress={onPress}
-      hitSlop={8}
-      containerStyle={{ width: 36, height: 36 }}
-      style={{ width: 36, height: 36 }}
-      className="rounded-full bg-foreground/10 items-center justify-center"
-      accessibilityRole="button"
-      accessibilityLabel="Done selecting"
-    >
-      <Icon as={Check} className="w-5 h-5 text-foreground" />
-    </PressableScale>
-  );
+  // `variant="accent"` per icon-buttons-editor-accent.png, whose filled accent
+  // circle with a checkmark is exactly this control. It was a plain grey circle
+  // before, which made confirming a bulk selection look like any other action.
+  return <IconButton icon={Check} label="Done selecting" variant="accent" onPress={onPress} />;
 }
 
 /** A floating bulk-action capsule. Local; Stage 12's conversion list. */
