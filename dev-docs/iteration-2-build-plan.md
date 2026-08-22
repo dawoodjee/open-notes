@@ -892,6 +892,49 @@ a rule that is already useful.
 
 ---
 
+## Stage 12 — closed 2026-08-22
+
+All seven sub-phases merged. What the stage set out to do and what it actually
+took:
+
+| | outcome |
+|---|---|
+| 12a icon buttons | the shared primitive; every icon button converted |
+| 12b web boots | to its own error screen — superseded by 12g |
+| 12c desktop chrome | matrix, bar, harness, then **wired live** once 12g unblocked it |
+| 12d mobile chrome | nav bar, keyboard-docked context bar, heading seed, Move Note |
+| 12e iPad chrome | its own bar and style grid; portrait + landscape on device |
+| 12f find & replace | both platforms, haptic vocabulary, this audit |
+| 12g web unblock | **not in the original plan** — web reaches the real app |
+
+**Two plan assumptions turned out wrong, both recorded where they bit.** iPad
+was going to inherit desktop's grouping; the screenshot said otherwise and won.
+And 12c's blocker — "wiring the bar is 100% unverifiable" — was true when
+written and dissolved the moment web could open a database, which is why 12g
+exists at all.
+
+**Standing state after the stage:**
+
+- **Native rebuild owed.** `react-native-pulsar` and `expo-blur` are in
+  `package.json` and neither is in the current binary. Haptics degrade to
+  silence; `expo-blur` is not imported anywhere yet (Glass is an unbuilt theme).
+  `expo prebuild` + `pod install` + `expo run:ios`, `LANG` set to UTF-8.
+- **Simulator Automation permission** is being granted after this stage;
+  rotation needed doing by hand throughout.
+- **Split View** is asserted by width tests, not driven on device — injected
+  touches cannot drag out of the Dock.
+- **Undo/redo do not exist** in `react-native-enriched-html`. Retry at iteration
+  end on a `setValue` snapshot stack; the open question is the caret.
+- **Five formatting controls dim permanently** — highlight, text colour, indent,
+  outdent, table — plus `dashedList` on the desktop panel. Same retry.
+- **`folderPaneShowsCollapse` is unimplemented**: with the list hidden and
+  folders shown, hiding the folders takes two steps. No reference exists for a
+  folder-pane control.
+- **Web is session-only.** Export/reimport is Stage 13's, so a web session's
+  notes still cannot leave the tab.
+
+---
+
 ### Stage 12f — Find & Replace, haptics, stage audit ✅ DONE (2026-08-22), branch `stage-12f-find-replace`
 
 **The three-way contention at the bottom of a phone is decided, not
