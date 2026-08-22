@@ -892,6 +892,24 @@ a rule that is already useful.
 
 ---
 
+### Stage 12d (leftover) — Move Note in the editor menu ✅ DONE (2026-08-22), branch `stage-12d-move-note`
+
+The one item 12d's plan named and 12d did not build. Wired to **Stage 11's**
+`FolderPickerSheet`, not a second picker: a note filed from the editor and one
+filed from the list now go through the same screen, the same folder ordering and
+the same inline "New Folder". That is the reason to reuse it — not that it saves
+work.
+
+Desktop is excluded for the reason `NoteListPane` already excludes it: there the
+picker is a flyout anchored to the click, and a menu row has no anchor to give
+it. Desktop files notes from the list, where the anchor exists.
+
+**Verified on iPhone 17 Pro:** menu → Move Note → picker showing the note's own
+title, All Notes and Skills correctly dimmed → chose Therapy → the list row now
+reads "Therapy".
+
+---
+
 ### Stage 12c — desktop top bar + minimize/restore ✅ DONE (2026-08-22), branches `stage-12c-desktop-chrome` then `stage-12c-desktop-wiring`
 
 **The blocker is gone and the bar is wired.** 12c built the matrix, the bar and

@@ -35,10 +35,23 @@ import {
 } from '@/components/ui/menu';
 
 // Lucide Icons
-import { Check, ChevronLeft, Eye, EyeOff, Menu, MoreVertical, Share, Trash2, Undo2 } from 'lucide-react-native';
+import {
+  Check,
+  ChevronLeft,
+  Eye,
+  EyeOff,
+  FolderInput,
+  Menu,
+  MoreVertical,
+  Share,
+  Trash2,
+  Undo2,
+} from 'lucide-react-native';
 
 // Custom Types
-import { Note, noteToPlainText } from '@/types/note';
+import { Note, noteToPlainText, parseNoteContent } from '@/types/note';
+import type { Folder } from '@/types/folder';
+import { FolderPickerSheet } from './FolderPickerSheet';
 import AvatarMenuTrigger from './AvatarMenuTrigger';
 import { useApiGateOpen } from '@/lib/plaintext/useApiGate';
 
@@ -53,6 +66,10 @@ export interface NoteEditorPaneProps {
   onNoteChange: (html: string) => void;
   initialEditorScrollOffset?: number;
   onEditorScrollOffsetChange?: (offset: number) => void;
+  /** For the overflow menu's Move Note. Stage 11's picker, not a second one. */
+  folders: Folder[];
+  onMoveNote: (id: string, folderId: string | null) => void;
+  onCreateFolder: (parentId: string | null, name: string) => void | Promise<void>;
   /** Which pane controls the editor owns right now. From `paneChrome()`. */
   chrome: PaneChrome;
   /** Brings back the pane immediately to the editor's left. */
@@ -73,6 +90,9 @@ export default function NoteEditorPane({
   onNoteChange,
   initialEditorScrollOffset,
   onEditorScrollOffsetChange,
+  folders,
+  onMoveNote,
+  onCreateFolder,
   chrome,
   onRestorePanes,
   onNewNote,
@@ -109,8 +129,10 @@ export default function NoteEditorPane({
    * first would mean building a layout twice and throwing one away. Until then
    * a wide iPad keeps the bordered row it already has.
    */
-  const useDesktopBar = Platform.OS === 'web' && !useCompact;
+  const isDesktop = Platform.OS === 'web';
+  const useDesktopBar = isDesktop && !useCompact;
   const [textStyleOpen, setTextStyleOpen] = useState(false);
+  const [movingNote, setMovingNote] = useState(false);
 
   // Closing when the note changes is not tidiness: the panel reports the
   // caret's styles, and the caret moved to a different document.
@@ -250,6 +272,29 @@ export default function NoteEditorPane({
           {visibilityLabel}
         </MenuItemLabel>
       </MenuItem>
+
+      {/*
+        MOVE NOTE, wired to Stage 11's folder picker rather than a second one.
+        The list pane raises exactly this sheet from its own context menu, so a
+        note filed from the editor and a note filed from the list go through the
+        same screen, the same folder ordering and the same inline "New Folder" --
+        which is the reason to reuse it, not that it saves work.
+
+        Desktop is excluded for the same reason NoteListPane excludes it: there
+        the picker is a flyout anchored to the click, and this menu has no anchor
+        to give it. Desktop files notes from the list, where that anchor exists.
+      */}
+      {!isDesktop ? (
+        <MenuItem
+          key="move"
+          textValue="Move Note"
+          onPress={() => setMovingNote(true)}
+          className="px-4 py-3 flex-row items-center gap-3"
+        >
+          <Icon as={FolderInput} className="text-muted-foreground w-4.5 h-4.5" />
+          <MenuItemLabel className="text-base text-foreground">Move Note</MenuItemLabel>
+        </MenuItem>
+      ) : null}
 
       <MenuSeparator />
 
@@ -445,6 +490,22 @@ export default function NoteEditorPane({
               textStyleTop={BAR_HEIGHT - 8}
             />
           </Box>
+
+          {movingNote ? (
+            <FolderPickerSheet
+              isOpen
+              label={parseNoteContent(selectedNote.body).title}
+              noteCount={1}
+              folders={folders}
+              currentFolderId={selectedNote.folderId}
+              onClose={() => setMovingNote(false)}
+              onSelect={(folderId) => {
+                onMoveNote(selectedNote.id, folderId);
+                setMovingNote(false);
+              }}
+              onCreateFolder={onCreateFolder}
+            />
+          ) : null}
         </>
       ) : (
         <VStack

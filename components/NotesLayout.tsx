@@ -1161,6 +1161,9 @@ export default function NotesLayout() {
           onNoteChange={handleNoteChange}
           initialEditorScrollOffset={restoredEditorScrollRef.current}
           onEditorScrollOffsetChange={handleEditorScrollChange}
+          folders={folders}
+          onMoveNote={(id, folderId) => handleMoveNotes([id], folderId)}
+          onCreateFolder={handleCreateFolder}
           chrome={chrome}
           onRestorePanes={() => setIsSidebarTucked(false)}
           onNewNote={handleCreateNotePressed}
