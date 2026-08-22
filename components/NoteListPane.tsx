@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IconButton } from './IconButton';
-import { SectionList, Text as RNText, View, Platform } from 'react-native';
+import { SectionList, Text as RNText, TextInput, View, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Gluestack UI Primitives
@@ -76,6 +76,16 @@ export interface NoteListPaneProps {
   /** Hides the list into the editor. Desktop only -- there is nowhere for the
    *  editor's restore control to live on a phone. */
   onCollapseList?: () => void;
+  /**
+   * Bumped by the iPad bar's search circle to put the caret in this pane's
+   * search field.
+   *
+   * A COUNTER, not a boolean. "Focus the search field" is an event, and a
+   * boolean would only fire once -- pressing search, dismissing the keyboard,
+   * and pressing search again would do nothing the second time, because the
+   * flag was already true. The value itself is never read.
+   */
+  focusSearchSignal?: number;
   /** True on phones. Decides the header shape -- see the note on the header. */
   useCompactHeader: boolean;
 }
@@ -105,6 +115,7 @@ export default function NoteListPane({
   onToggleSidebar,
   chrome,
   onCollapseList,
+  focusSearchSignal,
   useCompactHeader,
 }: NoteListPaneProps) {
   // The bottom bar is one of the few places styled with inline `style` rather
@@ -186,6 +197,14 @@ export default function NoteListPane({
   const [moveFlyoutAnchor, setMoveFlyoutAnchor] = useState<{ x: number; y: number } | null>(null);
 
   const isDesktop = Platform.OS === 'web';
+
+  const searchRef = useRef<TextInput>(null);
+  useEffect(() => {
+    // Skipped on mount: `focusSearchSignal` starts at 0 and raising the
+    // keyboard the moment the list appears would be startling.
+    if (!focusSearchSignal) return;
+    searchRef.current?.focus();
+  }, [focusSearchSignal]);
 
   /**
    * True when the editor's floating bar is on screen carrying search and New
@@ -581,6 +600,10 @@ export default function NoteListPane({
             <InputIcon as={Search} className="text-muted-foreground ml-1 shrink-0" />
           </InputSlot>
           <InputField
+            // Cast because Gluestack types InputField's ref as its own props
+            // object rather than the TextInput it forwards to. The instance at
+            // runtime is a TextInput, which is what `.focus()` needs.
+            ref={searchRef as any}
             placeholder="Search"
             value={searchQuery}
             onChangeText={onSearchChange}

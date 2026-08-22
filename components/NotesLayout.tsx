@@ -65,6 +65,9 @@ import { isBlankNote, noteToPlainText } from '@/types/note';
 import { BootSpinner } from '@/components/BootSpinner';
 import { BACKGROUND, useTheme } from '@/contexts/ThemeContext';
 import { paneChrome } from '@/lib/layout/paneChrome';
+// The same constant the editor's chrome decision uses. Two literals meaning
+// almost the same thing would drift the first time one was tuned.
+import { WIDE_LAYOUT_MIN_WIDTH } from '@/lib/layout/editorChrome';
 
 // How long the launch gate below will wait before giving up and painting
 // whatever it has. Deliberately generous -- it is a failsafe for a path that
@@ -83,6 +86,8 @@ export default function NotesLayout() {
   const { notes, selectedNoteId, searchQuery } = state;
 
   const [isSidebarTucked, setIsSidebarTucked] = useState<boolean>(false);
+  /** Bumped to move focus into the list's search field. See NoteListPane. */
+  const [focusSearchSignal, setFocusSearchSignal] = useState(0);
 
   // --- Folders -------------------------------------------------------------
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -100,7 +105,7 @@ export default function NotesLayout() {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   // 768 is the `md:` breakpoint the rest of the app already uses. Above it,
   // both the folder pane and the list are on screen together.
-  const isWideLayout = windowWidth >= 768;
+  const isWideLayout = windowWidth >= WIDE_LAYOUT_MIN_WIDTH;
   const isLandscape = windowWidth > windowHeight;
 
   /**
@@ -1130,6 +1135,7 @@ export default function NotesLayout() {
             useCompactHeader={useCompactHeader}
             onToggleSidebar={() => setIsFolderSidebarCollapsed((v) => !v)}
             chrome={chrome}
+            focusSearchSignal={focusSearchSignal}
             onCollapseList={
               Platform.OS === 'web' && isWideLayout
                 ? () => setIsSidebarTucked(true)
@@ -1167,6 +1173,22 @@ export default function NotesLayout() {
           chrome={chrome}
           onRestorePanes={() => setIsSidebarTucked(false)}
           onNewNote={handleCreateNotePressed}
+          onToggleMaximised={() => {
+            // "Maximise" hides BOTH panes, which is two flags here: the list is
+            // `isSidebarTucked`, the folder tree is `isFolderSidebarCollapsed`.
+            // Restoring brings back both, so the gesture is its own inverse
+            // rather than leaving you one control short of where you started.
+            const maximising = !isSidebarTucked;
+            setIsSidebarTucked(maximising);
+            setIsFolderSidebarCollapsed(maximising);
+          }}
+          onFocusSearch={() => {
+            // Search lives in the list pane, so revealing it is part of the
+            // action -- the alternative is a button that does nothing whenever
+            // the panes happen to be hidden.
+            setIsSidebarTucked(false);
+            setFocusSearchSignal((n) => n + 1);
+          }}
           searchQuery={searchQuery}
           onSearchChange={(query) =>
             dispatch({ type: 'SET_SEARCH_QUERY', payload: { query } })

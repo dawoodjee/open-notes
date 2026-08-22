@@ -13,6 +13,7 @@ import './paneChrome.test';
 import './toolbarContext.test';
 import './plainTextBody.test';
 import './paragraphStyle.test';
+import './editorChrome.test';
 import { report } from './harness';
 
 report();

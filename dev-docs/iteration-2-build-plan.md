@@ -892,6 +892,77 @@ a rule that is already useful.
 
 ---
 
+### Stage 12e — iPad chrome ✅ DONE (2026-08-22), branch `stage-12e-ipad-chrome`
+
+**Portrait and landscape verified on device.** Adam rotated the simulator by
+hand — `osascript` returns *"Not authorized to send Apple events to System
+Events. (-1743)"* and the Automation permission is being fixed at the end of the
+stage.
+
+**Split View is verified by test, not on device, and that is a hard limit.**
+Injected touches reveal the Dock but cannot drag an app out of it: that is a
+`UIDragInteraction`, and injected touches never reach UIKit's recognisers — the
+same root cause as the RNGH swipe problem from Stage 11. So the requirement is
+met the other way. What Split View actually does to this app is make its window
+narrow; every other consequence follows. `lib/layout/editorChrome.ts` decides
+the chrome from width and platform, and `tests/editorChrome.test.ts` asserts it
+at the real Split View widths — **320pt and 507pt get the PHONE chrome even
+though `isPad` is true**, which is the trap, and 880pt keeps the iPad bar. The
+narrow path is separately exercised live on the iPhone all session.
+
+**The plan's prose was wrong and the screenshot won.** The plan said iPad would
+inherit desktop's left/centre/right grouping. `ipad-collapsed-groups.jpeg` draws
+something else: one capsule on the left (maximise, compose), four SEPARATE
+circles on the right (Aa, Share, more, search), no centre zone, and no inline
+search field. `PadTopBar` is its own component rather than a `variant` of
+`DesktopTopBar`, because a variant switch around two layouts that share only
+their height is not a shared component.
+
+**Search is a circle, not a field**, and that is a Split View decision: an iPad
+pane can be 320pt wide and a permanently-expanded field would take most of it.
+Pressing it reveals the note list and puts the caret in that list's search
+field — revealing is part of the action, or it would be a button that does
+nothing whenever the panes happen to be hidden. Driven by a COUNTER, not a
+boolean: "focus the search field" is an event, and a boolean would fire once and
+then never again.
+
+**Collapsible-first**, as the plan asked: the maximise control is always present
+and its glyph flips, unlike desktop's restore which only appears once something
+is hidden. On an iPad, hiding the panes is the ordinary way to get room, not a
+recovery from having hidden them.
+
+**`PadStylePanel` is a GRID**, where desktop's is a vertical list —
+`ipad-expanded-groups.jpeg`. Paragraph styles are pills in a scrolling row,
+then B/I/U/S, then marks + lists, then nesting + quote. A vertical list of eight
+rows is fine under a mouse and taller than the pane under a thumb in Split View.
+
+**Two bugs found by putting it on the device:**
+
+*The bars sat under the status bar.* Both floating bars pin to `top: 0` and
+neither applied the safe-area inset — invisible on web, where it is zero, and
+immediately obvious on an iPad where the clock runs across the top. Both take a
+`topInset` now.
+
+*The pill row went blank whenever a list was active.* The pills were driven by
+`activeParagraphStyle`, which treats lists as paragraph styles, so a note with a
+bullet in it highlighted nothing at all. A bulleted list has a text style like
+any other line — `activeTextStyle` is the separate derivation, with tests. The
+desktop panel keeps the original, because there lists ARE rows in the same list
+and one tick across all of them is right.
+
+Also: the active pill is scrolled into view on open, from its own `onLayout`
+rather than an index-times-width guess. Without it the row always started at
+Title and the highlighted pill — on a Body note, the common case — sat half off
+the right edge the moment the panel appeared.
+
+**Verified on iPad Pro 13 in landscape:** the bar clears the status bar; the
+`Aa` grid renders with Body highlighted and the active list accented while
+highlight/colour/indent/outdent dim; maximise hides both panes and the glyph
+flips; the search circle restores the list and focuses its field. `tsc` clean,
+131/131, lint at the 8-warning baseline.
+
+---
+
 ### Stage 12d (leftover) — Move Note in the editor menu ✅ DONE (2026-08-22), branch `stage-12d-move-note`
 
 The one item 12d's plan named and 12d did not build. Wired to **Stage 11's**

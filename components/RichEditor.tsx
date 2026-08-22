@@ -20,6 +20,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { toEnrichedHtml } from '@/lib/notes/htmlMigrate';
 import { FormatBar } from './FormatBar';
 import { TextStylePanel } from './TextStylePanel';
+import { PadStylePanel } from './PadStylePanel';
 import { BLOCK_STYLES, paragraphStyleToggles } from '@/lib/notes/paragraphStyle';
 import { useKeyboardShown } from '@/hooks/useKeyboardShown';
 import type { ToolKey } from '@/lib/notes/toolbarContext';
@@ -80,6 +81,8 @@ export interface RichEditorProps {
   /** Distance from the top of this pane to the underside of a floating bar,
    *  so the panel hangs from it rather than from the window edge. */
   textStyleTop?: number;
+  /** Which shape of `Aa` panel this platform's chrome wants. */
+  stylePanel?: 'desktop' | 'pad';
 }
 
 /**
@@ -201,6 +204,7 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
     textStyleOpen = false,
     onCloseTextStyle,
     textStyleTop = 0,
+    stylePanel = 'desktop',
   },
   handle
 ) {
@@ -519,14 +523,25 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
           `styleState !== null` is still required: before the editor has reported
           any state the bar would render every control in its resting, unselected
           look, which is a lie about a document it has not read yet. */}
-      <TextStylePanel
-        open={textStyleOpen}
-        onClose={() => onCloseTextStyle?.()}
-        active={activeTools}
-        blocked={blockedTools}
-        onRun={runTool}
-        top={textStyleTop}
-      />
+      {stylePanel === 'pad' ? (
+        <PadStylePanel
+          open={textStyleOpen}
+          onClose={() => onCloseTextStyle?.()}
+          active={activeTools}
+          blocked={blockedTools}
+          onRun={runTool}
+          top={textStyleTop}
+        />
+      ) : (
+        <TextStylePanel
+          open={textStyleOpen}
+          onClose={() => onCloseTextStyle?.()}
+          active={activeTools}
+          blocked={blockedTools}
+          onRun={runTool}
+          top={textStyleTop}
+        />
+      )}
 
       <FormatBar
         active={activeTools}

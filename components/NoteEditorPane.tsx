@@ -18,7 +18,9 @@ import RichEditor, {
 } from './RichEditor';
 import { ChromeScrim } from './ChromeScrim';
 import { BAR_HEIGHT, DesktopTopBar } from './DesktopTopBar';
+import { PAD_BAR_HEIGHT, PadTopBar } from './PadTopBar';
 import type { PaneChrome } from '@/lib/layout/paneChrome';
+import { editorChrome } from '@/lib/layout/editorChrome';
 import { GROUP_GAP, IconButton, IconButtonGroup, SURFACE } from './IconButton';
 
 // Gluestack UI Primitives
@@ -75,6 +77,10 @@ export interface NoteEditorPaneProps {
   /** Brings back the pane immediately to the editor's left. */
   onRestorePanes: () => void;
   onNewNote: () => void;
+  /** iPad only: hide both panes, or bring them back. */
+  onToggleMaximised?: () => void;
+  /** iPad only: reveal the note list and put the caret in its search field. */
+  onFocusSearch?: () => void;
   searchQuery: string;
   onSearchChange: (next: string) => void;
 }
@@ -96,6 +102,8 @@ export default function NoteEditorPane({
   chrome,
   onRestorePanes,
   onNewNote,
+  onToggleMaximised,
+  onFocusSearch,
   searchQuery,
   onSearchChange,
 }: NoteEditorPaneProps) {
@@ -119,18 +127,30 @@ export default function NoteEditorPane({
    * clear. Derived from the same numbers the bar is laid out with rather than
    * a second literal, so the two cannot drift.
    */
-  const useCompact = useWindowDimensions().width < 768;
-
   /**
-   * The floating desktop bar replaces the bordered header row, and ONLY on web.
+   * WHICH CHROME, decided in one place: lib/layout/editorChrome.ts.
    *
-   * Not because iPad is narrower -- it is not -- but because iPad gets its own
-   * collapsible-first arrangement in 12e, and shipping the desktop bar there
-   * first would mean building a layout twice and throwing one away. Until then
-   * a wide iPad keeps the bordered row it already has.
+   * It is a module with tests rather than three ternaries here because of Split
+   * View. `Platform.isPad` stays true in a Split View pane, so "iPad gets the
+   * iPad bar" would hand a 507pt-wide pane a bar laid out for a full screen.
+   * Width has to win, and the test says so -- which is how that requirement
+   * gets checked at all, given that driving Split View from a script means a
+   * drag out of the Dock on a multitasking model iPadOS 26 rebuilt.
+   *
+   * `useWindowDimensions` reports the WINDOW, not the screen, so this responds
+   * to a Split View resize on its own.
    */
+  const chromeKind = editorChrome({
+    width: useWindowDimensions().width,
+    platform: Platform.OS === 'ios' ? 'ios' : Platform.OS === 'web' ? 'web' : 'android',
+    isPad: Platform.OS === 'ios' && Platform.isPad,
+  });
+
+  const useCompact = chromeKind === 'phone';
   const isDesktop = Platform.OS === 'web';
-  const useDesktopBar = isDesktop && !useCompact;
+  const useDesktopBar = chromeKind === 'desktop';
+  const usePadBar = chromeKind === 'pad';
+
   const [textStyleOpen, setTextStyleOpen] = useState(false);
   const [movingNote, setMovingNote] = useState(false);
 
@@ -321,7 +341,24 @@ export default function NoteEditorPane({
     >
       {selectedNote ? (
         <>
-          {useDesktopBar ? (
+          {usePadBar ? (
+            /*
+              iPAD: the same floating idea as desktop, a different arrangement.
+              `ipad-collapsed-groups.jpeg` is the reference and it wins over the
+              plan's prose, which said iPad would inherit desktop's three zones.
+            */
+            <PadTopBar
+              chrome={chrome}
+              onToggleMaximised={() => onToggleMaximised?.()}
+              onNewNote={onNewNote}
+              onShare={handleShare}
+              onSearch={() => onFocusSearch?.()}
+              canFormat={EDITOR_SUPPORTS_FORMATTING}
+              onTextStyles={() => setTextStyleOpen((v) => !v)}
+              menuTrigger={renderOverflowMenu(selectedNote)}
+              topInset={insets.top}
+            />
+          ) : useDesktopBar ? (
             /*
               DESKTOP: the bar FLOATS over the note instead of sitting above it.
 
@@ -345,6 +382,7 @@ export default function NoteEditorPane({
               canFormat={EDITOR_SUPPORTS_FORMATTING}
               onTextStyles={() => setTextStyleOpen((v) => !v)}
               onChecklist={() => editorRef.current?.run('checklist')}
+              topInset={insets.top}
             />
           ) : (
             <>
@@ -483,11 +521,23 @@ export default function NoteEditorPane({
               onScrollOffsetChange={onEditorScrollOffsetChange}
               // Clears whichever bar is floating. A wide iPad still has a real
               // bordered row above the document and needs nothing.
-              contentInsetTop={useCompact ? navBarHeight : useDesktopBar ? BAR_HEIGHT : 0}
+              contentInsetTop={
+                useCompact
+                  ? navBarHeight
+                  : useDesktopBar
+                    ? BAR_HEIGHT + insets.top
+                    : usePadBar
+                      ? PAD_BAR_HEIGHT + insets.top
+                      : 0
+              }
               textStyleOpen={textStyleOpen}
               onCloseTextStyle={() => setTextStyleOpen(false)}
               // Hangs from the underside of the bar, not from the window edge.
-              textStyleTop={BAR_HEIGHT - 8}
+              textStyleTop={(usePadBar ? PAD_BAR_HEIGHT : BAR_HEIGHT) + insets.top - 8}
+              // The two panels are different shapes -- a vertical list under a
+              // pointer, a grid under a thumb -- so the editor is told which to
+              // render rather than guessing from its own width.
+              stylePanel={usePadBar ? 'pad' : 'desktop'}
             />
           </Box>
 
