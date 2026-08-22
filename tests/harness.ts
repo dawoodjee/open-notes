@@ -63,6 +63,13 @@ export function expect<T>(actual: T) {
       const b = JSON.stringify(expected);
       if (a !== b) throw new Error(`expected ${b}, got ${a}`);
     },
+    /** For the swipe maths, which is all fractions of measured widths. */
+    toBeCloseTo(expected: number, digits = 3) {
+      const tolerance = Math.pow(10, -digits) / 2;
+      if (typeof actual !== 'number' || Math.abs(actual - expected) > tolerance) {
+        throw new Error(`expected ~${expected} (${digits}dp), got ${show(actual)}`);
+      }
+    },
     toContain(needle: string) {
       if (typeof actual !== 'string' || !actual.includes(needle)) {
         throw new Error(`expected ${show(actual)} to contain ${show(needle)}`);
