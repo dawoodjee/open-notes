@@ -5,7 +5,7 @@
 // load-order bug waiting to happen.)
 import 'react-native-get-random-values';
 
-import * as SecureStore from 'expo-secure-store';
+import * as SecureStore from './secureStorage';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/ciphers/utils.js';
@@ -75,7 +75,7 @@ const LEGACY_VAULT_KEY = 'notes.vault.v1';
  * foreground app; the guarantee is genuinely weaker, and the Security screen
  * copy must not claim otherwise.
  */
-const SECURE_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
+const SECURE_STORE_OPTIONS: SecureStore.SecureStorageOptions = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
 

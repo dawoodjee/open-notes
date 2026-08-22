@@ -1,11 +1,16 @@
 /**
  * DEV-ONLY DESKTOP-CHROME HARNESS. Reachable at /dev-chrome. Not linked.
  *
- * WHY IT EXISTS. Stage 12b got web booting, but only as far as the app's own
- * BootFailureScreen: `expo-secure-store` has no web implementation so there is
- * no device key, and `@powersync/react-native` + op-sqlite do not exist on web
- * at all. Both belong to Stage 13's Phase 0, including the unsolved at-rest
- * question. So there is no way to put a REAL note behind the desktop bar yet.
+ * WHY IT EXISTS. Stage 12b got web booting only as far as the app's own
+ * BootFailureScreen -- no keychain on web, no native SQLite -- so there was no
+ * way to put a REAL note behind the desktop bar. Stage 12g fixed that: web now
+ * runs the real app against a memory-only database.
+ *
+ * The harness stays, and is still the right place to work on chrome. A fixture
+ * gives every state on demand -- both panes hidden, a long scrolled document,
+ * an overlapped title -- where the real app gives whichever one the current
+ * data happens to produce. It also renders when the database does not open,
+ * which is exactly when a chrome bug is hardest to look at.
  *
  * Everything this stage has to prove is about the bar and the pane matrix, not
  * about the data:

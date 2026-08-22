@@ -13,6 +13,7 @@ import {
   unlockWithDeviceKey,
   isUnlocked as vaultIsUnlocked,
 } from '@/lib/crypto/vault';
+import { withTimeout } from '@/lib/auth/withTimeout';
 import { wipeLocalDatabase } from '@/lib/powersync/migrateToEncrypted';
 import { closePowerSync, initPowerSync } from '@/lib/powersync/db';
 
@@ -52,6 +53,14 @@ interface VaultContextValue {
   unlock: () => Promise<void>;
   lock: () => void;
   updateLockSettings: (next: LockSettings) => Promise<void>;
+  /**
+   * Try the boot again, changing nothing. The FIRST thing offered on a
+   * failure, because most of what can fail here is transient -- a keychain
+   * read that lost a race with the OS unlocking the device, a database still
+   * held by a process that is on its way out. Non-destructive, so it costs
+   * nothing to try before the option that deletes notes.
+   */
+  retryBoot: () => Promise<void>;
   /** Last resort out of a failed boot: throw the local database away and
    *  start over. Notes owned by an account come back from the server. */
   resetLocalData: () => Promise<void>;
@@ -99,11 +108,31 @@ async function loadKeys(): Promise<boolean> {
   return true;
 }
 
+/**
+ * How long the boot may take before it is treated as failed.
+ *
+ * FOUND, NOT GUESSED. Deleting the PowerSync worker asset on web and reloading
+ * produced neither an error nor a rejection -- the database open simply never
+ * settled, so `status` stayed 'loading' and the app sat on the boot spinner
+ * forever. That is the same dead end this whole area exists to remove, one
+ * layer down: a spinner with no exit is no better than an error screen with no
+ * exit. A failure that hangs has to become a failure that shows.
+ *
+ * Generous on purpose. A cold native launch here settles in well under a
+ * second, and the slowest legitimate path -- the Stage 6 plaintext migration
+ * over a large database -- is still seconds, not tens of them.
+ */
+const BOOT_TIMEOUT_MS = 20000;
+
 /** Everything between "app launched" and "note UI can mount", in one place so
  *  the cold-launch path and the unlock path can't drift apart. */
 async function bootVault(): Promise<void> {
   await loadKeys();
-  await initPowerSync();
+  await withTimeout(
+    initPowerSync(),
+    BOOT_TIMEOUT_MS,
+    'Opening the local database'
+  );
 }
 
 export function VaultProvider({ children }: { children: React.ReactNode }) {
@@ -164,6 +193,37 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  /**
+   * Re-run the boot exactly as it ran at launch.
+   *
+   * WHY THIS EXISTS: without it the failure screen offered precisely one
+   * action, and that action deleted every unsynced note on the device. An
+   * error page whose only exit is destructive is one people either take
+   * (losing data they did not have to lose) or refuse (leaving the app dead),
+   * and both outcomes are the screen's fault rather than the error's.
+   *
+   * initPowerSync() is safe to call again because it assigns its singleton
+   * only after init() resolves -- a failed boot leaves nothing half-open for
+   * this to trip over. See db.ts.
+   */
+  const retryBoot = useCallback(async () => {
+    setStatus('loading');
+    setBootError(null);
+    try {
+      // Non-destructive: this closes the handle and forgets a hung init, it
+      // does not touch the files. Without it a retry after a HANG would join
+      // the same stuck promise and time out again for the same reason.
+      await closePowerSync();
+      await bootVault();
+      setHasBooted(true);
+      setStatus('unlocked');
+    } catch (err) {
+      console.error('Vault boot retry failed:', err);
+      setBootError(err instanceof Error ? `${err.message}\n\n${err.stack ?? ''}` : String(err));
+      setStatus('failed');
+    }
   }, []);
 
   const unlock = useCallback(async () => {
@@ -276,6 +336,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         bootError,
         unlock,
         lock,
+        retryBoot,
         updateLockSettings,
         resetLocalData,
       }}

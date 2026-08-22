@@ -33,6 +33,39 @@ config.resolver.blockList = [
   new RegExp(`^${path.resolve(__dirname, '.claude').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/.*`),
 ];
 
+/**
+ * `@powersync/web` on web has to be the React-Native-Web build, not the default one.
+ *
+ * The SDK ships two entry points and picks between them with an export CONDITION
+ * (`"react-native-web": "./dist/index.react_native_web.js"`). Metro does not apply
+ * that condition on the web platform, so it resolved the default build -- which
+ * spawns its database worker with `new Worker(new URL('./worker.js', import.meta.url))`.
+ * Metro emits a classic script, not an ES module, so the page died at parse time
+ * with `Cannot use 'import.meta' outside a module` before a line of app code ran.
+ *
+ * The React-Native-Web build is the SDK's own answer to exactly this: a rollup
+ * plugin replaces that worker spawner with a stub that throws a readable error
+ * instead. `lib/powersync/openDatabase.web.ts` runs the database in the tab
+ * (`useWebWorker: false`, `enableMultiTabs: false`), so the stub is never reached.
+ *
+ * A targeted alias rather than adding 'react-native' to `unstable_conditionNames`:
+ * that flag is global, and flipping every package on web onto its React Native
+ * entry point to fix one of them is a much larger change than the problem.
+ */
+const powerSyncWebEntry = path.resolve(
+  __dirname,
+  'node_modules/@powersync/web/dist/index.react_native_web.js'
+);
+
+const defaultResolveRequest = config.resolver.resolveRequest;
+
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (platform === 'web' && moduleName === '@powersync/web') {
+    return { type: 'sourceFile', filePath: powerSyncWebEntry };
+  }
+  return (defaultResolveRequest ?? context.resolveRequest)(context, moduleName, platform);
+};
+
 module.exports = withNativewind(config, {
   input: './global.css',
   inlineRem: 16,

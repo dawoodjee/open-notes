@@ -10,6 +10,8 @@ import { X, LogOut, UserRound } from 'lucide-react-native';
 
 import AccountField, { FieldTone } from '@/components/AccountField';
 import { SettingsGroup, SettingsHeader, SettingsRow } from '@/components/ui/settings-group';
+import { SyncRecoverySection } from '@/components/SyncRecoverySection';
+import { useVault } from '@/contexts/VaultContext';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfile } from '@/lib/auth/useProfile';
@@ -81,6 +83,10 @@ type FieldStatus = 'idle' | 'checking' | 'available' | 'taken' | 'saving' | 'sav
 export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDialogProps) {
   const { session } = useAuth();
   const { profile, isLoading, error: profileError, refetch } = useProfile();
+  // Read HERE, above the Modal, and handed to SyncRecoverySection as a prop.
+  // The modal portals its children outside <VaultProvider>, so a useVault()
+  // call inside it throws. See the comment in SyncRecoverySection.
+  const { resetLocalData } = useVault();
 
   const [username, setUsername] = useState('');
   const [fullName, setFullName] = useState('');
@@ -657,6 +663,8 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
                 applies to is already shown directly above. */}
             <SettingsRow label="Apple" value="Not available" disabled />
           </SettingsGroup>
+
+          <SyncRecoverySection onReset={resetLocalData} />
 
           {identityError && (
             <RNText className="text-xs text-destructive px-1 -mt-4 mb-4">{identityError}</RNText>

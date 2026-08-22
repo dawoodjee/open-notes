@@ -144,21 +144,23 @@ function ThemedRoot() {
 const DEV_ROUTES = ['/dev-chrome', '/dev-icons', '/dev-swipe'];
 
 function VaultGate() {
-  const { status, hasBooted, bootError, resetLocalData } = useVault();
+  const { status, hasBooted, bootError, retryBoot, resetLocalData } = useVault();
   const pathname = usePathname();
 
   /**
    * WHY THE HARNESSES GET AN ESCAPE HATCH, and only on `failed`.
    *
-   * On web the vault cannot boot at all: `expo-secure-store` has no web
-   * implementation so there is no device key, and `@powersync/react-native` +
-   * op-sqlite do not exist there either. Both belong to Stage 13. Without this,
-   * every route on web -- including the harness built to verify the desktop
-   * chrome -- is replaced by BootFailureScreen, and the chrome cannot be looked
-   * at on the only platform it targets.
+   * This was written when web could not boot at all -- no keychain, no native
+   * SQLite -- so every route there, including the harnesses built to verify the
+   * desktop chrome, was replaced by BootFailureScreen. That is no longer true
+   * (see lib/crypto/secureStorage.web.ts and lib/powersync/openDatabase.web.ts),
+   * and web now reaches the real app.
    *
-   * Scoped to `status === 'failed'` deliberately. On native the vault succeeds,
-   * so this branch never runs and nothing about the normal boot changes. And
+   * It stays because the harnesses are the one thing that should still render
+   * when the database genuinely will not open, on any platform: they own their
+   * own fixture data and touch neither the vault nor PowerSync, so a chrome
+   * problem stays diagnosable while a storage problem is being fixed.
+   *
    * AuthProvider is left out on purpose rather than by omission: it restores
    * the session and calls connectPowerSync(), which is precisely what cannot
    * work when the database did not open.
@@ -178,7 +180,7 @@ function VaultGate() {
   }
 
   if (status === 'failed') {
-    return <BootFailureScreen error={bootError} onReset={resetLocalData} />;
+    return <BootFailureScreen error={bootError} onRetry={retryBoot} onReset={resetLocalData} />;
   }
 
   return (

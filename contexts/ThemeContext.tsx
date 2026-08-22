@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { Appearance, ColorSchemeName, Platform, useColorScheme } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
+import * as SecureStore from '@/lib/crypto/secureStorage';
 import * as SystemUI from 'expo-system-ui';
 import * as NavigationBar from 'expo-navigation-bar';
 import { Layers, Sparkles, Square, Sunrise } from 'lucide-react-native';

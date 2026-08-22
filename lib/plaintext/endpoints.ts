@@ -4,7 +4,7 @@
 // rejection that simply failed to add a row. Every other id in this codebase
 // comes from here (see lib/powersync/db.ts).
 import * as Crypto from 'expo-crypto';
-import * as SecureStore from 'expo-secure-store';
+import * as SecureStore from '@/lib/crypto/secureStorage';
 import { getPowerSync } from '@/lib/powersync/db';
 
 /**
@@ -39,7 +39,7 @@ export interface Endpoint {
 
 const tokenKey = (id: string) => `notes.endpoint.${id}.token`;
 
-const TOKEN_OPTIONS: SecureStore.SecureStoreOptions = {
+const TOKEN_OPTIONS: SecureStore.SecureStorageOptions = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
 

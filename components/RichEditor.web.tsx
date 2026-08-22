@@ -1,91 +1,120 @@
-import React, { useMemo } from 'react';
-import { ScrollView, Text as RNText, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { ScrollView, Text as RNText, TextInput, View } from 'react-native';
 
-import { stripEnrichedWrapper } from '@/lib/notes/htmlMigrate';
+import { isPlainTextSafe, toPlainText, toPlainTextHtml } from '@/lib/notes/plainTextBody';
 import type { RichEditorProps } from './RichEditor';
 
 /**
- * WEB PLACEHOLDER. Read-only, and deliberately so.
+ * THE WEB EDITOR: plain text, and honest about it.
  *
- * ── WHY THIS FILE EXISTS ──────────────────────────────────────────────────
+ * ── WHY IT IS NOT THE REAL EDITOR ─────────────────────────────────────────
  *
- * Web did not boot, and Stage 12b's job was to get it booting far enough to
- * verify the desktop chrome. The blocker turned out NOT to be the
- * `Appearance.setColorScheme` failure that was recorded against it -- that one
- * is real but comes later. The first thing to break is a BROKEN npm HOIST
- * introduced with the new editor in Stage 11.5:
+ * The native editor is `react-native-enriched-html`, which is genuinely native
+ * on iOS and Android. Its WEB implementation is a `@tiptap` stack, and that
+ * chain is both marked experimental and, in this tree, unresolvable -- a broken
+ * npm hoist puts `@tiptap/extensions` inside the library's own node_modules
+ * while `@tiptap/extension-history` is hoisted to the top level, so the web
+ * bundle died with a TransformError before any app code ran. Stage 12b kept the
+ * whole chain out of the bundle with this file. Stage 13 owns what the web
+ * editor finally becomes.
  *
- *   node_modules/@tiptap/extension-history        <- hoisted to the top level
- *   node_modules/react-native-enriched-html/
- *     node_modules/@tiptap/extensions             <- NOT hoisted
+ * ── WHY IT IS NO LONGER READ-ONLY ─────────────────────────────────────────
  *
- * `extension-history` requires `@tiptap/extensions`. From the top level that
- * resolves to `node_modules/@tiptap/extensions`, which does not exist, so the
- * web bundle dies with:
+ * It was, and that was the wrong answer to the wrong question. Adam,
+ * 2026-08-22: the user has to be "able to work offline, create and export
+ * notes". A note you can open and cannot type into is not a way through; it is
+ * the same dead end as the boot failure screen, one screen further in.
  *
- *   TransformError: ENOENT: no such file or directory, open
- *   '.../node_modules/@tiptap/extensions/dist/index.js'
+ * Plain text is a real editor. Everything else in the app works on web now --
+ * the list, folders, trash, search, the note lifecycle -- and this is the one
+ * piece that is reduced.
  *
- * `npm dedupe` does not fix it. Native never hits this because the whole
- * `@tiptap` chain belongs to `react-native-enriched-html`'s WEB
- * implementation -- on iOS and Android the editor is genuinely native and
- * none of it is bundled.
+ * ── THE GUARD, WHICH IS THE PART WORTH READING ────────────────────────────
  *
- * ── WHY A STUB RATHER THAN A FIX ──────────────────────────────────────────
+ * A formatted note projected into plain text and saved back comes out flat.
+ * That damage needs no keystroke: the editor autosaves, so merely OPENING a
+ * bold-and-bullets note on web would have been enough to destroy its
+ * formatting. So a note is editable here only when there is nothing to lose --
+ * see `isPlainTextSafe`. Everything else renders read-only, legibly, with the
+ * reason stated rather than a control that silently does nothing.
  *
- * Untangling npm's hoisting -- or pinning a transitive dependency of someone
- * else's package into our own manifest -- is a dependency-tree decision, and
- * this sub-phase's whole scope is "guard what throws at startup, decide
- * nothing architectural". The library's own web support is marked
- * experimental, and Stage 13 owns what the web editor actually is. Fixing the
- * hoist here would mean committing a lockfile change with an unclear blast
- * radius immediately before a native rebuild, in service of a pane Stage 13 is
- * going to revisit anyway.
- *
- * Metro resolves `.web.tsx` ahead of `.tsx`, so this file alone keeps the
- * entire `@tiptap` chain out of the web bundle. No dependency changed.
- *
- * ── WHAT THIS COSTS, PLAINLY ──────────────────────────────────────────────
- *
- * Notes are READ-ONLY on web until Stage 13. Editing, formatting and the echo
- * ledger all live in RichEditor.tsx and none of it runs here. `onChange` is
- * accepted and never called, which is the honest shape: there is nothing to
- * report because nothing can change.
- *
- * It is still the right thing for Stage 12c to verify against -- the desktop
- * chrome floats OVER a scrolling document and must not overlap the title until
- * you scroll, and that needs real note text of real length, which this gives.
+ * That guard is why the badge below has two texts and not one.
  */
-export default function RichEditor({ initialContent = '' }: RichEditorProps) {
+export default function RichEditor({
+  initialContent = '',
+  onChange,
+  autoFocus,
+  contentInsetTop = 0,
+}: RichEditorProps) {
+  const editable = useMemo(() => isPlainTextSafe(initialContent), [initialContent]);
+
   /**
-   * Tags are stripped rather than rendered. `dangerouslySetInnerHTML` would
-   * put unsanitised stored HTML into the DOM, and a note's body is the one
-   * string in this app most likely to contain markup that came from somewhere
-   * else -- a paste, an import, another client. Read-only plain text costs a
-   * placeholder its formatting; the alternative costs an XSS.
+   * Local text, re-seeded only when the note ITSELF changes.
+   *
+   * The parent hands `initialContent` straight back after every save, so
+   * following it blindly would reset the caret to the end of the document
+   * mid-sentence. The second half of the condition is what distinguishes the
+   * two cases: if the incoming body is what this component's own text would
+   * produce, it is our own save echoing back and must be ignored. If it is
+   * anything else, a different note has been opened and the editor has to
+   * follow it.
+   *
+   * This is the small web cousin of the native editor's echo ledger, and it
+   * exists for the same reason -- there, with sync running, the ledger has to
+   * tell a remote edit from an echo; here there is no sync yet, so "is it my
+   * own last output" is enough.
    */
-  const text = useMemo(() => {
-    const body = stripEnrichedWrapper(initialContent);
-    return body
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/(p|div|h[1-6]|li|blockquote)>/gi, '\n')
-      .replace(/<[^>]*>/g, '')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-  }, [initialContent]);
+  const [seed, setSeed] = useState(initialContent);
+  const [text, setText] = useState(() => toPlainText(initialContent));
+
+  if (initialContent !== seed && toPlainTextHtml(text) !== initialContent) {
+    setSeed(initialContent);
+    setText(toPlainText(initialContent));
+  }
+
+  const handleChange = (next: string) => {
+    setText(next);
+    onChange?.(toPlainTextHtml(next));
+  };
 
   return (
-    <ScrollView className="flex-1 bg-background" contentContainerStyle={{ padding: 16 }}>
+    <ScrollView
+      className="flex-1 bg-background"
+      contentContainerStyle={{ padding: 16, paddingTop: contentInsetTop + 16 }}
+    >
       <View className="mb-3 self-start rounded-full bg-foreground/10 px-3 py-1">
-        <RNText className="text-xs text-muted-foreground">Read-only on web until Stage 13</RNText>
+        <RNText className="text-xs text-muted-foreground">
+          {editable
+            ? 'Plain text on web · this session only'
+            : 'Read-only here — this note has formatting web can’t edit yet'}
+        </RNText>
       </View>
-      <RNText className="text-base text-foreground" selectable>
-        {text}
-      </RNText>
+
+      {editable ? (
+        <TextInput
+          multiline
+          autoFocus={autoFocus}
+          value={text}
+          onChangeText={handleChange}
+          placeholder="Start typing"
+          // react-native-web renders a <textarea>; without this it keeps its
+          // own default focus ring on top of the app's own surfaces.
+          style={{ outlineStyle: 'none' } as any}
+          className="text-base text-foreground min-h-[60vh]"
+          textAlignVertical="top"
+        />
+      ) : (
+        /**
+         * Tags stripped rather than rendered. `dangerouslySetInnerHTML` would
+         * put unsanitised stored HTML into the DOM, and a note body is the one
+         * string in this app most likely to carry markup from a paste or an
+         * import. Read-only plain text costs this view its formatting; the
+         * alternative costs an XSS.
+         */
+        <RNText className="text-base text-foreground" selectable>
+          {toPlainText(initialContent)}
+        </RNText>
+      )}
     </ScrollView>
   );
 }
