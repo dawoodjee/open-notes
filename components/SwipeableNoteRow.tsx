@@ -16,6 +16,15 @@ import { Folder as FolderIcon, Pin, Share as ShareIcon, Trash2 } from 'lucide-re
 
 import { Icon } from '@/components/ui/icon';
 import { spring, SPRING_EXPAND } from '@/lib/theme/motion';
+import {
+  ACTION_WIDTH,
+  COMMIT_FRACTION_LEFT,
+  COMMIT_FRACTION_RIGHT,
+  LEFT_ACTION_COUNT,
+  REVEAL_THRESHOLD,
+  easeSwipe,
+  outcomeFor,
+} from '@/lib/notes/swipeMath';
 
 /**
  * Swipe actions on a note row: right reveals Pin, left reveals Move + Delete.
@@ -47,41 +56,6 @@ import { spring, SPRING_EXPAND } from '@/lib/theme/motion';
  * second row leaves the first hanging open behind it, and then a tap meant for
  * the list hits a stale Delete button.
  */
-
-/** Width of one action slot: the capsule plus room for its label. */
-const ACTION_WIDTH = 72;
-/** Swipe-left reveals three actions, swipe-right one. */
-const LEFT_ACTION_COUNT = 3;
-/** Past this, a release snaps open instead of closed. */
-const REVEAL_THRESHOLD = 44;
-/**
- * Where a release stops revealing and starts ACTING.
- *
- * Two different numbers, because the two directions reveal different amounts.
- * Right shows one button, so committing past a bit over half the row is
- * comfortably clear of it. Left shows three -- 216pt of a 402pt row, which is
- * already 54% -- so a single shared fraction would have made "drag far enough
- * to see Share" and "delete this note" the same gesture. Left therefore has to
- * be dragged almost the whole way.
- */
-const COMMIT_FRACTION_RIGHT = 0.55;
-/**
- * Was 0.9, which needed 334pt of TRANSLATION on a 371pt row. With the
- * overshoot easing below, that costs more finger travel than the screen has,
- * so it was unreachable even after the clamp was fixed. 0.75 lands the commit
- * at ~278pt of translation, about 289pt of travel -- comfortably reachable,
- * and still far enough past the 216pt reveal that "look at Share" and "delete
- * this note" stay obviously different gestures.
- */
-const COMMIT_FRACTION_LEFT = 0.75;
-
-/**
- * How much of each pixel of finger movement past the revealed strip actually
- * moves the row. 1 would feel loose and make accidental commits easy; too low
- * puts the commit past the edge of the screen. 0.85 keeps it reachable while
- * making the extra distance feel deliberate.
- */
-const OVERSHOOT_RATE = 0.85;
 
 /**
  * The shape starts as a CIRCLE and STRETCHES into a capsule as the drag
@@ -203,58 +177,41 @@ export function SwipeableNoteRow({
     // Only claim the gesture once it is clearly horizontal. Without both of
     // these the pan wins over the SectionList's vertical scroll and the list
     // becomes very hard to scroll with a thumb, which never travels straight.
-    .activeOffsetX([-15, 15])
-    .failOffsetY([-12, 12])
+    .activeOffsetX([-12, 12])
+    // failOffsetY was [-12, 12], which CANCELLED the swipe as soon as a thumb
+    // drifted 12pt vertically -- and a thumb always drifts. The row would jump
+    // a few points and stop dead, which is exactly what a swipe that never
+    // works looks like. 40 still lets a clearly vertical drag go to the list's
+    // scroll, because activeOffsetX above means the pan does not even claim
+    // the gesture until it is 12pt horizontal.
+    .failOffsetY([-40, 40])
     .onUpdate((e) => {
-      /**
-       * Past the revealed strip the row keeps moving, at a reduced rate.
-       *
-       * THIS USED TO CLAMP AT THE STRIP WIDTH, and that quietly disabled the
-       * whole force-swipe feature: translateX could never exceed 216pt on the
-       * left, while onEnd's commit test is a fraction of the ROW width (~334pt
-       * of a 371pt row). The test could not be true, so releasing after a long
-       * drag only ever opened the row. Same on the right, where the clamp was
-       * 72 and the threshold ~204. It read as working in the source and did
-       * nothing on the device -- found by measuring the drag needed to arm the
-       * colour and discovering no drag could.
-       *
-       * OVERSHOOT_RATE is what keeps that from feeling loose: the buttons
-       * arrive at 1:1, and going beyond them costs more finger per pixel, so a
-       * commit has to be meant. The cap is the row width -- there is nothing
-       * to see past the row's own edge.
-       */
-      const raw = e.translationX;
-      const limit = raw > 0 ? ACTION_WIDTH : ACTION_WIDTH * LEFT_ACTION_COUNT;
-      const magnitude = Math.abs(raw);
-      const beyond = Math.max(0, magnitude - limit);
-      const eased = Math.min(limit + beyond * OVERSHOOT_RATE, rowWidth.value || magnitude);
-      translateX.value = raw < 0 ? -eased : eased;
+      // All the arithmetic lives in lib/notes/swipeMath.ts and is unit-tested.
+      // It has been wrong twice; it is not going to be re-derived inline here.
+      translateX.value = easeSwipe(e.translationX, rowWidth.value);
     })
     .onEnd(() => {
-      const tx = translateX.value;
-
-      if (tx >= rowWidth.value * COMMIT_FRACTION_RIGHT) {
-        translateX.value = spring(0, SPRING_EXPAND);
-        runOnJS(commit)('pin');
-        return;
+      switch (outcomeFor(translateX.value, rowWidth.value)) {
+        case 'commit-right':
+          translateX.value = spring(0, SPRING_EXPAND);
+          runOnJS(commit)('pin');
+          return;
+        case 'commit-left':
+          translateX.value = spring(0, SPRING_EXPAND);
+          runOnJS(commit)('delete');
+          return;
+        case 'open-right':
+          translateX.value = spring(ACTION_WIDTH, SPRING_EXPAND);
+          runOnJS(onOpenChange)(id);
+          return;
+        case 'open-left':
+          translateX.value = spring(-ACTION_WIDTH * LEFT_ACTION_COUNT, SPRING_EXPAND);
+          runOnJS(onOpenChange)(id);
+          return;
+        default:
+          translateX.value = spring(0, SPRING_EXPAND);
+          runOnJS(onOpenChange)(null);
       }
-      if (tx <= -rowWidth.value * COMMIT_FRACTION_LEFT) {
-        translateX.value = spring(0, SPRING_EXPAND);
-        runOnJS(commit)('delete');
-        return;
-      }
-      if (tx >= REVEAL_THRESHOLD) {
-        translateX.value = spring(ACTION_WIDTH, SPRING_EXPAND);
-        runOnJS(onOpenChange)(id);
-        return;
-      }
-      if (tx <= -REVEAL_THRESHOLD) {
-        translateX.value = spring(-ACTION_WIDTH * LEFT_ACTION_COUNT, SPRING_EXPAND);
-        runOnJS(onOpenChange)(id);
-        return;
-      }
-      translateX.value = spring(0, SPRING_EXPAND);
-      runOnJS(onOpenChange)(null);
     });
 
   const rowStyle = useAnimatedStyle(() => ({
