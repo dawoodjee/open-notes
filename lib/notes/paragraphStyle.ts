@@ -44,6 +44,29 @@ export function activeParagraphStyle(active: Partial<Record<ToolKey, boolean>>):
 }
 
 /**
+ * The styles that change how the TEXT looks, as opposed to how the line is
+ * structured. Lists are deliberately absent.
+ */
+const TEXT_STYLES: readonly ToolKey[] = ['heading', 'heading2', 'heading3', 'codeBlock'] as const;
+
+/**
+ * The text style at the caret, ignoring list-ness — `'body'` when none.
+ *
+ * WHY THIS EXISTS SEPARATELY. The iPad panel draws text styles as pills and
+ * lists as their own group, because that is what the reference does and it is
+ * the honest model: a bulleted list can be in Body or in Heading. Using
+ * `activeParagraphStyle` for the pills meant that the moment a list was active,
+ * NO pill was highlighted — the row went blank and looked broken. Found on the
+ * iPad, on a note that happened to contain a bullet.
+ *
+ * The desktop panel keeps `activeParagraphStyle`, because there lists ARE rows
+ * in the same list and exactly one tick across all of them is right.
+ */
+export function activeTextStyle(active: Partial<Record<ToolKey, boolean>>): ToolKey {
+  return TEXT_STYLES.find((key) => active[key] === true) ?? 'body';
+}
+
+/**
  * Applying a paragraph style, expressed as which styles to TOGGLE.
  *
  * The editor's block toggles are their own inverse, so "make this Body" is

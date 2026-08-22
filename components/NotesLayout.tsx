@@ -83,6 +83,8 @@ export default function NotesLayout() {
   const { notes, selectedNoteId, searchQuery } = state;
 
   const [isSidebarTucked, setIsSidebarTucked] = useState<boolean>(false);
+  /** Bumped to move focus into the list's search field. See NoteListPane. */
+  const [focusSearchSignal, setFocusSearchSignal] = useState(0);
 
   // --- Folders -------------------------------------------------------------
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -1130,6 +1132,7 @@ export default function NotesLayout() {
             useCompactHeader={useCompactHeader}
             onToggleSidebar={() => setIsFolderSidebarCollapsed((v) => !v)}
             chrome={chrome}
+            focusSearchSignal={focusSearchSignal}
             onCollapseList={
               Platform.OS === 'web' && isWideLayout
                 ? () => setIsSidebarTucked(true)
@@ -1167,6 +1170,22 @@ export default function NotesLayout() {
           chrome={chrome}
           onRestorePanes={() => setIsSidebarTucked(false)}
           onNewNote={handleCreateNotePressed}
+          onToggleMaximised={() => {
+            // "Maximise" hides BOTH panes, which is two flags here: the list is
+            // `isSidebarTucked`, the folder tree is `isFolderSidebarCollapsed`.
+            // Restoring brings back both, so the gesture is its own inverse
+            // rather than leaving you one control short of where you started.
+            const maximising = !isSidebarTucked;
+            setIsSidebarTucked(maximising);
+            setIsFolderSidebarCollapsed(maximising);
+          }}
+          onFocusSearch={() => {
+            // Search lives in the list pane, so revealing it is part of the
+            // action -- the alternative is a button that does nothing whenever
+            // the panes happen to be hidden.
+            setIsSidebarTucked(false);
+            setFocusSearchSignal((n) => n + 1);
+          }}
           searchQuery={searchQuery}
           onSearchChange={(query) =>
             dispatch({ type: 'SET_SEARCH_QUERY', payload: { query } })

@@ -8,6 +8,7 @@ import { describe, it, expect } from './harness';
 import {
   BLOCK_STYLES,
   activeParagraphStyle,
+  activeTextStyle,
   paragraphStyleToggles,
 } from '../lib/notes/paragraphStyle';
 import type { ToolKey } from '../lib/notes/toolbarContext';
@@ -60,5 +61,24 @@ describe('paragraphStyleToggles', () => {
     expect(paragraphStyleToggles({ heading: true }, 'heading')).toEqual(['heading']);
     // ...and the result of that is Body, which closes the loop.
     expect(activeParagraphStyle({})).toBe('body');
+  });
+});
+
+describe('activeTextStyle — the iPad pills', () => {
+  it('A LIST DOES NOT BLANK THE PILL ROW', () => {
+    // The bug this is here for: using activeParagraphStyle for the pills meant
+    // that the moment a bullet was active, no pill was highlighted at all and
+    // the row read as broken. A list has a text style like any other line.
+    expect(activeTextStyle({ bulletList: true })).toBe('body');
+    expect(activeParagraphStyle({ bulletList: true })).toBe('bulletList');
+  });
+
+  it('a heading inside a list is still a heading', () => {
+    expect(activeTextStyle({ bulletList: true, heading2: true })).toBe('heading2');
+  });
+
+  it('plain text is Body', () => {
+    expect(activeTextStyle({})).toBe('body');
+    expect(activeTextStyle({ bold: true })).toBe('body');
   });
 });

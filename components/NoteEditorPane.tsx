@@ -18,6 +18,7 @@ import RichEditor, {
 } from './RichEditor';
 import { ChromeScrim } from './ChromeScrim';
 import { BAR_HEIGHT, DesktopTopBar } from './DesktopTopBar';
+import { PAD_BAR_HEIGHT, PadTopBar } from './PadTopBar';
 import type { PaneChrome } from '@/lib/layout/paneChrome';
 import { GROUP_GAP, IconButton, IconButtonGroup, SURFACE } from './IconButton';
 
@@ -75,6 +76,10 @@ export interface NoteEditorPaneProps {
   /** Brings back the pane immediately to the editor's left. */
   onRestorePanes: () => void;
   onNewNote: () => void;
+  /** iPad only: hide both panes, or bring them back. */
+  onToggleMaximised?: () => void;
+  /** iPad only: reveal the note list and put the caret in its search field. */
+  onFocusSearch?: () => void;
   searchQuery: string;
   onSearchChange: (next: string) => void;
 }
@@ -96,6 +101,8 @@ export default function NoteEditorPane({
   chrome,
   onRestorePanes,
   onNewNote,
+  onToggleMaximised,
+  onFocusSearch,
   searchQuery,
   onSearchChange,
 }: NoteEditorPaneProps) {
@@ -131,6 +138,18 @@ export default function NoteEditorPane({
    */
   const isDesktop = Platform.OS === 'web';
   const useDesktopBar = isDesktop && !useCompact;
+
+  /**
+   * The iPad's own bar, which is NOT the desktop one -- different zones,
+   * different grouping, a search circle instead of an inline field. See
+   * PadTopBar for why the screenshot overrode the plan's prose here.
+   *
+   * `Platform.isPad` rather than a width test: an iPhone in landscape can be
+   * wider than 768 and must keep the phone chrome, because the thing that
+   * makes iPad chrome right is the input method and the pane count, not the
+   * pixel count.
+   */
+  const usePadBar = Platform.OS === 'ios' && Platform.isPad && !useCompact;
   const [textStyleOpen, setTextStyleOpen] = useState(false);
   const [movingNote, setMovingNote] = useState(false);
 
@@ -321,7 +340,24 @@ export default function NoteEditorPane({
     >
       {selectedNote ? (
         <>
-          {useDesktopBar ? (
+          {usePadBar ? (
+            /*
+              iPAD: the same floating idea as desktop, a different arrangement.
+              `ipad-collapsed-groups.jpeg` is the reference and it wins over the
+              plan's prose, which said iPad would inherit desktop's three zones.
+            */
+            <PadTopBar
+              chrome={chrome}
+              onToggleMaximised={() => onToggleMaximised?.()}
+              onNewNote={onNewNote}
+              onShare={handleShare}
+              onSearch={() => onFocusSearch?.()}
+              canFormat={EDITOR_SUPPORTS_FORMATTING}
+              onTextStyles={() => setTextStyleOpen((v) => !v)}
+              menuTrigger={renderOverflowMenu(selectedNote)}
+              topInset={insets.top}
+            />
+          ) : useDesktopBar ? (
             /*
               DESKTOP: the bar FLOATS over the note instead of sitting above it.
 
@@ -345,6 +381,7 @@ export default function NoteEditorPane({
               canFormat={EDITOR_SUPPORTS_FORMATTING}
               onTextStyles={() => setTextStyleOpen((v) => !v)}
               onChecklist={() => editorRef.current?.run('checklist')}
+              topInset={insets.top}
             />
           ) : (
             <>
@@ -483,11 +520,23 @@ export default function NoteEditorPane({
               onScrollOffsetChange={onEditorScrollOffsetChange}
               // Clears whichever bar is floating. A wide iPad still has a real
               // bordered row above the document and needs nothing.
-              contentInsetTop={useCompact ? navBarHeight : useDesktopBar ? BAR_HEIGHT : 0}
+              contentInsetTop={
+                useCompact
+                  ? navBarHeight
+                  : useDesktopBar
+                    ? BAR_HEIGHT + insets.top
+                    : usePadBar
+                      ? PAD_BAR_HEIGHT + insets.top
+                      : 0
+              }
               textStyleOpen={textStyleOpen}
               onCloseTextStyle={() => setTextStyleOpen(false)}
               // Hangs from the underside of the bar, not from the window edge.
-              textStyleTop={BAR_HEIGHT - 8}
+              textStyleTop={(usePadBar ? PAD_BAR_HEIGHT : BAR_HEIGHT) + insets.top - 8}
+              // The two panels are different shapes -- a vertical list under a
+              // pointer, a grid under a thumb -- so the editor is told which to
+              // render rather than guessing from its own width.
+              stylePanel={usePadBar ? 'pad' : 'desktop'}
             />
           </Box>
 

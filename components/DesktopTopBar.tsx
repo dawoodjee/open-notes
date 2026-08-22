@@ -61,6 +61,13 @@ export interface DesktopTopBarProps {
   onShare: () => void;
   searchQuery: string;
   onSearchChange: (next: string) => void;
+  /**
+   * Safe-area top inset. Zero on web, which is why this was missed until the
+   * bar reached an iPad: there the status bar runs across the top of the screen
+   * and a bar pinned to `top: 0` sits directly under it, with its controls a
+   * few points clear of the clock.
+   */
+  topInset?: number;
   /** Rendered as the overflow trigger so the caller keeps owning the menu. */
   menuTrigger?: React.ReactNode;
   /** Formatting controls the editor can actually perform right now. */
@@ -93,6 +100,7 @@ export function DesktopTopBar({
   onTextStyles,
   onChecklist,
   canFormat = true,
+  topInset = 0,
 }: DesktopTopBarProps) {
   const { scheme } = useTheme();
 
@@ -108,7 +116,8 @@ export function DesktopTopBar({
         top: 0,
         left: 0,
         right: 0,
-        height: BAR_HEIGHT,
+        height: BAR_HEIGHT + topInset,
+        paddingTop: topInset,
         // The scrim overflows this box downward on purpose; `overflow: visible`
         // is the default but is stated because clipping it is the obvious
         // "tidy-up" that would silently remove the fade.
@@ -119,7 +128,7 @@ export function DesktopTopBar({
         zIndex: 10,
       }}
     >
-      <ChromeScrim height={BAR_HEIGHT} />
+      <ChromeScrim height={BAR_HEIGHT + topInset} />
 
       {/* LEFT */}
       <IconButtonGroup>
