@@ -253,48 +253,33 @@ export function FolderSidebar({
       }`}
     >
       {/*
-        Edit and overflow trail the title on BOTH layouts, one row -- phones
-        used to stack them above the title on their own row, which read as a
-        tablet header transplanted onto a phone. New Folder lives inside the
-        overflow rather than beside it -- a header with one action in it and
-        one action next to it invites the question of why, and there is no
-        answer.
+        ONE HEADER AT EVERY WIDTH: large left title, Edit and overflow trailing
+        it on the same row. New Folder lives inside the overflow rather than
+        beside it -- a header with one action in it and one action next to it
+        invites the question of why, and there is no answer.
 
-        The two layouts differ only in title size/alignment (phones keep the
-        large left title, wide layouts use the smaller centered one) -- same
-        controls, same order, same row, so nothing has to be learned twice.
+        Wide layouts used to put Edit on the FAR LEFT with a small centred
+        title, following Apple Notes' own iPad header
+        (`ipad-landscape-folder-view.jpeg`). Adam's call, 2026-08-22: match the
+        phone instead. Apple's version has no title at all, so copying its Edit
+        placement while also keeping a title produced a third arrangement that
+        was neither -- and it meant the same control moved across the screen
+        depending on how you were holding the device.
       */}
-      {useCompactHeader ? (
-        <View className="flex-row items-center justify-between px-4 pt-4 pb-2 gap-2">
-          {/* Truncates rather than clipping -- see the note on the wide
-              layout's title below; the same Dynamic Type failure applies
-              here now that the title shares a row with the controls. */}
-          <RNText
-            className="text-3xl font-bold text-foreground flex-1 min-w-0"
-            numberOfLines={1}
-            ellipsizeMode="tail"
-          >
-            Folders
-          </RNText>
-          <EditButton isEditing={isEditing} onPress={() => setIsEditing((v) => !v)} />
-          {overflowMenu}
-        </View>
-      ) : (
-        <View className="flex-row items-center justify-between px-4 pt-4 pb-2 gap-2">
-          <EditButton isEditing={isEditing} onPress={() => setIsEditing((v) => !v)} />
-          {/* Truncates rather than clipping. At Android font_scale 1.6 this
-              title and the Edit button were both hard-clipped mid-word
-              ("Folder", "E") because nothing told either one how to yield. */}
-          <RNText
-            className="text-lg font-semibold text-foreground flex-1 min-w-0 text-center"
-            numberOfLines={1}
-            ellipsizeMode="tail"
-          >
-            Folders
-          </RNText>
-          {overflowMenu}
-        </View>
-      )}
+      <View className="flex-row items-center justify-between px-4 pt-4 pb-2 gap-2">
+        {/* Truncates rather than clipping. At Android font_scale 1.6 both this
+            title and the Edit button were hard-clipped mid-word ("Folder",
+            "E") because nothing told either one how to yield. */}
+        <RNText
+          className="text-3xl font-bold text-foreground flex-1 min-w-0"
+          numberOfLines={1}
+          ellipsizeMode="tail"
+        >
+          Folders
+        </RNText>
+        <EditButton isEditing={isEditing} onPress={() => setIsEditing((v) => !v)} />
+        {overflowMenu}
+      </View>
 
       <ScrollView
         contentContainerStyle={{
