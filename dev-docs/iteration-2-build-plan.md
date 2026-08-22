@@ -1520,8 +1520,35 @@ only in a chat log.
 - [x] **4. `SettingsDialog` on the native bottom sheet.** ✅ Sub-view navigation
       (Settings → Appearance) verified; the sheet keeps its height rather than
       resizing under the thumb as you push in.
-- [ ] **5. Drag-to-reorder folders**, driving `swapFolderOrder`, top level only.
-- [ ] **6. Checkpoint:** sheets behave as before with no Gluestack workarounds
+- [ ] **5. Drag-to-reorder folders** — ⛔ **BLOCKED, needs a decision from Adam.**
+      `react-native-reanimated-dnd` is unusable at BOTH published versions:
+      - `1.1.0` peers on `react-native-reanimated >= 3.0.0` but calls
+        `useAnimatedGestureHandler`, which **Reanimated 4 removed**. Built and
+        ran; it throws `useAnimatedGestureHandler is not a function` from
+        `useSortable` the moment edit mode renders. The peer range is simply
+        wrong.
+      - `2.0.0` requires `react-native-reanimated >= 4.2.0`; Expo SDK 54 pins
+        `~4.1.1` (we are on 4.1.7) and `expo install --check` treats that as
+        current.
+
+      The drag work was built end to end — a `Sortable` in edit mode, a
+      `moveTopLevelFolderToIndex` primitive that renumbers the level in one
+      transaction, and `moveToIndex` with 7 tests including "never loses or
+      duplicates a folder" — then **reverted**, and the package uninstalled, so
+      the tree stays clean while the call is made. The arrow buttons are back
+      and unchanged.
+
+      **Options, with a recommendation:**
+      1. *Build it on Reanimated 4 + RNGH directly, no dependency.* The list is
+         one level, ≤10 rows, fixed height in edit mode — the tractable case.
+         **Recommended:** no version risk, and the pieces (worklets, springs,
+         the vendored swipeable) are already in use here.
+      2. *Bump Reanimated to 4.2.x and use dnd 2.0.0.* Off Expo SDK 54's tested
+         matrix, and Reanimated 4's version is coupled to
+         `react-native-worklets` — a bad bump breaks the native build that was
+         just done.
+      3. *Defer.* Keep the arrow buttons; they work.
+- [ ] **6. Checkpoint** (blocked on item 5): sheets behave as before with no Gluestack workarounds
       left in either file; the new folder order survives a sync round-trip;
       Skills stays pinned and undraggable.
 
