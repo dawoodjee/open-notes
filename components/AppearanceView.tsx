@@ -1,15 +1,17 @@
 import React from 'react';
 import { ScrollView, View } from 'react-native';
-import { List, Type } from 'lucide-react-native';
+import { Check, List, Type } from 'lucide-react-native';
 import {
   SettingsGroup,
   SettingsRow,
   SettingsSegmented,
   SettingsSubHeader,
 } from '@/components/ui/settings-group';
-import type { BulletStyle, ThemePreference } from '@/contexts/ThemeContext';
+import { Icon } from '@/components/ui/icon';
+import { APP_THEMES } from '@/contexts/ThemeContext';
+import type { AppTheme, BulletStyle, ThemePreference } from '@/contexts/ThemeContext';
 
-const THEME_OPTIONS: { label: string; value: ThemePreference }[] = [
+const DARK_MODE_OPTIONS: { label: string; value: ThemePreference }[] = [
   { label: 'Device', value: 'system' },
   { label: 'Light', value: 'light' },
   { label: 'Dark', value: 'dark' },
@@ -36,31 +38,61 @@ export function AppearanceView({
   setPreference,
   bulletStyle,
   setBulletStyle,
+  theme,
+  setTheme,
 }: {
   onBack: () => void;
   preference: ThemePreference;
   setPreference: (next: ThemePreference) => Promise<void>;
   bulletStyle: BulletStyle;
   setBulletStyle: (next: BulletStyle) => Promise<void>;
+  theme: AppTheme;
+  setTheme: (next: AppTheme) => Promise<void>;
 }) {
   return (
     <>
       <SettingsSubHeader title="Appearance" onBack={onBack} />
 
       <ScrollView className="flex-1 px-5 pt-4 bg-background">
-        {/* No caption: it would read "THEME" directly above a row labelled
-            "Theme". The row label alone is enough. */}
+        {/* "Dark Mode", not "Theme". This control has only ever chosen between
+            a light and a dark FACE; the group below chooses which light and
+            which dark you get. They are independent, and naming them both
+            "Theme" was what made that hard to see. */}
         <SettingsGroup footnote="Device follows your phone’s own light and dark setting, including its schedule.">
           <SettingsRow
-            label="Theme"
+            label="Dark Mode"
             right={
               <SettingsSegmented
-                options={THEME_OPTIONS}
+                options={DARK_MODE_OPTIONS}
                 value={preference}
                 onChange={(next) => void setPreference(next)}
               />
             }
           />
+        </SettingsGroup>
+
+        {/* Rows rather than a segmented control: three of the four are not
+            built yet, and a segmented control with most of its segments dead
+            reads as broken rather than as forthcoming. Rows carry a reason. */}
+        <SettingsGroup
+          caption="Theme"
+          footnote="Every theme has its own light and dark version — Dark Mode above chooses which one you see."
+        >
+          {APP_THEMES.map((t) => (
+            <SettingsRow
+              key={t.value}
+              icon={t.icon}
+              label={t.label}
+              sublabel={t.available ? t.blurb : `${t.blurb} · Coming soon`}
+              disabled={!t.available}
+              onPress={t.available ? () => void setTheme(t.value) : undefined}
+              right={
+                theme === t.value ? (
+                  <Icon as={Check} className="w-5 h-5 text-lime-600 dark:text-lime-400" />
+                ) : undefined
+              }
+            />
+          ))}
         </SettingsGroup>
 
         {/* Applies to every list in every note, because the editor only has

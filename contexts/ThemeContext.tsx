@@ -3,6 +3,7 @@ import { Appearance, ColorSchemeName, Platform, useColorScheme } from 'react-nat
 import * as SecureStore from 'expo-secure-store';
 import * as SystemUI from 'expo-system-ui';
 import * as NavigationBar from 'expo-navigation-bar';
+import { Layers, Sparkles, Square, Sunrise } from 'lucide-react-native';
 
 /**
  * Which appearance the user picked, and what that resolves to right now.
@@ -43,6 +44,68 @@ export type ThemePreference = 'system' | 'light' | 'dark';
 export type BulletStyle = 'dash' | 'dot';
 
 /**
+ * A THEME is the app's whole visual identity: how chrome surfaces are painted
+ * and which palette they are painted in. It is a SEPARATE axis from dark mode,
+ * and that separation is the point -- every theme has its own light face and
+ * its own dark face, so choosing `horizon` does not mean choosing dark, it
+ * means choosing which dark (and which light) you get.
+ *
+ * `flat` is what the app looks like today and is the only one that exists.
+ * The other three are listed in Settings deliberately rather than hidden: the
+ * layout is then final, and it says what the app is going to be instead of
+ * concealing it. Same reasoning as the greyed-out formatting controls.
+ */
+export type AppTheme = 'flat' | 'glass' | 'cosmic' | 'horizon';
+
+export interface ThemeDescriptor {
+  value: AppTheme;
+  label: string;
+  /** What it is, in one line, for the settings row. */
+  blurb: string;
+  /** False renders the row disabled and marked "Coming soon". */
+  available: boolean;
+  /**
+   * EVERY theme carries one, including the unbuilt ones. Giving an icon only
+   * to the built theme left the other three labels starting further left, so
+   * the group had no common text edge -- the same defect as the folder rows,
+   * for the same reason: an absent icon is not a zero-width icon.
+   */
+  icon: React.ComponentType<any>;
+}
+
+/** Render order in Settings -> Appearance -> Theme. */
+export const APP_THEMES: ThemeDescriptor[] = [
+  {
+    value: 'flat',
+    label: 'Flat',
+    blurb: 'Solid surfaces, no blur. The current look.',
+    available: true,
+    icon: Square,
+  },
+  {
+    value: 'glass',
+    label: 'Glass',
+    blurb: 'Translucent chrome that blurs the note behind it.',
+    available: false,
+    icon: Layers,
+  },
+  {
+    value: 'cosmic',
+    label: 'Cosmic',
+    blurb: 'Deep space colour, for both faces.',
+    available: false,
+    icon: Sparkles,
+  },
+  {
+    value: 'horizon',
+    label: 'Horizon',
+    blurb: 'Night sky after dark, daylight before it.',
+    available: false,
+    icon: Sunrise,
+  },
+];
+
+/**
  * SecureStore, NOT the ui_state table, and not for secrecy.
  *
  * The theme has to be readable BEFORE the encrypted database opens: the boot
@@ -63,6 +126,11 @@ const THEME_KEY = 'notes.appearance.v1';
  * second prop thread to carry one string.
  */
 const BULLET_KEY = 'notes.bulletStyle.v1';
+
+/** Separate key rather than folded into the appearance one: dark mode and
+ *  theme are independent choices, and a combined value would need a migration
+ *  the first time either list changes. */
+const APP_THEME_KEY = 'notes.theme.v1';
 
 /**
  * The one place a literal background colour is allowed.
@@ -116,6 +184,9 @@ interface ThemeContextValue {
   setPreference: (next: ThemePreference) => Promise<void>;
   bulletStyle: BulletStyle;
   setBulletStyle: (next: BulletStyle) => Promise<void>;
+  /** The visual identity. Independent of `preference` -- see AppTheme. */
+  theme: AppTheme;
+  setTheme: (next: AppTheme) => Promise<void>;
   /** Has the stored preference been read yet? Only the native splash cares:
    *  it stays up until this flips, so a dark launch never paints a light frame
    *  while SecureStore is still being read. See app/_layout.tsx. */
@@ -140,6 +211,7 @@ function toColorScheme(preference: ThemePreference): ColorSchemeName {
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [preference, setPreferenceState] = useState<ThemePreference>('system');
   const [bulletStyle, setBulletStyleState] = useState<BulletStyle>('dash');
+  const [theme, setThemeState] = useState<AppTheme>('flat');
   const [isReady, setIsReady] = useState(false);
   const deviceScheme = useColorScheme();
 
@@ -161,6 +233,17 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         }
       } catch {
         // Same reasoning: 'dash' is a perfectly good answer.
+      }
+      try {
+        const stored = await SecureStore.getItemAsync(APP_THEME_KEY);
+        // Checked against the catalogue's AVAILABLE entries, not just the
+        // union. A build that drops a theme, or a device that stored one
+        // before it shipped, must not leave the app pointing at a theme this
+        // binary cannot paint -- it would render nothing and look like a bug.
+        const known = APP_THEMES.find((t) => t.value === stored && t.available);
+        if (known) setThemeState(known.value);
+      } catch {
+        // 'flat' is a perfectly good answer.
       }
       // Outside both catches on purpose: "ready" means the read has been
       // ATTEMPTED, not that it succeeded. A failed read still settles the
@@ -243,6 +326,18 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const setTheme = useCallback(async (next: AppTheme) => {
+    // Guard rather than trust the caller: Settings disables the unavailable
+    // rows, but this is the only place that can promise a theme is paintable.
+    if (!APP_THEMES.some((t) => t.value === next && t.available)) return;
+    setThemeState(next);
+    try {
+      await SecureStore.setItemAsync(APP_THEME_KEY, next);
+    } catch {
+      // The choice still applies for this launch; only persistence failed.
+    }
+  }, []);
+
   const setBulletStyle = useCallback(async (next: BulletStyle) => {
     setBulletStyleState(next);
     try {
@@ -254,7 +349,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeContext.Provider
-      value={{ preference, scheme, setPreference, bulletStyle, setBulletStyle, isReady }}
+      value={{ preference, scheme, setPreference, bulletStyle, setBulletStyle, theme, setTheme, isReady }}
     >
       {children}
     </ThemeContext.Provider>
