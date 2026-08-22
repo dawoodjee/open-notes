@@ -2,6 +2,7 @@ import React from 'react';
 import { Text as RNText, TextInput, View } from 'react-native';
 import { PressableScale } from './PressableScale';
 import { useTheme } from '@/contexts/ThemeContext';
+import { DialogOverlay } from './DialogOverlay';
 
 /**
  * Confirmation for deleting a folder that isn't empty.
@@ -35,7 +36,7 @@ export function DeleteFolderDialog({
   onConfirm: () => void;
 }) {
   return (
-    <View className="absolute inset-0 items-center justify-center px-8 bg-black/40">
+    <DialogOverlay onDismiss={onCancel}>
       <View className="w-full max-w-sm rounded-2xl bg-background p-6">
         <RNText className="text-lg font-semibold text-foreground mb-2">
           Delete Folder?
@@ -75,7 +76,7 @@ export function DeleteFolderDialog({
           </PressableScale>
         </View>
       </View>
-    </View>
+    </DialogOverlay>
   );
 }
 
@@ -103,7 +104,7 @@ export function FolderNameDialog({
   const trimmed = value.trim();
 
   return (
-    <View className="absolute inset-0 items-center justify-center px-8 bg-black/40">
+    <DialogOverlay onDismiss={onCancel}>
       <View className="w-full max-w-sm rounded-2xl bg-background p-6">
         <RNText className="text-lg font-semibold text-foreground mb-4">{title}</RNText>
 
@@ -131,7 +132,7 @@ export function FolderNameDialog({
           </PressableScale>
         </View>
       </View>
-    </View>
+    </DialogOverlay>
   );
 }
 

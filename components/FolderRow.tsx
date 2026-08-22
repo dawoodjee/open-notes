@@ -33,6 +33,20 @@ function iconSizeForDepth(depth: number): number {
   return Math.max(20 - depth * 1.25, 15);
 }
 
+/**
+ * The icon always occupies THIS much width, whatever size it is drawn at.
+ *
+ * Without it the glyph was laid out at its own shrinking width inside a `gap-2`
+ * row, so every nesting level pulled its label 1.25pt further left than the
+ * level above. The indent step is meant to be a clean 16pt; it was really
+ * 14.75, and the labels down a nested tree stopped sharing a left edge. Barely
+ * visible in a full-width phone sidebar, obvious in a 250pt iPad column, which
+ * is where it was finally spotted.
+ *
+ * Equal to the largest icon, so nothing moves at top level.
+ */
+const ICON_SLOT = 20;
+
 export interface FolderRowProps {
   label: string;
   /** 0 for top level and for both virtual rows. */
@@ -134,11 +148,16 @@ export function FolderRow({
         accessibilityState={{ selected: isSelected, expanded: isExpanded }}
         {...webContextMenu}
       >
-        <Icon
-          as={GlyphFor}
-          style={{ width: iconSize, height: iconSize }}
-          className={isSelected ? 'text-on-accent' : 'text-lime-600 dark:text-lime-400'}
-        />
+        {/* Fixed-width slot, glyph centred inside it -- see ICON_SLOT. Centred
+            rather than left-aligned so the glyphs share an optical centre line
+            down the tree, which is how the reference draws a nested sidebar. */}
+        <View style={{ width: ICON_SLOT, alignItems: 'center' }}>
+          <Icon
+            as={GlyphFor}
+            style={{ width: iconSize, height: iconSize }}
+            className={isSelected ? 'text-on-accent' : 'text-lime-600 dark:text-lime-400'}
+          />
+        </View>
 
         {/* The label is wrapped rather than being flexed directly, because a
             bare <Text flex-1> did NOT shrink at large font scales -- it took
