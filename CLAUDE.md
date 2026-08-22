@@ -22,7 +22,7 @@ Escalate before acting only when a choice is expensive to undo or changes someth
 
 The test when unsure: would undoing this in two weeks take minutes or days? Minutes, decide. Days, ask. And if I explicitly delegate a decision in a prompt ("decide and implement"), that overrides all of the above — just make the call.
 
-When I accept a tradeoff on an escalated decision, record it in the Decisions Log in `mvp-build-plan.md` — the decision, the reasoning, and the consequence I accepted — before moving on.
+When I accept a tradeoff on an escalated decision, record it in the Decisions Log of the **current** build plan in `dev-docs/` — `dev-docs/iteration-2-build-plan.md` today; `dev-docs/mvp-build-plan.md` holds the MVP-era log and is history. Record the decision, the reasoning, and the consequence I accepted, before moving on.
 
 ## Devices
 Reuse the simulators and emulators that are already booted. Keep the app
@@ -44,7 +44,7 @@ Prove things rather than asserting them: use the terminal to run, boot, query, o
 
 When compacting — automatic or manual — write a state snapshot, not a narrative
 recap. If the current stage is complete, don't compact: write outcomes into
-`mvp-build-plan.md`, commit, merge, `/clear`. A written handoff is inspectable;
+the current plan in `dev-docs/`, commit, merge, `/clear`. A written handoff is inspectable;
 a summary isn't.
 
 Anything already committed or written to a file is durable — reference it by
@@ -58,13 +58,13 @@ conversation. Compaction is lossy, so preserve in this order:
 3. **Decisions, with reasoning and tradeoff** — especially anything escalated to
    me under the Decisions rule and what I chose. Never silently drop an accepted
    tradeoff; a decision without its tradeoff gets relitigated. Anything already
-   written to the Decisions Log in `mvp-build-plan.md` is durable — reference it
+   written to a Decisions Log in `dev-docs/` is durable — reference it
    by name, don't re-summarize it. Preserve decisions made this session that
    haven't been written down yet.
 4. **Cross-stage deferrals** — what was deferred, which stage it lands in, and
    what forces it then. The landing stage is the half that goes missing and
    resurfaces as rework, so never record a deferral without it. Deferrals
-   already captured in `mvp-build-plan.md` are durable — reference by path.
+   already captured in `dev-docs/` are durable — reference by path.
 5. **Verification actually run** — which command, what it proved. Not "tests passed."
 6. **Errors verbatim** — never paraphrased, never summarized.
 7. **Open questions** — including concepts I asked about that aren't yet settled.
@@ -89,6 +89,13 @@ Don't read node_modules/, android/, ios/, .expo/, assets/, or lock files unless 
 
 ## Follow-up questions
 If I ask "why" or push back, that's a continuation of the conversation, not a new task — answer in chat and only touch code again once I say to proceed.
+
+## Documentation
+`dev-docs/` is how the app gets built — plans, Decisions Logs, and the design
+screenshots those plans are written against. `docs/` is the opposite: the app
+explained to someone who wants to run or self-host it. A design screenshot beats
+prose whenever the two disagree. Never put a credential, key or recovery code in
+either.
 
 ## Environments
 There are two backends — a wipeable local dev stack and a live cloud stack holding my real notes. Read `docs/two-stacks.md` before touching server config, migrations, sync rules, or builds.

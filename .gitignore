@@ -60,10 +60,5 @@ scripts/.verify-enc-*.db*
 # note bodies. Never commit these.
 supabase/backups/
 
-# build docs
-mvp-build-plan.md
-iteration-2-build-plan.md
-prd.md
-
 # Editor swap files. One of these was committed once.
 *.sw[a-p]

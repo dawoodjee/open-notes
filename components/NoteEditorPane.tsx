@@ -3,7 +3,6 @@ import {
   Text as RNText,
   PanResponder,
   Keyboard,
-  Platform,
   // The API, not the lucide glyph of the same name imported below. Built into
   // React Native, so sharing needs no new dependency.
   Share as RNShare,
@@ -11,7 +10,8 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import RichEditor from './RichEditor';
+import { useKeyboardShown } from '@/hooks/useKeyboardShown';
+import RichEditor, { type RichEditorHandle } from './RichEditor';
 import { ChromeScrim } from './ChromeScrim';
 import { GROUP_GAP, IconButton, IconButtonGroup, SURFACE } from './IconButton';
 
@@ -47,32 +47,6 @@ export interface NoteEditorPaneProps {
   onNoteChange: (html: string) => void;
   initialEditorScrollOffset?: number;
   onEditorScrollOffsetChange?: (offset: number) => void;
-}
-
-/**
- * Whether a software keyboard is currently on screen.
- *
- * The two platforms fire different events and only one pair is reliable on
- * each: iOS gets `keyboardWillShow`/`keyboardWillHide`, which fire with the
- * animation and so keep the layout in step with it, while Android only has the
- * `did` variants.
- */
-function useKeyboardShown() {
-  const [shown, setShown] = React.useState(false);
-
-  React.useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-
-    const subs = [
-      Keyboard.addListener(showEvent, () => setShown(true)),
-      Keyboard.addListener(hideEvent, () => setShown(false)),
-    ];
-
-    return () => subs.forEach((s) => s.remove());
-  }, []);
-
-  return shown;
 }
 
 export default function NoteEditorPane({
@@ -158,6 +132,8 @@ export default function NoteEditorPane({
   // is confirmed (onMoveShouldSetPanResponderCapture), not on touch-start --
   // otherwise every edge tap would be captured before it could reach
   // anything underneath, including this pane's own back button.
+  const editorRef = useRef<RichEditorHandle>(null);
+
   const panResponder = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponderCapture: (evt, gestureState) => {
@@ -355,7 +331,16 @@ export default function NoteEditorPane({
                 icon={Check}
                 label="Done editing"
                 variant="accent"
-                onPress={() => Keyboard.dismiss()}
+                onPress={() => {
+                  // The editor's OWN blur, not Keyboard.dismiss(). The native
+                  // editor is a UITextView behind a Fabric component and never
+                  // sees RN's dismiss, so this button did nothing on iOS until
+                  // 2026-08-22. Keyboard.dismiss() stays as a second call for
+                  // anything else on screen that does answer to it -- a search
+                  // field, a rename input -- and is harmless when nothing does.
+                  editorRef.current?.blur();
+                  Keyboard.dismiss();
+                }}
               />
             ) : null}
           </HStack>
@@ -368,6 +353,7 @@ export default function NoteEditorPane({
             {...panResponder.panHandlers}
           >
             <RichEditor
+              ref={editorRef}
               key={selectedNote.id}
               initialContent={selectedNote.body}
               onChange={onNoteChange}

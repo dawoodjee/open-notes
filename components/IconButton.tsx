@@ -18,7 +18,7 @@ import { spring, SPRING_PRESS } from '@/lib/theme/motion';
  *
  * ── THE NUMBERS ARE MEASURED, NOT CHOSEN ──────────────────────────────────
  *
- * Read off `floating-menu/icon-buttons-groups-dark.png` (638x96, a 2x capture)
+ * Read off `dev-docs/design/iteration-2/floating-menu/icon-buttons-groups-dark.png` (638x96, a 2x capture)
  * by sampling the actual pixels rather than eyeballing:
  *
  *   surfaces      three of them, every one exactly 72px tall
