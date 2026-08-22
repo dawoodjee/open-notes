@@ -892,13 +892,23 @@ a rule that is already useful.
 
 ---
 
-### Stage 12e — iPad chrome ⚠️ BUILT, LANDSCAPE VERIFIED (2026-08-22), branch `stage-12e-ipad-chrome`
+### Stage 12e — iPad chrome ✅ DONE (2026-08-22), branch `stage-12e-ipad-chrome`
 
-**Blocked on one thing only:** portrait and Split View could not be verified —
-the simulator cannot be rotated from here. `osascript` returns *"Not authorized
-to send Apple events to System Events. (-1743)"*, so rotation needs either
-Terminal granted Automation permission in System Settings › Privacy & Security,
-or Adam pressing ⌘← in the Simulator. Everything else is done and checked.
+**Portrait and landscape verified on device.** Adam rotated the simulator by
+hand — `osascript` returns *"Not authorized to send Apple events to System
+Events. (-1743)"* and the Automation permission is being fixed at the end of the
+stage.
+
+**Split View is verified by test, not on device, and that is a hard limit.**
+Injected touches reveal the Dock but cannot drag an app out of it: that is a
+`UIDragInteraction`, and injected touches never reach UIKit's recognisers — the
+same root cause as the RNGH swipe problem from Stage 11. So the requirement is
+met the other way. What Split View actually does to this app is make its window
+narrow; every other consequence follows. `lib/layout/editorChrome.ts` decides
+the chrome from width and platform, and `tests/editorChrome.test.ts` asserts it
+at the real Split View widths — **320pt and 507pt get the PHONE chrome even
+though `isPad` is true**, which is the trap, and 880pt keeps the iPad bar. The
+narrow path is separately exercised live on the iPhone all session.
 
 **The plan's prose was wrong and the screenshot won.** The plan said iPad would
 inherit desktop's left/centre/right grouping. `ipad-collapsed-groups.jpeg` draws

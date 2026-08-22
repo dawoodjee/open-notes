@@ -65,6 +65,9 @@ import { isBlankNote, noteToPlainText } from '@/types/note';
 import { BootSpinner } from '@/components/BootSpinner';
 import { BACKGROUND, useTheme } from '@/contexts/ThemeContext';
 import { paneChrome } from '@/lib/layout/paneChrome';
+// The same constant the editor's chrome decision uses. Two literals meaning
+// almost the same thing would drift the first time one was tuned.
+import { WIDE_LAYOUT_MIN_WIDTH } from '@/lib/layout/editorChrome';
 
 // How long the launch gate below will wait before giving up and painting
 // whatever it has. Deliberately generous -- it is a failsafe for a path that
@@ -102,7 +105,7 @@ export default function NotesLayout() {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   // 768 is the `md:` breakpoint the rest of the app already uses. Above it,
   // both the folder pane and the list are on screen together.
-  const isWideLayout = windowWidth >= 768;
+  const isWideLayout = windowWidth >= WIDE_LAYOUT_MIN_WIDTH;
   const isLandscape = windowWidth > windowHeight;
 
   /**

@@ -20,6 +20,7 @@ import { ChromeScrim } from './ChromeScrim';
 import { BAR_HEIGHT, DesktopTopBar } from './DesktopTopBar';
 import { PAD_BAR_HEIGHT, PadTopBar } from './PadTopBar';
 import type { PaneChrome } from '@/lib/layout/paneChrome';
+import { editorChrome } from '@/lib/layout/editorChrome';
 import { GROUP_GAP, IconButton, IconButtonGroup, SURFACE } from './IconButton';
 
 // Gluestack UI Primitives
@@ -126,30 +127,30 @@ export default function NoteEditorPane({
    * clear. Derived from the same numbers the bar is laid out with rather than
    * a second literal, so the two cannot drift.
    */
-  const useCompact = useWindowDimensions().width < 768;
-
   /**
-   * The floating desktop bar replaces the bordered header row, and ONLY on web.
+   * WHICH CHROME, decided in one place: lib/layout/editorChrome.ts.
    *
-   * Not because iPad is narrower -- it is not -- but because iPad gets its own
-   * collapsible-first arrangement in 12e, and shipping the desktop bar there
-   * first would mean building a layout twice and throwing one away. Until then
-   * a wide iPad keeps the bordered row it already has.
+   * It is a module with tests rather than three ternaries here because of Split
+   * View. `Platform.isPad` stays true in a Split View pane, so "iPad gets the
+   * iPad bar" would hand a 507pt-wide pane a bar laid out for a full screen.
+   * Width has to win, and the test says so -- which is how that requirement
+   * gets checked at all, given that driving Split View from a script means a
+   * drag out of the Dock on a multitasking model iPadOS 26 rebuilt.
+   *
+   * `useWindowDimensions` reports the WINDOW, not the screen, so this responds
+   * to a Split View resize on its own.
    */
+  const chromeKind = editorChrome({
+    width: useWindowDimensions().width,
+    platform: Platform.OS === 'ios' ? 'ios' : Platform.OS === 'web' ? 'web' : 'android',
+    isPad: Platform.OS === 'ios' && Platform.isPad,
+  });
+
+  const useCompact = chromeKind === 'phone';
   const isDesktop = Platform.OS === 'web';
-  const useDesktopBar = isDesktop && !useCompact;
+  const useDesktopBar = chromeKind === 'desktop';
+  const usePadBar = chromeKind === 'pad';
 
-  /**
-   * The iPad's own bar, which is NOT the desktop one -- different zones,
-   * different grouping, a search circle instead of an inline field. See
-   * PadTopBar for why the screenshot overrode the plan's prose here.
-   *
-   * `Platform.isPad` rather than a width test: an iPhone in landscape can be
-   * wider than 768 and must keep the phone chrome, because the thing that
-   * makes iPad chrome right is the input method and the pane count, not the
-   * pixel count.
-   */
-  const usePadBar = Platform.OS === 'ios' && Platform.isPad && !useCompact;
   const [textStyleOpen, setTextStyleOpen] = useState(false);
   const [movingNote, setMovingNote] = useState(false);
 
