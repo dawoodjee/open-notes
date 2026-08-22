@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/components/ui/icon';
 import { RotateCcw, ChevronLeft } from 'lucide-react-native';
 import { PressableScale } from './PressableScale';
+import { DialogOverlay } from './DialogOverlay';
 import { HeaderCircleButton } from './HeaderCircleButton';
 import { Note, formatNoteDate, parseNoteContent } from '@/types/note';
 import { TRASH_RETENTION_DAYS } from '@/lib/powersync/db';
@@ -166,7 +167,7 @@ export function RecentlyDeletedPane({
       )}
 
       {confirmingEmpty ? (
-        <View className="absolute inset-0 items-center justify-center px-8 bg-black/40">
+        <DialogOverlay onDismiss={() => setConfirmingEmpty(false)}>
           <View className="w-full max-w-sm rounded-2xl bg-background p-6">
             <RNText className="text-lg font-semibold text-foreground mb-2">
               Delete Everything?
@@ -201,7 +202,7 @@ export function RecentlyDeletedPane({
               </PressableScale>
             </View>
           </View>
-        </View>
+        </DialogOverlay>
       ) : null}
     </View>
   );

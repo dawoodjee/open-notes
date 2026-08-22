@@ -17,6 +17,7 @@ import { Search, SquarePen, PanelLeft, ChevronLeft, Check } from 'lucide-react-n
 import { Note, parseNoteContent } from '@/types/note';
 import AvatarMenuTrigger from './AvatarMenuTrigger';
 import { PressableScale } from './PressableScale';
+import { DialogOverlay } from './DialogOverlay';
 import { HeaderCircleButton } from './HeaderCircleButton';
 import { NoteRow } from './NoteRow';
 import { SwipeableNoteRow } from './SwipeableNoteRow';
@@ -696,7 +697,7 @@ function ConfirmBulkDelete({
   onConfirm: () => void;
 }) {
   return (
-    <View className="absolute inset-0 items-center justify-center px-8 bg-black/40">
+    <DialogOverlay onDismiss={onCancel}>
       <View className="w-full max-w-sm rounded-2xl bg-background p-6">
         <RNText className="text-lg font-semibold text-foreground mb-2">
           Delete {count} {count === 1 ? 'Note' : 'Notes'}?
@@ -727,7 +728,7 @@ function ConfirmBulkDelete({
           </PressableScale>
         </View>
       </View>
-    </View>
+    </DialogOverlay>
   );
 }
 

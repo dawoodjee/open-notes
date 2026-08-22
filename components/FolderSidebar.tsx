@@ -185,7 +185,17 @@ export function FolderSidebar({
       isOpen={isOverflowOpen}
       onOpen={() => setIsOverflowOpen(true)}
       onClose={() => setIsOverflowOpen(false)}
-      placement="bottom right"
+      /**
+       * PHONES right-align this menu under its trigger, which sits at the far
+       * right of a full-width header -- correct there, and wrong the moment the
+       * sidebar is a column. On a landscape iPad the trigger is only ~215pt from
+       * the left edge, so right-aligning a 260pt-wide menu under it put the
+       * menu's left edge at roughly -20 and clipped its corner off the display.
+       * Left-aligning under the trigger keeps it on screen at every width,
+       * because the trigger is near the LEFT edge in exactly the layouts where
+       * the sidebar is narrow.
+       */
+      placement={useCompactHeader ? 'bottom right' : 'bottom left'}
       offset={8}
       className="rounded-2xl p-0 overflow-hidden min-w-[260px]"
       trigger={({ ...triggerProps }) => (
