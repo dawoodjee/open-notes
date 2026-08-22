@@ -40,6 +40,9 @@ import type { RichEditorHandle, RichEditorProps } from './RichEditor';
  *
  * That guard is why the badge below has two texts and not one.
  */
+/** Plain text has no formatting. See the native file for what this is for. */
+export const EDITOR_SUPPORTS_FORMATTING = false;
+
 const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEditor(
   { initialContent = '', onChange, autoFocus, contentInsetTop = 0 },
   handle
@@ -48,7 +51,18 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
   // one it would also answer to Keyboard.dismiss(). It still implements the
   // handle, because the caller must not have to know which editor it got.
   const inputRef = useRef<TextInput>(null);
-  useImperativeHandle(handle, () => ({ blur: () => inputRef.current?.blur() }), []);
+  useImperativeHandle(
+    handle,
+    () => ({
+      blur: () => inputRef.current?.blur(),
+      // Plain text has no formatting to apply. A no-op rather than an omission,
+      // so a caller never has to ask which editor it got -- the desktop bar's
+      // Checklist button is simply inert here, matching the badge that already
+      // says this editor is plain text.
+      run: () => {},
+    }),
+    []
+  );
   const editable = useMemo(() => isPlainTextSafe(initialContent), [initialContent]);
 
   /**

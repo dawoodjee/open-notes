@@ -892,7 +892,71 @@ a rule that is already useful.
 
 ---
 
-### Stage 12c — desktop top bar + minimize/restore ⚠️ PART DONE (2026-08-22), branch `stage-12c-desktop-chrome`
+### Stage 12c — desktop top bar + minimize/restore ✅ DONE (2026-08-22), branches `stage-12c-desktop-chrome` then `stage-12c-desktop-wiring`
+
+**The blocker is gone and the bar is wired.** 12c built the matrix, the bar and
+the harness but could not wire any of it: web had no database, so a bar over a
+real document was unverifiable. 12g gave web real notes. The bar now floats over
+the live editor on web at wide widths, and all four minimize/restore states were
+walked in the browser with the restore-control count asserted at each one:
+
+| state | restore controls | which |
+|---|---|---|
+| both shown | 0 | — |
+| folders hidden | 1 | Show folders, in the list pane |
+| neither | 1 | Show note list, in the editor's capsule |
+| list hidden | 1 | Show note list |
+
+**Stage 11's debt is paid.** Search and New Note left the desktop list pane —
+they were kept there "for now on every platform" precisely until this bar
+existed. Two search fields on one screen is worse than the wrong one, because
+you cannot tell which list either filters. A wide iPad keeps its bottom bar
+until 12e.
+
+**Two real bugs the wiring surfaced:**
+
+The list pane's folder button was labelled **"Show folders" permanently**, so a
+screen reader announced the opposite of what it did whenever folders were on
+screen. It now reads its label from the matrix.
+
+Removing the desktop header row took the list's collapse control with it, making
+the both-hidden state unreachable and half the matrix dead code. The references
+show the RESULT of hiding the list but never the control — macOS puts it in the
+View menu, which this app has no equivalent of. A `PanelLeftClose` button in the
+list pane header is a **deliberate divergence**, recorded rather than silently
+added.
+
+**The `Aa` panel is built and NOT live.** `TextStylePanel` renders the
+reference's popover — inline marks over paragraph styles, drawn in the style
+they apply, exactly one row ticked. But the desktop bar is web-only, and the web
+editor is plain text, so `Aa` and Checklist correctly render **dimmed** there
+under the standing grey-out rule (`EDITOR_SUPPORTS_FORMATTING`, a build-time
+constant that flips with the `.web.tsx` resolution). Rather than ship it
+unlooked-at, it is driven by a fixture in `app/dev-chrome.tsx` and its logic is
+extracted to `lib/notes/paragraphStyle.ts` with 8 tests. It goes live with the
+iPad chrome in 12e, where a native editor sits behind it.
+
+**Body is derived, not reported.** The editor has no "paragraph" state — a plain
+line is simply none of h1–h3, code block, quote or the three lists. So the menu
+infers it, which is what stops an ordinary line showing nothing ticked. The
+inverse matters more: "make this Body" is *toggle off whatever is on*, and the
+naive version — toggle every block style — would turn six of them ON, because
+the editor's block toggles are their own inverse. That is the test that earns
+its keep.
+
+**Known, two steps not one:** with the list hidden and folders shown, there is no
+way to hide the folders — that control lives in the list pane header, which is
+itself hidden. Restore the list first. `paneChrome` provides
+`folderPaneShowsCollapse` for a folder-pane control that does not exist yet;
+there is no reference for one.
+
+**Verified:** four states walked in the browser, the `Aa` panel's mutual
+exclusion checked via `aria-checked` before and after (Body → Heading, exactly
+one ticked each time). `tsc` clean, 128/128, lint at the 8-warning baseline.
+
+---
+
+### Stage 12c (first pass) — the matrix, the bar and the harness, branch `stage-12c-desktop-chrome`
 
 **Built and verified:** the matrix, the bar, the harness.
 **Not done, and blocked:** wiring the bar into the real `NotesLayout`/`NoteEditorPane`.

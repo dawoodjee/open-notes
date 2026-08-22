@@ -26,7 +26,10 @@ import React, { useState } from 'react';
 import { Pressable, ScrollView, Text as RNText, View } from 'react-native';
 
 import { BAR_HEIGHT, DesktopTopBar } from '@/components/DesktopTopBar';
+import { TextStylePanel } from '@/components/TextStylePanel';
 import { paneChrome, restoreControlCount } from '@/lib/layout/paneChrome';
+import type { ToolKey } from '@/lib/notes/toolbarContext';
+import { BLOCK_STYLES, paragraphStyleToggles } from '@/lib/notes/paragraphStyle';
 
 export default function DevChrome() {
   if (!__DEV__) return null;
@@ -46,6 +49,41 @@ function Harness() {
   const [query, setQuery] = useState('');
   const [log, setLog] = useState<string[]>([]);
   const [scrolled, setScrolled] = useState(false);
+
+  /**
+   * The `Aa` panel's own fixture.
+   *
+   * It is here rather than in the live app because the live desktop bar only
+   * renders on web, and the web editor is plain text -- so on the one platform
+   * that shows this bar, the panel has nothing to act on and `Aa` is correctly
+   * dimmed. The panel itself is real and lands with the iPad chrome in 12e,
+   * where a native editor exists behind it.
+   *
+   * Rather than ship it unlooked-at until then, it is driven here by a fixture
+   * that behaves the way the editor does: block styles are mutually exclusive,
+   * inline marks toggle freely. That makes the two things worth checking now --
+   * that exactly one paragraph row is ever ticked, and that Body ticks when
+   * none of the others do -- checkable by clicking.
+   */
+  const [active, setActive] = useState<Partial<Record<ToolKey, boolean>>>({});
+  const [styleOpen, setStyleOpen] = useState(false);
+
+  const runFixture = (key: ToolKey) => {
+    note(`run ${key}`);
+    setActive((prev) => {
+      // Driven by the SAME function the editor uses, so the fixture cannot
+      // quietly behave better than the real thing.
+      if (BLOCK_STYLES.includes(key) || key === 'body') {
+        const next = { ...prev };
+        for (const style of paragraphStyleToggles(prev, key)) {
+          if (next[style]) delete next[style];
+          else next[style] = true;
+        }
+        return next;
+      }
+      return { ...prev, [key]: !prev[key] };
+    });
+  };
 
   const chrome = paneChrome({ foldersVisible, listVisible });
   const note = (s: string) => setLog((l) => [s, ...l].slice(0, 6));
@@ -112,8 +150,16 @@ function Harness() {
             onShare={() => note('share')}
             searchQuery={query}
             onSearchChange={setQuery}
-            onTextStyles={() => note('text styles')}
-            onChecklist={() => note('checklist')}
+            onTextStyles={() => setStyleOpen((v) => !v)}
+            onChecklist={() => runFixture('checklist')}
+          />
+
+          <TextStylePanel
+            open={styleOpen}
+            onClose={() => setStyleOpen(false)}
+            active={active}
+            onRun={runFixture}
+            top={BAR_HEIGHT - 8}
           />
           <ScrollView
             // The whole point of the inset: at rest the title clears the bar.
