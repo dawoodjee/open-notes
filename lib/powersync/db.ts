@@ -1,5 +1,5 @@
 import { Note, parseNoteContent } from '@/types/note';
-import { PowerSyncDatabase } from '@powersync/react-native';
+import type { CommonPowerSyncDatabase } from '@powersync/common';
 import * as Crypto from 'expo-crypto';
 import { AppSchema } from './schema';
 import { connector } from './connector';
@@ -7,6 +7,7 @@ import { getCurrentUserId } from '@/lib/auth/currentUser';
 import { getDatabaseKey } from '@/lib/crypto/vault';
 import { encryptField, tryDecryptField } from '@/lib/crypto/noteCrypto';
 import { ENCRYPTED_DB_FILENAME, migrateToEncrypted } from './migrateToEncrypted';
+import { isSessionOnlyDatabase, openDatabase } from './openDatabase';
 import { isSkillsFolder } from './folders';
 
 // Note the "-v2": the encrypted database is a different file from the
@@ -23,9 +24,16 @@ export const DB_FILENAME = ENCRYPTED_DB_FILENAME;
  * their PIN. A module-level `new PowerSyncDatabase(...)` would run on import,
  * long before any of that, so there would be no key to give it.
  */
-let instance: PowerSyncDatabase | null = null;
+let instance: CommonPowerSyncDatabase | null = null;
 
-export function getPowerSync(): PowerSyncDatabase {
+/**
+ * Re-exported so the UI can ask one question -- "does what I write here
+ * survive?" -- without importing a platform-specific module to find out.
+ * True on web, where the database lives in memory only. See openDatabase.web.ts.
+ */
+export { isSessionOnlyDatabase };
+
+export function getPowerSync(): CommonPowerSyncDatabase {
   if (!instance) {
     throw new Error('PowerSync is not initialised yet -- unlock the vault first.');
   }
@@ -61,22 +69,13 @@ export async function initPowerSync(): Promise<void> {
     // before this stage would be unreachable on first launch.
     await migrateToEncrypted(getDatabaseKey());
 
-    const db = new PowerSyncDatabase({
+    // Everything platform-specific about the database is in openDatabase.ts /
+    // openDatabase.web.ts, and nothing else in this file needs to know which
+    // one it got. See there for why web is memory-only.
+    const db = openDatabase({
       schema: AppSchema,
-      database: {
-        dbFilename: DB_FILENAME,
-        // Note the nesting: sqliteOptions belongs to the op-sqlite adapter's
-        // open options, NOT to PowerSyncDatabase's root options. Put it at the
-        // top level and TypeScript rejects it; the encryption would simply
-        // never be configured.
-        //
-        // Whole-file encryption: SQLCipher works at the page level, so notes,
-        // ui_state, sync_issues and note_sync_base are all covered by this one
-        // option -- there is nothing table-specific to configure.
-        sqliteOptions: {
-          encryptionKey: getDatabaseKey(),
-        },
-      },
+      dbFilename: DB_FILENAME,
+      encryptionKey: getDatabaseKey(),
     });
 
     // Assigned only after init() resolves. Assigning first -- as this used to
@@ -107,6 +106,15 @@ export async function closePowerSync(): Promise<void> {
   const open = instance;
   instance = null;
   syncBaseTrackingStarted = false;
+  // Forget any init still in flight, so the NEXT initPowerSync() genuinely
+  // starts over instead of awaiting a promise that may never settle.
+  //
+  // That is not hypothetical: a database open can hang rather than reject --
+  // web with a missing worker asset does exactly this -- and `initInFlight` is
+  // cleared in its own `finally`, which never runs while it is hung. Without
+  // this line, every retry would join the dead promise and the app could not
+  // recover from a hang even though a fresh open would have worked.
+  initInFlight = null;
   if (!open) return;
   try {
     await open.close();
@@ -232,7 +240,7 @@ async function refreshSyncBaseIfSettled(): Promise<void> {
  * setNoteHiddenFromApi below: this changes storage representation, not the
  * note's substance, so it must not reorder the list or read as an edit.
  */
-async function encryptLegacyPlaintextNotes(db: PowerSyncDatabase): Promise<void> {
+async function encryptLegacyPlaintextNotes(db: CommonPowerSyncDatabase): Promise<void> {
   const rows = await db.getAll<{ id: string; body: string; title: string }>(
     `SELECT id, body, title FROM notes
      WHERE body NOT LIKE 'enc:v1:%' OR title NOT LIKE 'enc:v1:%'`
@@ -276,7 +284,7 @@ export const TRASH_RETENTION_DAYS = 30;
  * after them: encryptLegacyPlaintextNotes must not spend work re-encrypting
  * notes that are about to be deleted.
  */
-async function purgeExpiredTrash(db: PowerSyncDatabase): Promise<void> {
+async function purgeExpiredTrash(db: CommonPowerSyncDatabase): Promise<void> {
   const cutoff = new Date(
     Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000
   ).toISOString();

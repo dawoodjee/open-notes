@@ -1,5 +1,12 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text as RNText, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text as RNText,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react-native';
 import { Icon } from '@/components/ui/icon';
@@ -23,18 +30,56 @@ import { BACKGROUND, ON_ACCENT, useTheme } from '@/contexts/ThemeContext';
  *   Reset is destructive and says so plainly, without softening. Notes that
  *   belong to an account come back on the next sync; notes written before
  *   signing in exist nowhere else and will not.
+ *
+ * ── AND WHY IT IS NO LONGER A DEAD END (2026-08-22) ───────────────────────
+ *
+ * It used to offer exactly one action, and that action deleted notes. Adam's
+ * call: this screen "should never be seen by the user, there has to be a way
+ * through it". Two changes follow from that.
+ *
+ * The first is that the non-destructive option now comes FIRST and is the
+ * prominent one. Most of what fails here is transient, and an error page whose
+ * only exit is destructive gets taken by people who did not need to lose
+ * anything.
+ *
+ * The second is not in this file at all: web no longer arrives here in the
+ * normal case. It used to be structurally guaranteed to -- no keychain, no
+ * native SQLite -- so the error screen WAS the web app. See
+ * lib/crypto/secureStorage.web.ts and lib/powersync/openDatabase.web.ts.
  */
 export function BootFailureScreen({
   error,
+  onRetry,
   onReset,
 }: {
   error: string | null;
+  onRetry: () => Promise<void>;
   onReset: () => Promise<void>;
 }) {
   const { scheme } = useTheme();
   const [showDetail, setShowDetail] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+
+  const handleRetry = async () => {
+    setRetrying(true);
+    try {
+      await onRetry();
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  /**
+   * Web only, and genuinely different from Try again rather than a duplicate
+   * of it: a retry re-runs app code inside a JavaScript context that is
+   * already in whatever state broke it, while a reload re-fetches the bundle
+   * and the wasm with it. When the failure is a half-loaded asset -- the most
+   * likely web failure now that the database is wa-sqlite -- only the second
+   * one can help.
+   */
+  const canReload = Platform.OS === 'web' && typeof window !== 'undefined';
 
   const handleReset = async () => {
     setResetting(true);
@@ -78,6 +123,27 @@ export function BootFailureScreen({
         ) : (
           <View className="h-4" />
         )}
+
+        <Pressable
+          onPress={handleRetry}
+          disabled={retrying}
+          className="py-3.5 rounded-2xl bg-lime-500 items-center active:opacity-80 disabled:opacity-50 mb-3"
+        >
+          {retrying ? (
+            <ActivityIndicator color={ON_ACCENT} />
+          ) : (
+            <RNText className="text-sm font-semibold text-on-accent">Try again</RNText>
+          )}
+        </Pressable>
+
+        {canReload ? (
+          <Pressable
+            onPress={() => window.location.reload()}
+            className="py-3.5 rounded-2xl bg-muted items-center active:bg-accent mb-3"
+          >
+            <RNText className="text-sm font-medium text-foreground">Reload the page</RNText>
+          </Pressable>
+        ) : null}
 
         {confirming ? (
           <View className="bg-red-50 dark:bg-red-950/40 rounded-2xl p-4 mb-4">
