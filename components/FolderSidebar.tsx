@@ -1,5 +1,13 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text as RNText, View } from 'react-native';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { StyleSheet, Text as RNText, View } from 'react-native';
+/**
+ * Gesture-handler's ScrollView, not React Native's, and only because of the
+ * drag: `blocksExternalGesture` needs a scrollable whose recogniser
+ * gesture-handler actually owns, otherwise there is nothing for the folder pan
+ * to outrank and iOS's scroll view cancels the drag mid-flight. It behaves
+ * identically to RN's in every other respect.
+ */
+import { ScrollView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Pressable } from '@/components/ui/pressable';
@@ -8,6 +16,7 @@ import { Menu, MenuItem, MenuItemLabel, MenuSeparator } from '@/components/ui/me
 import { FolderPlus, MoreHorizontal, Scroll } from 'lucide-react-native';
 
 import { FolderRow } from './FolderRow';
+import { ReorderableFolderList } from './ReorderableFolderList';
 import { HeaderCircleButton } from './HeaderCircleButton';
 import { FolderContextMenu, FolderMenuTarget } from './FolderContextMenu';
 import { DeleteFolderDialog, FolderNameDialog } from './DeleteFolderDialog';
@@ -65,6 +74,10 @@ export interface FolderSidebarProps {
   onToggleIncludeInNotes: (folderId: string, next: boolean) => void;
   onToggleGroupByDate: (folderId: string, next: boolean) => void;
   onMoveFolder: (folderId: string, direction: -1 | 1) => void;
+  /** Where a drag ends. Distinct from onMoveFolder because a drop lands on an
+   *  arbitrary slot, which is a different database write -- see
+   *  moveTopLevelFolderToIndex. */
+  onMoveFolderToIndex: (folderId: string, toIndex: number) => void;
   onSetFolderEnabled: (folderId: string, enabled: boolean) => void;
   onSetSubtreeApiVisibility: (folderId: string, visible: boolean) => void;
   /** Resolved by the parent, which owns the note data the aggregate reads. */
@@ -99,6 +112,7 @@ export function FolderSidebar({
   onToggleIncludeInNotes,
   onToggleGroupByDate,
   onMoveFolder,
+  onMoveFolderToIndex,
   onSetFolderEnabled,
   onSetSubtreeApiVisibility,
   skillsApiVisibility,
@@ -110,6 +124,9 @@ export function FolderSidebar({
   const [isEditing, setIsEditing] = useState(false);
 
   const [isOverflowOpen, setIsOverflowOpen] = useState(false);
+  /** Frozen while a folder is being dragged -- see ReorderableFolderList. */
+  const [isDragging, setIsDragging] = useState(false);
+  const scrollRef = useRef(null);
 
   /**
    * Skills is pinned; everything else is the reorderable list.
@@ -282,6 +299,8 @@ export function FolderSidebar({
       </View>
 
       <ScrollView
+        ref={scrollRef}
+        scrollEnabled={!isDragging}
         contentContainerStyle={{
           paddingHorizontal: 8,
           paddingBottom: insets.bottom + 16,
@@ -327,21 +346,62 @@ export function FolderSidebar({
           />
         ) : null}
 
-        {reorderable.map((node, index) => (
-          <FolderSubtree
-            key={node.folder.id}
-            node={node}
-            selection={selection}
-            expandedIds={expandedIds}
-            isEditing={isEditing}
-            canMoveUp={index > 0}
-            canMoveDown={index < reorderable.length - 1}
-            onSelect={onSelect}
-            onToggleExpanded={onToggleExpanded}
-            onRequestMenu={openMenuFor}
-            onMove={onMoveFolder}
+        {/*
+          EDIT MODE IS A DIFFERENT LIST, not the same list with extra buttons.
+
+          Children are not rendered while editing, and that is load-bearing
+          rather than tidiness: the drag maths assumes every row in the list is
+          one row tall (see lib/notes/reorder.ts), and an expanded parent is as
+          tall as its subtree. Reordering has always been top-level-only -- the
+          old arrow path already passed isEditing={false} down to children -- so
+          hiding what cannot be moved also stops the list offering rows that
+          would refuse to be dragged.
+        */}
+        {isEditing ? (
+          <ReorderableFolderList
+            ids={reorderable.map((n) => n.folder.id)}
+            onMove={onMoveFolderToIndex}
+            onDragActiveChange={setIsDragging}
+            scrollRef={scrollRef}
+            renderRow={(index, handle) => {
+              const node = reorderable[index];
+              if (!node) return null;
+              const { folder } = node;
+              return (
+                <FolderRow
+                  label={folder.decryptFailed ? 'Unreadable folder' : folder.name || 'New Folder'}
+                  depth={0}
+                  noteCount={node.noteCount}
+                  isSelected={isSameSelection(selection, { kind: 'folder', id: folder.id })}
+                  hasChildren={node.children.length > 0}
+                  variant={folder.kind === 'skills' ? 'skills' : 'user'}
+                  isEditing
+                  dragHandle={handle}
+                  canMoveUp={index > 0}
+                  canMoveDown={index < reorderable.length - 1}
+                  onPress={() => onSelect({ kind: 'folder', id: folder.id })}
+                  onMove={(direction) => onMoveFolder(folder.id, direction)}
+                />
+              );
+            }}
           />
-        ))}
+        ) : (
+          reorderable.map((node, index) => (
+            <FolderSubtree
+              key={node.folder.id}
+              node={node}
+              selection={selection}
+              expandedIds={expandedIds}
+              isEditing={false}
+              canMoveUp={index > 0}
+              canMoveDown={index < reorderable.length - 1}
+              onSelect={onSelect}
+              onToggleExpanded={onToggleExpanded}
+              onRequestMenu={openMenuFor}
+              onMove={onMoveFolder}
+            />
+          ))
+        )}
 
         {/* Recently Deleted -- always last, and deliberately outside the
             reorderable list rather than pinned by a sort_order the user could

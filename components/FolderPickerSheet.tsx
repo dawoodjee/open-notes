@@ -10,7 +10,7 @@ import {
   X,
 } from 'lucide-react-native';
 
-import { ModalBottomSheet } from '@swmansion/react-native-bottom-sheet';
+import { ModalBottomSheet } from './ModalSheet';
 import { Icon } from '@/components/ui/icon';
 import { PressableScale } from './PressableScale';
 import { FolderNameDialog } from './DeleteFolderDialog';

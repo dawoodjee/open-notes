@@ -15,6 +15,7 @@ import './plainTextBody.test';
 import './paragraphStyle.test';
 import './editorChrome.test';
 import './findMatches.test';
+import './reorder.test';
 import { report } from './harness';
 
 report();

@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { IconButton, SURFACE } from './IconButton';
 import { Text as RNText, View, Platform } from 'react-native';
 import {
@@ -61,6 +61,18 @@ export interface FolderRowProps {
   isEditing?: boolean;
   canMoveUp?: boolean;
   canMoveDown?: boolean;
+  /**
+   * The drag handle, built by ReorderableFolderList because it owns the
+   * gesture. Present only in edit mode, and when it is present it REPLACES the
+   * up/down arrows -- three controls do not fit a 250pt iPad sidebar column,
+   * and iOS puts a grip there rather than a pair of arrows.
+   *
+   * The arrows are not lost. `onMove` stays wired, and in edit mode this row
+   * publishes it as VoiceOver actions instead (see accessibilityActions below):
+   * a drag handle is unusable to a screen reader, so reordering would otherwise
+   * become a sighted-only feature.
+   */
+  dragHandle?: React.ReactNode;
   onPress: () => void;
   onToggleExpanded?: () => void;
   onRequestMenu?: (anchor: { x: number; y: number }) => void;
@@ -79,6 +91,7 @@ export function FolderRow({
   isEditing = false,
   canMoveUp = false,
   canMoveDown = false,
+  dragHandle,
   onPress,
   onToggleExpanded,
   onRequestMenu,
@@ -123,6 +136,21 @@ export function FolderRow({
   const GlyphFor = { all: Notebook, trash: Trash2, skills: Scroll, user: FolderIcon }[variant];
   const iconSize = iconSizeForDepth(depth);
 
+  /**
+   * The keyboard/VoiceOver route to the same reorder the handle drags.
+   *
+   * Only offered where it would do something: an action in the rotor that
+   * silently no-ops at the top of the list is worse than one that is absent,
+   * because the rotor gives no other signal that it failed.
+   */
+  const reorderActions = useMemo(() => {
+    if (!isEditing || !onMove) return undefined;
+    const actions = [];
+    if (canMoveUp) actions.push({ name: 'moveUp', label: 'Move up' });
+    if (canMoveDown) actions.push({ name: 'moveDown', label: 'Move down' });
+    return actions.length ? actions : undefined;
+  }, [isEditing, onMove, canMoveUp, canMoveDown]);
+
   return (
     <View
       style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: depth * INDENT_PER_LEVEL }}
@@ -146,6 +174,11 @@ export function FolderRow({
         accessibilityRole="button"
         accessibilityLabel={`${label}, ${noteCount} ${noteCount === 1 ? 'note' : 'notes'}`}
         accessibilityState={{ selected: isSelected, expanded: isExpanded }}
+        accessibilityActions={reorderActions}
+        onAccessibilityAction={(event) => {
+          if (event.nativeEvent.actionName === 'moveUp') onMove?.(-1);
+          if (event.nativeEvent.actionName === 'moveDown') onMove?.(1);
+        }}
         {...webContextMenu}
       >
         {/* Fixed-width slot, glyph centred inside it -- see ICON_SLOT. Centred
@@ -191,7 +224,9 @@ export function FolderRow({
         )}
       </PressableScale>
 
-      {isEditing ? (
+      {isEditing && dragHandle ? (
+        dragHandle
+      ) : isEditing ? (
         <View style={{ flexDirection: 'row' }}>
           <ReorderButton
             direction={-1}

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { IconButton } from './IconButton';
 import { ScrollView, Text as RNText, View, useWindowDimensions } from 'react-native';
-import { ModalBottomSheet } from '@swmansion/react-native-bottom-sheet';
+import { ModalBottomSheet } from './ModalSheet';
 import { Pressable } from '@/components/ui/pressable';
 import { HStack } from '@/components/ui/hstack';
 import { Icon } from '@/components/ui/icon';

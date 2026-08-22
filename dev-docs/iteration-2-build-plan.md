@@ -2,7 +2,7 @@
 
 **Governs:** iteration 2 only (folders, list view, floating menu chrome, web parity, website, export/import, env toggle). MVP history stays in `dev-docs/mvp-build-plan.md` — don't merge this into it; keep the two files separate so a Claude Code session planning a folder icon doesn't have to read Stage 0–8 and the E2EE Decisions Log first.
 
-**Status (2026-08-22):** Stage 9 ✅ merged · Stage 10 ✅ merged · **Stage 11 ✅ merged to `main`** — every checkpoint item verified except web, which is blocked until Stage 13 (the accent-border rule itself was since confirmed on iPad). **Stage 11.5 ✅ done** — TenTap and the WebView are gone; the editor is native. Spike said NO-GO, Adam overrode it, and a wrap-on-read migration preserved old notes anyway. See `docs/editor-migration-findings.md` plus the Decisions Log. Stage 12, 12.5, 13–16 not started.
+**Status (2026-08-23):** Stage 9 ✅ merged · Stage 10 ✅ merged · **Stage 11 ✅ merged to `main`** — every checkpoint item verified except web, which is blocked until Stage 13 (the accent-border rule itself was since confirmed on iPad). **Stage 11.5 ✅ done** — TenTap and the WebView are gone; the editor is native. Spike said NO-GO, Adam overrode it, and a wrap-on-read migration preserved old notes anyway. See `docs/editor-migration-findings.md` plus the Decisions Log. Stage 12, 12.5, 13–16 not started.
 
 > **Stage 11 checkpoint — what was actually verified, and how.**
 > - **Date buckets** — unit tests (`npm test`, 86 tests overall) walking every boundary from both sides, including 6-vs-7 days and a future timestamp collapsing into Today.
@@ -1520,37 +1520,76 @@ only in a chat log.
 - [x] **4. `SettingsDialog` on the native bottom sheet.** ✅ Sub-view navigation
       (Settings → Appearance) verified; the sheet keeps its height rather than
       resizing under the thumb as you push in.
-- [ ] **5. Drag-to-reorder folders** — ⛔ **BLOCKED, needs a decision from Adam.**
-      `react-native-reanimated-dnd` is unusable at BOTH published versions:
+- [x] **5. Drag-to-reorder folders.** ✅ Done — built directly on
+      gesture-handler + Reanimated 4, **no dependency**. Adam chose option 1,
+      2026-08-23.
+
+      `react-native-reanimated-dnd` was tried first and is unusable at BOTH
+      published versions:
       - `1.1.0` peers on `react-native-reanimated >= 3.0.0` but calls
-        `useAnimatedGestureHandler`, which **Reanimated 4 removed**. Built and
-        ran; it throws `useAnimatedGestureHandler is not a function` from
-        `useSortable` the moment edit mode renders. The peer range is simply
-        wrong.
+        `useAnimatedGestureHandler`, which **Reanimated 4 removed**. It
+        installs, type-checks and builds, then throws
+        `useAnimatedGestureHandler is not a function` from `useSortable` the
+        moment edit mode renders. The peer range is simply wrong.
       - `2.0.0` requires `react-native-reanimated >= 4.2.0`; Expo SDK 54 pins
         `~4.1.1` (we are on 4.1.7) and `expo install --check` treats that as
         current.
 
-      The drag work was built end to end — a `Sortable` in edit mode, a
-      `moveTopLevelFolderToIndex` primitive that renumbers the level in one
-      transaction, and `moveToIndex` with 7 tests including "never loses or
-      duplicates a folder" — then **reverted**, and the package uninstalled, so
-      the tree stays clean while the call is made. The arrow buttons are back
-      and unchanged.
+      What shipped instead:
+      - `lib/notes/reorder.ts` — `moveToIndex`, `targetIndexFor`, `rowShift`,
+        with 16 tests. The last two are worklets; all three are pure, which is
+        the only reason any of this is testable (see below).
+      - `lib/powersync/folders.ts` — `moveTopLevelFolderToIndex`, renumbering
+        the level contiguously from 0 in one transaction. Deliberately NOT the
+        swap `moveTopLevelFolder` uses; see the Decisions Log.
+      - `components/ReorderableFolderList.tsx` — the pan, the displacement, and
+        the settle.
+      - `FolderRow` gains `dragHandle`, which replaces the up/down arrows in
+        edit mode, and publishes `onMove` as VoiceOver `moveUp`/`moveDown`
+        actions so reordering does not become sighted-only.
+      - The sidebar's `ScrollView` is now gesture-handler's, so
+        `blocksExternalGesture` has a recogniser to outrank.
 
-      **Options, with a recommendation:**
-      1. *Build it on Reanimated 4 + RNGH directly, no dependency.* The list is
-         one level, ≤10 rows, fixed height in edit mode — the tractable case.
-         **Recommended:** no version risk, and the pieces (worklets, springs,
-         the vendored swipeable) are already in use here.
-      2. *Bump Reanimated to 4.2.x and use dnd 2.0.0.* Off Expo SDK 54's tested
-         matrix, and Reanimated 4's version is coupled to
-         `react-native-worklets` — a bad bump breaks the native build that was
-         just done.
-      3. *Defer.* Keep the arrow buttons; they work.
-- [ ] **6. Checkpoint** (blocked on item 5): sheets behave as before with no Gluestack workarounds
-      left in either file; the new folder order survives a sync round-trip;
-      Skills stays pinned and undraggable.
+      **Children are hidden in edit mode.** Load-bearing, not tidiness: the
+      drag maths assumes every row is one row tall, and an expanded parent is as
+      tall as its subtree. Reordering was already top-level-only, so this also
+      stops the list offering rows that would refuse to be dragged.
+- [x] **6. Checkpoint.** ✅ `tsc` clean, **167/167 tests** (151 + 16),
+      `expo lint` at the 8-warning / 0-error baseline. Drag proved end to end in
+      the browser (below); edit-mode layout screenshotted on iPhone 17 Pro.
+
+**The gesture cannot be tested on a simulator, so it was tested in a browser.**
+Injected `simctl` touches drive React Native's own responder system but never
+fire a `UIGestureRecognizer`, so every gesture-handler recogniser in the app is
+invisible to them. On web, gesture-handler listens on pointer events — which
+*can* be synthesised. Four folders (Alpha/Bravo/Charlie/Delta) created in the
+session-only web database, then:
+
+| Case | Result |
+|---|---|
+| Alpha (0) dragged +132px = 3 rows | lands at index 3 ✅ |
+| Delta (2) dragged −88px = 2 rows | lands at index 0 ✅ |
+| First row dragged −400px | clamps, no write ✅ |
+| Last row dragged +400px | clamps, no write ✅ |
+| Any row dragged 6px (under half a row) | springs back, no write ✅ |
+| Mid-drag | neighbours slide out of the way, gap opens at the target ✅ |
+
+The order re-renders from `SELECT … FROM folders ORDER BY sort_order`, so the
+list changing IS proof the write landed rather than a local animation.
+
+What this does **not** prove, stated plainly: whether the pan wins against
+iOS's scroll view on a real finger. Two independent defences are in
+(`blocksExternalGesture`, plus `scrollEnabled={false}` for the duration), and
+haptics still need a physical device — no simulator has a Taptic Engine.
+
+**A regression this caught, unrelated to the drag:** the browser run opened on a
+red error screen — `(0, _reactNativeWebDistIndex.codegenNativeComponent) is not
+a function`. `@swmansion/react-native-bottom-sheet` is a Fabric component with
+no web implementation, so items 3 and 4 had silently taken web from working
+(12g) back to not booting. Fixed with `components/ModalSheet.tsx` /
+`.web.tsx` — a platform seam, because the throw is at *import*, so a guard at
+the call site could never have caught it. The web sheet keeps the presentation
+and the prop shape and honestly drops drag-to-dismiss.
 
 **Two traps found on the device, both silent:**
 
@@ -1565,8 +1604,9 @@ looked unchanged. Now `useWindowDimensions().height * 0.8`, reproducing the
 and was invisible against the app, because both are `bg-background` and the
 dimming was the only thing separating them.
 
-**Version call, made not escalated:** `react-native-reanimated-dnd@1.1.0`, not
-2.0.0. 2.0.0 peers on `react-native-reanimated >= 4.2.0` and Expo SDK 54 pins
+**Version call, made not escalated — SUPERSEDED 2026-08-23** (the package is
+gone; kept because the reasoning is why we did not bump Reanimated either):
+`react-native-reanimated-dnd@1.1.0`, not 2.0.0. 2.0.0 peers on `react-native-reanimated >= 4.2.0` and Expo SDK 54 pins
 `~4.1.1` (`expo install --check` agrees). Bumping the core animation library —
 which the motion primitives, the icon button, the format bar and the vendored
 swipeable all sit on — to satisfy folder reordering is the wrong way round. Same
@@ -1823,6 +1863,30 @@ One blocking item; the rest is settled and recorded in the Decisions Log below.
 ## Decisions Log
 
 *(iteration-2-specific decisions, same terse format as `dev-docs/mvp-build-plan.md` — decision / reasoning / verification / status. Don't duplicate MVP-era entries.)*
+
+### 2026-08-23 — Drag-to-reorder is hand-built, not a dependency
+- **Decision:** Adam chose option 1 of three. Build folder drag-to-reorder directly on `react-native-gesture-handler` + Reanimated 4 (`components/ReorderableFolderList.tsx` + `lib/notes/reorder.ts`), and drop `react-native-reanimated-dnd` entirely.
+- **Reasoning:** Neither published version of the library works here. `1.1.0` declares `react-native-reanimated >= 3.0.0` but calls `useAnimatedGestureHandler`, removed in Reanimated 4 — so it installs, type-checks and builds, then throws at first render. `2.0.0` needs Reanimated >= 4.2.0; Expo SDK 54 pins `~4.1.1`. Bumping the animation library that the motion primitives, the icon button, the format bar and the vendored swipeable all sit on, in order to satisfy folder reordering, is the wrong way round.
+- **Consequence accepted:** ~230 lines of gesture and animation code the project now owns and maintains. Bounded by what this list is NOT — one level, under a dozen rows, uniform height, edit mode only — so there is no nesting, virtualisation, cross-list drag or auto-scroll to get right. If a second sortable list ever appears, this is the thing to generalise rather than a library to re-evaluate.
+- **Status:** done. 167/167 tests; drag proved end to end in a browser (exact landing slot, both clamps, drop-in-place); edit-mode layout screenshotted on iPhone 17 Pro. **Not proved:** the pan winning against iOS's scroll view on a real finger — untestable here, defended twice.
+
+### 2026-08-23 — A dropped folder renumbers the level; an arrow still swaps
+- **Decision:** `moveTopLevelFolderToIndex` writes a contiguous `sort_order` across every top-level folder in one transaction. `moveTopLevelFolder` (the arrows, and now the VoiceOver actions) keeps its two-row swap.
+- **Reasoning:** A drop lands on an arbitrary slot. Dragging the first folder to the fourth is a rotation, not a swap, and expressing it as a chain of swaps would write the same rows anyway while passing through orders the user never saw.
+- **Consequence accepted:** Two devices dragging concurrently resolve last-writer-wins over the whole level rather than merging, which the swap path avoids. At one user, one level, under a dozen folders, a clobbered reorder costs one more drag; an order nobody chose costs trust in the control. The renumber also repairs the equal-`sort_order` case the swap path has to special-case.
+- **Status:** done.
+
+### 2026-08-23 — The drag handle replaces the arrows; VoiceOver keeps them
+- **Decision:** In edit mode a grip handle takes the place of the up/down arrow pair, and `onMove` is republished as VoiceOver `moveUp`/`moveDown` actions on the row. Children of an expanded folder are not rendered while editing.
+- **Reasoning:** Three controls do not fit a 250pt iPad sidebar column, and iOS puts a grip there rather than arrows. A drag handle is unusable to a screen reader, so the arrows had to survive as *something*. Hiding children is load-bearing rather than cosmetic: the drag maths assumes uniform row height and an expanded parent is as tall as its subtree.
+- **Consequence accepted:** Sighted users lose the tap-to-nudge affordance, and the tree flattens while editing. Both are one conditional to reverse if the flattening reads as data loss rather than as a mode.
+- **Status:** done; verified on iPhone 17 Pro (grips present on the three reorderable rows, absent on Skills and both virtual rows, and the expandable folder's chevron correctly gone).
+
+### 2026-08-23 — The bottom sheet gets a platform seam
+- **Decision:** `components/ModalSheet.tsx` re-exports the native sheet; `ModalSheet.web.tsx` is a plain positioned panel with a click-to-dismiss scrim and the same prop shape.
+- **Reasoning:** `@swmansion/react-native-bottom-sheet` is a Fabric component with no web implementation. Swapping both sheets onto it in items 3 and 4 took web from working (12g) straight back to a red error screen — `codegenNativeComponent is not a function` — and because the throw is at *import*, no guard at the call site could have caught it. Only Metro's platform resolution keeps it out of the web bundle.
+- **Consequence accepted:** Web loses drag-to-dismiss and the detent physics, which are the native sheet's whole point. Re-implementing them in JS would be a second, worse sheet to maintain, and on a desktop browser there is no thumb to drag with — the scrim and the sheet's own close button are the real dismissal routes there.
+- **Status:** done; web boots again and both sheets present correctly.
 
 ### 2026-08-22 — Planning docs live in `dev-docs/`, tracked in git
 - **Decision:** Move `prd.md`, `mvp-build-plan.md`, `iteration-2-build-plan.md` and the design screenshots into `dev-docs/`, and remove them from `.gitignore`. `docs/` stays the user-facing set.
