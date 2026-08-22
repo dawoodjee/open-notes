@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { IconButton } from './IconButton';
 import { ScrollView, Text as RNText, View } from 'react-native';
 import {
   ChevronDown,
@@ -135,16 +136,7 @@ export function FolderPickerSheet({
       <ModalBackdrop />
       <ModalContent className="w-full max-w-full h-4/5 mt-auto mb-0 mx-0 rounded-t-2xl rounded-b-none border-0 pb-8 bg-background">
         <View className="flex-row items-center px-4 pt-4 pb-2">
-          <PressableScale
-            onPress={onClose}
-            style={{ width: 36, height: 36 }}
-            className="rounded-full bg-foreground/10 items-center justify-center"
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Cancel"
-          >
-            <Icon as={X} className="w-5 h-5 text-foreground" />
-          </PressableScale>
+          <IconButton icon={X} label="Cancel" onPress={onClose} />
 
           <RNText className="flex-1 text-center text-base font-semibold text-foreground">
             Select a Folder

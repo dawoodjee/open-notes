@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
+import { IconButton } from './IconButton';
 import { FlatList, Text as RNText, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Icon } from '@/components/ui/icon';
 import { RotateCcw, ChevronLeft } from 'lucide-react-native';
 import { PressableScale } from './PressableScale';
 import { DialogOverlay } from './DialogOverlay';
@@ -151,15 +151,11 @@ export function RecentlyDeletedPane({
                   </View>
                 </PressableScale>
 
-                <PressableScale
+                <IconButton
+                  icon={RotateCcw}
+                  label={`Restore ${title}`}
                   onPress={() => onRestoreNote(note.id)}
-                  style={{ minHeight: 44, minWidth: 44 }}
-                  className="items-center justify-center rounded-xl bg-card border border-border"
-                  accessibilityRole="button"
-                  accessibilityLabel={`Restore ${title}`}
-                >
-                  <Icon as={RotateCcw} className="w-5 h-5 text-foreground" />
-                </PressableScale>
+                />
               </View>
             );
           }}

@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext } from 'react';
-import { View, type PressableProps, type ViewStyle } from 'react-native';
+import { View, type PressableProps, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
 import { Icon } from '@/components/ui/icon';
@@ -101,19 +101,45 @@ export type IconButtonProps = {
    * sighted one. This becomes the accessibility hint.
    */
   disabledReason?: string;
+  /**
+   * `'none'` drops the circle/capsule fill and keeps only the hover/press
+   * inset. For controls that live INSIDE another surface -- a folder row's
+   * disclosure chevron, its reorder arrows -- where a filled circle would read
+   * as a button floating on top of the row rather than part of it. Apple draws
+   * these bare too.
+   *
+   * They still get the inset, which is the point: bare used to mean NO press
+   * feedback whatsoever, the same defect as the hover-only buttons.
+   */
+  surface?: 'auto' | 'none';
+  /**
+   * An animated style for the glyph itself, for the one case that needs it:
+   * the folder chevron rotates 90 degrees on expand, and the turn is what
+   * tells you the row opened.
+   */
+  glyphStyle?: StyleProp<ViewStyle>;
 } & Omit<PressableProps, 'children' | 'style' | 'disabled'>;
 
-export function IconButton({
+/**
+ * `forwardRef` because a Gluestack `Menu` hands its trigger a ref -- it needs
+ * the real native node to measure where to draw the popover -- bundled in the
+ * same props object as its `onPress`. A plain function component drops an
+ * incoming ref silently, and the menu then has nothing to position against.
+ * `PressableScale` underneath already forwards for the same reason.
+ */
+export const IconButton = React.forwardRef<View, IconButtonProps>(function IconButton({
   icon,
   label,
   selected = false,
   variant = 'plain',
   disabled = false,
   disabledReason,
+  surface = 'auto',
+  glyphStyle,
   onPressIn,
   onPressOut,
   ...rest
-}: IconButtonProps) {
+}, ref) {
   const inCapsule = useContext(InCapsule);
 
   /**
@@ -181,6 +207,7 @@ export function IconButton({
           className="bg-foreground"
         />
       ) : null}
+      <AnimatedIconWrapper style={glyphStyle}>
       <Icon
         as={icon}
         style={{ width: GLYPH, height: GLYPH }}
@@ -192,6 +219,7 @@ export function IconButton({
               : 'text-foreground'
         }
       />
+      </AnimatedIconWrapper>
     </View>
   );
 
@@ -200,10 +228,11 @@ export function IconButton({
    * did, and a second one would read as a button-within-a-button. An accent
    * button always paints its own -- it is never absorbed.
    */
-  const paintsSurface = !inCapsule || variant === 'accent';
+  const paintsSurface = surface !== 'none' && (!inCapsule || variant === 'accent');
 
   return (
     <PressableScale
+      ref={ref}
       disabled={disabled}
       onPressIn={disabled ? undefined : handlePressIn}
       onPressOut={disabled ? undefined : handlePressOut}
@@ -238,6 +267,20 @@ export function IconButton({
       {glyph}
     </PressableScale>
   );
+});
+
+IconButton.displayName = 'IconButton';
+
+/** Only wraps when there is something to animate, so the common case adds no view. */
+function AnimatedIconWrapper({
+  style,
+  children,
+}: {
+  style?: StyleProp<ViewStyle>;
+  children: React.ReactNode;
+}) {
+  if (!style) return <>{children}</>;
+  return <Animated.View style={style}>{children}</Animated.View>;
 }
 
 /**

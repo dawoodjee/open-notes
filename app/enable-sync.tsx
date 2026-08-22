@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { IconButton } from '@/components/IconButton';
 import { Text as RNText, ActivityIndicator, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { OtpInput } from 'react-native-otp-entry';
@@ -8,7 +9,6 @@ import { VStack } from '@/components/ui/vstack';
 import { HStack } from '@/components/ui/hstack';
 import { Input, InputField } from '@/components/ui/input';
 import { Pressable } from '@/components/ui/pressable';
-import { Icon } from '@/components/ui/icon';
 import { SettingsHeader } from '@/components/ui/settings-group';
 import { UserRound, X } from 'lucide-react-native';
 
@@ -167,9 +167,7 @@ export default function EnableSyncScreen() {
           title="Sync Account"
           icon={UserRound}
           right={
-            <Pressable onPress={dismiss} className="p-1.5 rounded-full active:bg-muted">
-              <Icon as={X} className="text-muted-foreground w-5 h-5" />
-            </Pressable>
+            <IconButton icon={X} label="Close" onPress={dismiss} />
           }
         />
 

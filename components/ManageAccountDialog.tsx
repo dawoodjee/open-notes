@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { IconButton } from './IconButton';
 import { Alert, ScrollView, Text as RNText, View } from 'react-native';
 import { Modal, ModalBackdrop, ModalContent } from '@/components/ui/modal';
 import { Pressable } from '@/components/ui/pressable';
@@ -525,9 +526,7 @@ export default function ManageAccountDialog({ isOpen, onClose }: ManageAccountDi
             // A plain Pressable, not ModalCloseButton: that one closes through
             // the modal's own context and would bypass the required-field
             // check, so the X and the backdrop would disagree.
-            <Pressable onPress={handleAttemptClose} className="p-1.5 rounded-full active:bg-muted">
-              <Icon as={X} className="text-muted-foreground w-5 h-5" />
-            </Pressable>
+            <IconButton icon={X} label="Close" onPress={handleAttemptClose} />
           }
         />
 
