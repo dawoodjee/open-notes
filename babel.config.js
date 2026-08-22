@@ -26,7 +26,9 @@ module.exports = function (api) {
           root: ['./'],
           alias: {
             '@': './',
-            'tailwind.config': './tailwind.config.js',
+            // The 'tailwind.config' alias that used to sit here pointed at a
+            // file that does not exist and that nothing imported -- a leftover
+            // from before the theme moved into global.css. Removed 2026-08-22.
           },
         },
       ],

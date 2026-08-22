@@ -4,7 +4,25 @@
 **Branch:** `spike/enriched-editor` (throwaway, not merged)
 **Question:** should `@10play/tentap-editor` be replaced by `react-native-enriched-html`?
 
-## Verdict: **NO-GO**
+## Verdict at the time: NO-GO — **subsequently overridden, and the migration shipped**
+
+> **UPDATE 2026-08-22.** Adam overrode this recommendation, and was right to.
+> The findings below all reproduced and are accurate; what was wrong was the
+> BAR they were judged against. This spike held the library to "must preserve
+> everything", which was never the requirement — the requirement was that the
+> editor be native and fast and that NEW notes work well.
+>
+> Re-judged on that, the migration shipped. Finding 1 turned out to be the key
+> to the whole thing rather than a blocker: wrapping a legacy body in
+> `<html>…</html>` both clears the length threshold AND parses correctly, so old
+> notes survive as real formatted content instead of the escaped text or code
+> block that were the fallback plans. See `lib/notes/htmlMigrate.ts`.
+>
+> Findings 2 and 3 stand as accepted losses. The original text is kept below
+> unedited, because a spike that gets rewritten to match the outcome is worth
+> nothing next time.
+
+## Original verdict: **NO-GO**
 
 Do not migrate. Stay on TenTap. The library corrupts this app's data in a way
 that is silent, reproducible, and hits the most common note shape there is.
