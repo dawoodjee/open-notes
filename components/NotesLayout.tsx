@@ -256,8 +256,23 @@ export default function NotesLayout() {
     if (hasAutoCreatedRef.current) return;
     if (!emptyDatabaseIsTrustworthy()) return;
 
+    // CLAIMED BEFORE THE FIRST AWAIT, and that ordering is the whole point.
+    //
+    // This used to be set after the count query below. Three callers race to
+    // get here, and an await between "have we done this?" and "mark it done"
+    // means all three can pass the check before any of them sets the flag --
+    // so all three create a note. Found on a fresh iPad: two empty "New Note"
+    // rows, created in the same minute, on a device that had never been used.
+    // The comment above already claimed the ref made the other callers no-ops;
+    // it only does now.
+    //
+    // Consuming the claim even when the count turns out to be non-zero is
+    // deliberate: at that point we have established the database is not empty,
+    // so this launch should never auto-create regardless.
+    hasAutoCreatedRef.current = true;
+
     // Re-read from SQLite rather than trusting a count passed in from a
-    // caller: the two async callers can arrive long after their snapshot was
+    // caller: the async callers can arrive long after their snapshot was
     // taken, and the whole point of this function is not to act on a stale
     // reading of "empty".
     const row = await getPowerSync().get<{ count: number }>(
@@ -268,7 +283,6 @@ export default function NotesLayout() {
       return;
     }
 
-    hasAutoCreatedRef.current = true;
     // Stay gated across the insert: the note this creates is what the user is
     // meant to land in, and it only reaches `notes` on a later tick. Releasing
     // here would paint the empty list for exactly one INSERT round-trip. If the
