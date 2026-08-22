@@ -892,6 +892,73 @@ a rule that is already useful.
 
 ---
 
+### Stage 12f — Find & Replace, haptics, stage audit ✅ DONE (2026-08-22), branch `stage-12f-find-replace`
+
+**The three-way contention at the bottom of a phone is decided, not
+discovered** — the plan's own requirement. Keyboard, formatting bar, find bar:
+**the formatting bar hides while find is open.** You are searching, not
+formatting, they are never both wanted at once, and neither has to shrink for
+the other. The find bar then takes the same slot and rides the keyboard through
+the same `useAnimatedKeyboard`, so the two are interchangeable rather than
+merely similar.
+
+**Two coordinate systems, and that is the whole design.** Finding happens in
+PLAIN TEXT, because that is what the user sees and what `setSelection` counts
+in. Replacing happens in HTML and must avoid markup entirely — a naive
+`html.replaceAll('b', …)` rewrites every `<b>` tag into something that is no
+longer HTML, and single-letter searches are the first thing anybody types.
+`lib/notes/findMatches.ts` owns both, with 14 tests including attribute values,
+unterminated tags, and matches that straddle a tag boundary (not found, and
+deliberately: deciding which half keeps the `<b>` has no right answer).
+
+**Matches are revealed deliberately, not automatically — found on the phone.**
+Selecting a range requires focusing the editor, because an unfocused
+`UITextView` does not draw a selection. But focusing the editor takes focus off
+the Find field, so the first version moved the keyboard to the note after one
+keystroke and the query could not be finished. Typing now updates the COUNT
+only; next, previous and the return key reveal. Which is also what iOS does.
+
+**⌘F / Ctrl+F on web.** Not a nicety: a find bar reachable only from an overflow
+menu is one nobody finds, and the browser's own ⌘F would otherwise search
+whatever the virtualised list happens to have mounted.
+
+**Two copy bugs caught on device.** After a Replace there is no current match,
+and the status printed **"0 of 3"** — a counter that looks broken. And typing a
+query used to claim "1 of 4" before anything had been revealed, so next would
+jump to match two and skip one the user was told they were on. The bar now says
+"4 matches" until something is actually revealed.
+
+**⚠️ HAPTICS CRASHED THE APP, and the fix is the interesting part.**
+`react-native-pulsar` went into `package.json` in 12a but the native app was
+never rebuilt, so importing it threw at launch:
+
+> `TurboModuleRegistry.getEnforcing(...): 'RNPulsar' could not be found.`
+
+`getEnforcing` runs at MODULE SCOPE, so the throw happens during `import` and a
+`try` around the call site cannot catch it. `lib/theme/haptics.ts` now
+`require`s lazily inside its guarded call and memoises — a binary without the
+module degrades to silence rather than to a crash, which is the right behaviour
+regardless.
+
+**Haptics are therefore wired but inert until a native rebuild**
+(`expo prebuild` + `pod install` + `expo run:ios`, with `LANG` set to a UTF-8
+locale). They cannot be verified on a simulator in any case — no Taptic Engine —
+so confirming them needs a physical device. Three meanings, not thirty presets:
+`tap` from every icon button, `step` when moving between matches, `commit` after
+a replace. A fourth, `toggleOn`, was dropped rather than left unused: the shared
+icon button cannot tell a toggle that is off from a plain action, so nothing
+could call it correctly.
+
+**Verified.** iPhone: find opens from the overflow menu, the caret stays in the
+Find field while typing, "1 of 3" and "2 of 3" step through with the match
+selected in the note, and Replace rewrote exactly the current match
+("through" → "THrough") leaving the other two alone. Web at 1280pt: ⌘F opens the
+inline two-row bar, "4 matches" → next → "1 of 4" → Replace All with "dog"
+rewrote all four including "Cat" and "CAT" → "No results". `tsc` clean, 151/151,
+lint at the 8-warning / 0-error baseline.
+
+---
+
 ### Stage 12e — iPad chrome ✅ DONE (2026-08-22), branch `stage-12e-ipad-chrome`
 
 **Portrait and landscape verified on device.** Adam rotated the simulator by
