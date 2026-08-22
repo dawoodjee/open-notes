@@ -53,8 +53,20 @@ export function toEnrichedHtml(body: string): string {
   const trimmed = body.trim();
 
   // An empty note is a real and very common state -- it is what every new note
-  // starts as. An empty paragraph is what the editor itself produces for one.
-  if (trimmed === '') return '<html>\n<p></p>\n</html>';
+  // starts as.
+  //
+  // SEEDED AS A HEADING, NOT A PARAGRAPH (Adam, 2026-08-22): the first line of
+  // a note is its title, and typing it should not require reaching for a
+  // formatting control first. Carried in the document itself rather than as a
+  // runtime rule, so there is nothing to re-apply, nothing to race the editor's
+  // own initialisation, and no state to get out of step.
+  //
+  // Safe for `isBlankNote`, which strips tags and asks whether any VISIBLE text
+  // remains: an empty <h1> has none, exactly as an empty <p> had none. That
+  // matters more than it sounds -- isBlankNote decides whether a note is
+  // permanently deleted, so a seed that read as non-blank would leak an empty
+  // note into the list every time one was opened and abandoned.
+  if (trimmed === '') return '<html>\n<h1></h1>\n</html>';
 
   let html = trimmed
     // The semantic tags the library drops. Attribute forms are not matched on

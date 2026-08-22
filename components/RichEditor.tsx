@@ -7,24 +7,11 @@ import {
 } from 'react-native-enriched-html';
 
 import { Box } from '@/components/ui/box';
-import { HStack } from '@/components/ui/hstack';
-import { Pressable } from '@/components/ui/pressable';
-import { Icon } from '@/components/ui/icon';
-import {
-  Bold,
-  Code,
-  Heading1,
-  Heading2,
-  Italic,
-  List,
-  ListOrdered,
-  Quote,
-  Strikethrough,
-  Underline,
-} from 'lucide-react-native';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { toEnrichedHtml } from '@/lib/notes/htmlMigrate';
+import { FormatBar } from './FormatBar';
+import type { ToolKey } from '@/lib/notes/toolbarContext';
 
 /**
  * The note editor. Native, no WebView.
@@ -60,6 +47,15 @@ export interface RichEditorProps {
   onChange?: (html: string) => void;
   autoFocus?: boolean;
   initialScrollOffset?: number;
+  /**
+   * Space to leave clear at the top of the document.
+   *
+   * The phone's nav bar FLOATS over the note, so the first line has to start
+   * below it or the title is hidden behind the controls before you have typed
+   * a character. Content then scrolls UNDER the bar, which is the behaviour the
+   * reference shows -- same rule as the desktop bar's own inset.
+   */
+  contentInsetTop?: number;
   onScrollOffsetChange?: (offset: number) => void;
 }
 
@@ -94,30 +90,50 @@ function isActive(state: OnChangeStateEvent | null, key: StyleKey): boolean {
   return entry?.isActive === true;
 }
 
-/** Toolbar buttons, in render order. `null` is a separator. */
-const TOOLBAR: ({ key: StyleKey; icon: any; label: string; run: (r: EnrichedTextInputInstance) => void } | null)[] = [
-  { key: 'bold', icon: Bold, label: 'Bold', run: (r) => r.toggleBold() },
-  { key: 'italic', icon: Italic, label: 'Italic', run: (r) => r.toggleItalic() },
-  // Underline is new. TenTap's toolbar had no underline because Tiptap's
-  // starter kit ships none; this editor supports it natively, and the Stage 12
-  // reference toolbar shows one.
-  { key: 'underline', icon: Underline, label: 'Underline', run: (r) => r.toggleUnderline() },
-  { key: 'strikeThrough', icon: Strikethrough, label: 'Strikethrough', run: (r) => r.toggleStrikeThrough() },
-  null,
-  { key: 'h1', icon: Heading1, label: 'Heading 1', run: (r) => r.toggleH1() },
-  { key: 'h2', icon: Heading2, label: 'Heading 2', run: (r) => r.toggleH2() },
-  null,
-  { key: 'unorderedList', icon: List, label: 'Bullet list', run: (r) => r.toggleUnorderedList() },
-  { key: 'orderedList', icon: ListOrdered, label: 'Numbered list', run: (r) => r.toggleOrderedList() },
-  null,
-  { key: 'blockQuote', icon: Quote, label: 'Block quote', run: (r) => r.toggleBlockQuote() },
-  { key: 'inlineCode', icon: Code, label: 'Code', run: (r) => r.toggleInlineCode() },
-];
+/**
+ * ToolKey -> what the editor actually does for it.
+ *
+ * Only the supported keys appear. `lib/notes/toolbarContext.ts` owns which
+ * keys EXIST and in what order; this owns what pressing one does, and a key
+ * missing from here is a key the editor cannot perform -- which is the same
+ * list `isSupported` reports, kept honest by the test that pins it.
+ */
+const RUN: Partial<Record<ToolKey, (r: EnrichedTextInputInstance) => void>> = {
+  bold: (r) => r.toggleBold(),
+  italic: (r) => r.toggleItalic(),
+  underline: (r) => r.toggleUnderline(),
+  strikethrough: (r) => r.toggleStrikeThrough(),
+  heading: (r) => r.toggleH1(),
+  bulletList: (r) => r.toggleUnorderedList(),
+  numberedList: (r) => r.toggleOrderedList(),
+  // `checked` is required, and false is the only sensible default: a fresh
+  // checklist whose items arrive pre-ticked is a to-do list already done.
+  checklist: (r) => r.toggleCheckboxList(false),
+  blockquote: (r) => r.toggleBlockQuote(),
+  code: (r) => r.toggleInlineCode(),
+};
+
+/** ToolKey -> the editor's own state key, for the selected/blocked flags. */
+const STATE_KEY: Partial<Record<ToolKey, StyleKey>> = {
+  bold: 'bold',
+  italic: 'italic',
+  underline: 'underline',
+  strikethrough: 'strikeThrough',
+  heading: 'h1',
+  bulletList: 'unorderedList',
+  numberedList: 'orderedList',
+  checklist: 'checkboxList',
+  blockquote: 'blockQuote',
+  code: 'inlineCode',
+  link: 'link',
+  image: 'image',
+};
 
 export default function RichEditor({
   initialContent = '',
   onChange,
   autoFocus = false,
+  contentInsetTop = 0,
 }: RichEditorProps) {
   const ref = useRef<EnrichedTextInputInstance>(null);
   const { scheme } = useTheme();
@@ -246,10 +262,63 @@ export default function RichEditor({
   );
 
   const [styleState, setStyleState] = useState<OnChangeStateEvent | null>(null);
+  const [barExpanded, setBarExpanded] = useState(false);
   const handleChangeState = useCallback(
     (event: { nativeEvent: OnChangeStateEvent }) => setStyleState(event.nativeEvent),
     []
   );
+
+  /**
+   * What the bar needs, derived from the editor's own report.
+   *
+   * `onBlankBodyLine` is the one signal `onChangeState` does NOT provide -- it
+   * says which FORMATS are active, never whether the line has any text. So it
+   * is approximated as "no block format is active", which is true for an empty
+   * paragraph and also true for a paragraph with text in it. That is a
+   * deliberate over-reach rather than a bug: the consequence is that Heading
+   * and Bulleted list come forward on ordinary body text too, which is exactly
+   * where someone is most likely to want them. The alternative -- reading the
+   * caret's line contents on every keystroke -- costs a round trip per
+   * character to sharpen a rule that is already useful.
+   */
+  const onListItem =
+    isActive(styleState, 'unorderedList') ||
+    isActive(styleState, 'orderedList') ||
+    isActive(styleState, 'checkboxList');
+
+  const onBlankBodyLine =
+    !onListItem &&
+    !isActive(styleState, 'h1') &&
+    !isActive(styleState, 'h2') &&
+    !isActive(styleState, 'h3') &&
+    !isActive(styleState, 'blockQuote') &&
+    !isActive(styleState, 'codeBlock');
+
+  const activeTools = useMemo(() => {
+    const out: Partial<Record<ToolKey, boolean>> = {};
+    for (const [tool, key] of Object.entries(STATE_KEY) as [ToolKey, StyleKey][]) {
+      out[tool] = isActive(styleState, key);
+    }
+    return out;
+  }, [styleState]);
+
+  const blockedTools = useMemo(() => {
+    const out: Partial<Record<ToolKey, boolean>> = {};
+    for (const [tool, key] of Object.entries(STATE_KEY) as [ToolKey, StyleKey][]) {
+      const entry = styleState?.[key] as ToggleState | undefined;
+      out[tool] = entry?.isBlocking === true;
+    }
+    return out;
+  }, [styleState]);
+
+  const runTool = useCallback((key: ToolKey) => {
+    const instance = ref.current;
+    const run = RUN[key];
+    // Unsupported keys reach here only if a disabled button were ever
+    // pressable. Ignored rather than thrown: a formatting bar is not the place
+    // to crash an editor holding unsaved text.
+    if (instance && run) run(instance);
+  }, []);
 
   const isDark = scheme === 'dark';
   const text = isDark ? '#fafafa' : '#111111';
@@ -258,43 +327,6 @@ export default function RichEditor({
 
   return (
     <Box className="flex-1 bg-background flex flex-col">
-      {/* Toolbar ABOVE the canvas. Nothing here avoids the keyboard, so a
-          toolbar underneath the text was covered the moment you started typing
-          -- unreachable exactly when it was wanted. */}
-      <Box className="border-b border-border bg-background px-3 py-1.5">
-        <HStack className="items-center space-x-1 flex-wrap">
-          {TOOLBAR.map((item, i) =>
-            item === null ? (
-              <Box key={`sep-${i}`} className="w-px h-4 bg-border mx-1" />
-            ) : (
-              <Pressable
-                key={item.key}
-                onPress={() => {
-                  const instance = ref.current;
-                  if (instance) item.run(instance);
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={item.label}
-                className={`p-2 rounded-lg ${
-                  isActive(styleState, item.key)
-                    ? 'bg-lime-100 dark:bg-lime-900/40'
-                    : 'bg-transparent'
-                }`}
-              >
-                <Icon
-                  as={item.icon}
-                  className={`w-4 h-4 ${
-                    isActive(styleState, item.key)
-                      ? 'text-lime-700 dark:text-lime-400'
-                      : 'text-muted-foreground'
-                  }`}
-                />
-              </Pressable>
-            )
-          )}
-        </HStack>
-      </Box>
-
       <View style={{ flex: 1 }}>
         <EnrichedTextInput
           ref={ref}
@@ -309,7 +341,7 @@ export default function RichEditor({
           style={{
             flex: 1,
             paddingHorizontal: 16,
-            paddingTop: 12,
+            paddingTop: 12 + contentInsetTop,
             color: text,
             fontSize: 17,
             lineHeight: 24,
@@ -332,6 +364,19 @@ export default function RichEditor({
           }}
         />
       </View>
+
+      {/* Docked to the keyboard, so it is only there when there is something
+          to format. */}
+      <FormatBar
+        active={activeTools}
+        blocked={blockedTools}
+        onListItem={onListItem}
+        onBlankBodyLine={onBlankBodyLine}
+        onRun={runTool}
+        expanded={barExpanded}
+        onToggleExpanded={() => setBarExpanded((v) => !v)}
+        visible={styleState !== null}
+      />
     </Box>
   );
 }
