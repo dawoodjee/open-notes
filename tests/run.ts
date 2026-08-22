@@ -14,6 +14,7 @@ import './toolbarContext.test';
 import './plainTextBody.test';
 import './paragraphStyle.test';
 import './editorChrome.test';
+import './findMatches.test';
 import { report } from './harness';
 
 report();

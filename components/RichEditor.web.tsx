@@ -1,4 +1,11 @@
-import React, { forwardRef, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import React, {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { ScrollView, Text as RNText, TextInput, View } from 'react-native';
 
 import { isPlainTextSafe, toPlainText, toPlainTextHtml } from '@/lib/notes/plainTextBody';
@@ -44,7 +51,7 @@ import type { RichEditorHandle, RichEditorProps } from './RichEditor';
 export const EDITOR_SUPPORTS_FORMATTING = false;
 
 const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEditor(
-  { initialContent = '', onChange, autoFocus, contentInsetTop = 0 },
+  { initialContent = '', onChange, autoFocus, contentInsetTop = 0, onPlainTextChange },
   handle
 ) {
   // The web editor IS a real RN TextInput (a <textarea>), so unlike the native
@@ -60,6 +67,20 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
       // Checklist button is simply inert here, matching the badge that already
       // says this editor is plain text.
       run: () => {},
+      // Find works here: it is a plain TextInput, so a selection is native.
+      selectRange: (start: number, end: number) => {
+        inputRef.current?.focus();
+        inputRef.current?.setSelection?.(start, end);
+      },
+      // Replace goes through the same plain-text projection everything else on
+      // web does, so the caller gets back what it would have written anyway.
+      getHtml: async () => toPlainTextHtml(textRef.current),
+      setHtml: (html: string) => {
+        const next = toPlainText(html);
+        setText(next);
+        onPlainTextChangeRef.current?.(next);
+        onChangeRef.current?.(toPlainTextHtml(next));
+      },
     }),
     []
   );
@@ -84,6 +105,16 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
   const [seed, setSeed] = useState(initialContent);
   const [text, setText] = useState(() => toPlainText(initialContent));
 
+  // Both read inside the imperative handle, which is memoised with no deps and
+  // must not close over a stale value. The native editor keeps `onChange` in a
+  // ref for the same reason -- see the comment there.
+  const textRef = useRef(text);
+  textRef.current = text;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const onPlainTextChangeRef = useRef(onPlainTextChange);
+  onPlainTextChangeRef.current = onPlainTextChange;
+
   if (initialContent !== seed && toPlainTextHtml(text) !== initialContent) {
     setSeed(initialContent);
     setText(toPlainText(initialContent));
@@ -92,7 +123,22 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
   const handleChange = (next: string) => {
     setText(next);
     onChange?.(toPlainTextHtml(next));
+    onPlainTextChange?.(next);
   };
+
+  /**
+   * Report the text Find searches, including the note's STARTING text.
+   *
+   * Missed the first time and caught in the browser: Find said "No results" for
+   * a word plainly on screen, because the native editor emits `onChangeText` on
+   * load and this one only reported on edits. A search that works only after
+   * you have typed something is worse than no search.
+   */
+  useEffect(() => {
+    onPlainTextChange?.(text);
+    // Only when the note itself changes -- following `text` would re-report on
+    // every keystroke, which `handleChange` already does.
+  }, [seed]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <ScrollView

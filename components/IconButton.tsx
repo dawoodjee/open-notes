@@ -5,6 +5,7 @@ import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanima
 import { Icon } from '@/components/ui/icon';
 import { PressableScale } from './PressableScale';
 import { spring, SPRING_PRESS } from '@/lib/theme/motion';
+import { haptics } from '@/lib/theme/haptics';
 
 /**
  * The one icon button. Every icon button in the app is this component.
@@ -150,9 +151,31 @@ export const IconButton = React.forwardRef<View, IconButtonProps>(function IconB
   const hovered = useSharedValue(0);
   const pressed = useSharedValue(0);
 
+  /**
+   * HAPTICS FIRE ON PRESS-IN, not on press.
+   *
+   * Press-in is the moment the finger lands, and that is when the physical
+   * feedback has to arrive or it reads as lag rather than as touch. `onPress`
+   * fires on RELEASE, which is tens of milliseconds late and — worse — does not
+   * fire at all if the finger slides off, so a button would feel dead for the
+   * exact gesture where reassurance matters most.
+   *
+   * Disabled buttons are excluded by Pressable itself: it calls neither
+   * handler, which is the behaviour the icon-button spec asks for ("no press,
+   * no haptic") without a check here.
+   *
+   * Every icon button gets the SAME tap, deliberately. An earlier version tried
+   * to pick a firmer one for toggles using `selected`, which cannot work: this
+   * component cannot tell a toggle that is currently off from a plain action
+   * button — both arrive as `selected={false}` — so it would have made Share
+   * feel like switching bold on. The stronger meanings in
+   * `lib/theme/haptics.ts` belong at the call sites that actually know: Replace
+   * All commits, stepping through matches steps.
+   */
   const handlePressIn = useCallback<NonNullable<PressableProps['onPressIn']>>(
     (e) => {
       pressed.value = spring(1, SPRING_PRESS);
+      haptics.tap();
       onPressIn?.(e);
     },
     [onPressIn, pressed]

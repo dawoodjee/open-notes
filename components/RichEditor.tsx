@@ -70,6 +70,18 @@ export interface RichEditorProps {
   contentInsetTop?: number;
   onScrollOffsetChange?: (offset: number) => void;
   /**
+   * The document as PLAIN TEXT, whenever it changes.
+   *
+   * Find searches this rather than the HTML, because it is the string the user
+   * can see and — importantly — the one `setSelection` counts in. Searching the
+   * HTML would count tags as characters and put every highlight in the wrong
+   * place.
+   */
+  onPlainTextChange?: (text: string) => void;
+  /** Hide the formatting bar. The find bar wants the same slot, and while it is
+   *  open it wins -- see NoteEditorPane. */
+  suppressFormatBar?: boolean;
+  /**
    * Desktop only: whether the top bar's `Aa` popover is open.
    *
    * The BAR owns this boolean because the bar owns the button; the editor owns
@@ -193,6 +205,21 @@ export interface RichEditorHandle {
   /** Apply a formatting action. Used by the desktop bar, whose Checklist
    *  button sits outside this component. */
   run: (key: ToolKey) => void;
+  /**
+   * Select a range of the document, in the same plain-text offsets
+   * `onPlainTextChange` reports.
+   *
+   * This is how Find highlights a match: there is no highlight API, but a
+   * native selection already draws the right thing, scrolls it into view and
+   * survives the keyboard moving. Reusing it is better than painting our own
+   * overlay that would have to track the editor's layout.
+   */
+  selectRange: (start: number, end: number) => void;
+  /** The document's current HTML, for Replace to rewrite. */
+  getHtml: () => Promise<string>;
+  /** Replace the whole document. Used by Replace, which rewrites text nodes in
+   *  the HTML and hands the result back. */
+  setHtml: (html: string) => void;
 }
 
 const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEditor(
@@ -205,6 +232,8 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
     onCloseTextStyle,
     textStyleTop = 0,
     stylePanel = 'desktop',
+    onPlainTextChange,
+    suppressFormatBar = false,
   },
   handle
 ) {
@@ -215,6 +244,14 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
     () => ({
       blur: () => ref.current?.blur(),
       run: (key: ToolKey) => runToolRef.current(key),
+      selectRange: (start: number, end: number) => {
+        // Focus first: a selection set on an unfocused editor is not shown, so
+        // Find would report "3 of 7" while the note looked untouched.
+        ref.current?.focus();
+        ref.current?.setSelection(start, end);
+      },
+      getHtml: async () => (await ref.current?.getHTML()) ?? '',
+      setHtml: (html: string) => ref.current?.setValue(html),
     }),
     []
   );
@@ -479,6 +516,7 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
           onChangeHtml={handleChangeHtml}
           onChangeState={handleChangeState}
           onChangeSelection={handleChangeSelection}
+          onChangeText={(e) => onPlainTextChange?.(e.nativeEvent.value)}
           // color MUST be set explicitly. The input is a real UITextView and
           // defaults to black, so in dark mode the note rendered as black text
           // on a black background -- invisible, and it looked like the editor
@@ -551,7 +589,7 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
         onRun={runTool}
         expanded={barExpanded}
         onToggleExpanded={() => setBarExpanded((v) => !v)}
-        visible={styleState !== null && (keyboardShown || hasSelection)}
+        visible={!suppressFormatBar && styleState !== null && (keyboardShown || hasSelection)}
       />
     </Box>
   );

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Text as RNText,
   PanResponder,
@@ -21,6 +21,9 @@ import { BAR_HEIGHT, DesktopTopBar } from './DesktopTopBar';
 import { PAD_BAR_HEIGHT, PadTopBar } from './PadTopBar';
 import type { PaneChrome } from '@/lib/layout/paneChrome';
 import { editorChrome } from '@/lib/layout/editorChrome';
+import { findMatches, replaceInHtml, stepMatch } from '@/lib/notes/findMatches';
+import { haptics } from '@/lib/theme/haptics';
+import { FindBar } from './FindBar';
 import { GROUP_GAP, IconButton, IconButtonGroup, SURFACE } from './IconButton';
 
 // Gluestack UI Primitives
@@ -44,6 +47,7 @@ import {
   EyeOff,
   FolderInput,
   Menu,
+  Search,
   MoreVertical,
   Share,
   Trash2,
@@ -153,6 +157,131 @@ export default function NoteEditorPane({
 
   const [textStyleOpen, setTextStyleOpen] = useState(false);
   const [movingNote, setMovingNote] = useState(false);
+
+  /**
+   * FIND AND REPLACE, owned here rather than in RichEditor.
+   *
+   * The bar is chrome — it sits with the top bar on desktop and takes the
+   * formatting bar's slot on a phone — so it belongs to whatever owns the
+   * chrome. The editor only lends it two capabilities through the handle:
+   * select a range, and swap the document.
+   */
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const [replacement, setReplacement] = useState('');
+  const [replaceOpen, setReplaceOpen] = useState(false);
+  const [plainText, setPlainText] = useState('');
+  const [currentMatch, setCurrentMatch] = useState(-1);
+
+  const matches = useMemo(() => findMatches(plainText, findQuery), [plainText, findQuery]);
+
+  /**
+   * REVEALING A MATCH IS DELIBERATE, NOT AUTOMATIC — and that is the whole
+   * design of this, found on the phone.
+   *
+   * Selecting a range requires focusing the editor: an unfocused UITextView
+   * does not draw a selection, so a match highlighted without focus is a match
+   * nobody can see. But focusing the editor takes focus OFF the Find field, so
+   * a version that revealed on every keystroke moved the keyboard to the note
+   * after the first letter and the user could not finish typing their query.
+   *
+   * So typing updates the COUNT only — "1 of 3" appears as you type — and the
+   * match is revealed when you ask for one: next, previous, or the return key.
+   * That is also how iOS's own find bar behaves, and it means the two focus
+   * states never fight.
+   *
+   * A counter rather than a boolean, for the reason the iPad's search circle
+   * uses one: "reveal it" is an event, and pressing next twice on the same
+   * match must reveal it twice.
+   */
+  const [revealSignal, setRevealSignal] = useState(0);
+
+  useEffect(() => {
+    if (revealSignal === 0 || !findOpen) return;
+    const match = matches[currentMatch];
+    if (!match) return;
+    editorRef.current?.selectRange(match.start, match.end);
+  }, [revealSignal]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * A new query clears the current match rather than pointing at the first one.
+   *
+   * The two have to agree: nothing has been REVEALED yet, so claiming "1 of 4"
+   * would say match one is highlighted when the note is untouched — and then
+   * pressing next would jump to match two, skipping a match the user was told
+   * they were on. With no current match the bar reads "4 matches" and next goes
+   * to the first, which is what actually happens.
+   */
+  useEffect(() => {
+    setCurrentMatch(-1);
+  }, [findQuery, matches.length]);
+
+  const step = useCallback(
+    (direction: 1 | -1) => {
+      setCurrentMatch((c) => stepMatch(c, matches.length, direction));
+      setRevealSignal((n) => n + 1);
+      // Moving through a set, which is what `selection` is for -- the same
+      // feel a picker gives as it passes each row.
+      haptics.step();
+    },
+    [matches.length]
+  );
+
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setReplaceOpen(false);
+    setFindQuery('');
+    setCurrentMatch(-1);
+  }, []);
+
+  const runReplace = useCallback(
+    async (scope: number | 'all') => {
+      const editor = editorRef.current;
+      if (!editor || matches.length === 0) return;
+      const html = await editor.getHtml();
+      const result = replaceInHtml(html, findQuery, replacement, scope);
+      if (result.count === 0) return;
+      editor.setHtml(result.html);
+      onNoteChange(result.html);
+      // A commit, not a tap: replacing rewrites the note and pressing the
+      // button again will not undo it.
+      haptics.commit();
+      // The document just changed, so every offset after the edit moved. The
+      // match list recomputes from the new plain text on its own; resetting the
+      // index is what stops "4 of 7" pointing into a note that now has 6.
+      setCurrentMatch(-1);
+    },
+    [findQuery, matches.length, onNoteChange, replacement]
+  );
+
+  /**
+   * ⌘F / Ctrl+F on the web, and Escape to leave.
+   *
+   * Not a nicety on desktop: a find bar reachable only from an overflow menu is
+   * one nobody finds, and the browser's own ⌘F would otherwise search the
+   * rendered page — which on a virtualised note list means it searches whatever
+   * happens to be mounted. `preventDefault` is the point of intercepting it.
+   *
+   * Web only. There is no hardware keyboard to speak of on a phone, and iPadOS
+   * routes hardware shortcuts through a different API that belongs with the
+   * rest of the iPad keyboard work rather than bolted on here.
+   */
+  useEffect(() => {
+    if (Platform.OS !== 'web' || !selectedNoteId) return;
+
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        setFindOpen(true);
+        return;
+      }
+      if (event.key === 'Escape') closeFind();
+    };
+
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [closeFind, selectedNoteId]);
+
 
   // Closing when the note changes is not tidiness: the panel reports the
   // caret's styles, and the caret moved to a different document.
@@ -304,6 +433,19 @@ export default function NoteEditorPane({
         the picker is a flyout anchored to the click, and this menu has no anchor
         to give it. Desktop files notes from the list, where that anchor exists.
       */}
+      <MenuItem
+        key="find"
+        textValue="Find in Note"
+        onPress={() => {
+          setFindOpen(true);
+          setReplaceOpen(false);
+        }}
+        className="px-4 py-3 flex-row items-center gap-3"
+      >
+        <Icon as={Search} className="text-muted-foreground w-4.5 h-4.5" />
+        <MenuItemLabel className="text-base text-foreground">Find in Note</MenuItemLabel>
+      </MenuItem>
+
       {!isDesktop ? (
         <MenuItem
           key="move"
@@ -519,6 +661,13 @@ export default function NoteEditorPane({
               autoFocus={!selectedNote.body || selectedNote.body === ''}
               initialScrollOffset={initialEditorScrollOffset}
               onScrollOffsetChange={onEditorScrollOffsetChange}
+              onPlainTextChange={setPlainText}
+              // The formatting bar and the find bar want the same slot above
+              // the keyboard. Find wins while it is open -- you are searching,
+              // not formatting, and they are never both wanted at once. This is
+              // the three-way contention the stage plan asked to be decided
+              // rather than discovered.
+              suppressFormatBar={findOpen}
               // Clears whichever bar is floating. A wide iPad still has a real
               // bordered row above the document and needs nothing.
               contentInsetTop={
@@ -540,6 +689,27 @@ export default function NoteEditorPane({
               stylePanel={usePadBar ? 'pad' : 'desktop'}
             />
           </Box>
+
+          <FindBar
+            visible={findOpen}
+            query={findQuery}
+            onQueryChange={setFindQuery}
+            replacement={replacement}
+            onReplacementChange={setReplacement}
+            replaceOpen={replaceOpen}
+            onToggleReplace={() => setReplaceOpen((v) => !v)}
+            matchCount={matches.length}
+            currentMatch={currentMatch}
+            onStep={step}
+            onSubmit={() => setRevealSignal((n) => n + 1)}
+            onReplaceOne={() => void runReplace(currentMatch < 0 ? 0 : currentMatch)}
+            onReplaceAll={() => void runReplace('all')}
+            onClose={closeFind}
+            // Docked on a phone, a strip under the top bar everywhere else --
+            // the same split the two reference screenshots draw.
+            layout={useCompact ? 'docked' : 'inline'}
+            top={(usePadBar ? PAD_BAR_HEIGHT : BAR_HEIGHT) + insets.top}
+          />
 
           {movingNote ? (
             <FolderPickerSheet
