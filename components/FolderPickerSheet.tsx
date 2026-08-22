@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { IconButton } from './IconButton';
-import { ScrollView, Text as RNText, View } from 'react-native';
+import { ScrollView, Text as RNText, View, useWindowDimensions } from 'react-native';
 import {
   ChevronDown,
   ChevronRight,
@@ -10,7 +10,7 @@ import {
   X,
 } from 'lucide-react-native';
 
-import { Modal, ModalBackdrop, ModalContent } from '@/components/ui/modal';
+import { ModalBottomSheet } from '@swmansion/react-native-bottom-sheet';
 import { Icon } from '@/components/ui/icon';
 import { PressableScale } from './PressableScale';
 import { FolderNameDialog } from './DeleteFolderDialog';
@@ -30,15 +30,32 @@ import type { Folder } from '@/types/folder';
  * desktop-move-folder-selection.png against ipad-move-folder-selection.png.
  * They are structurally different controls, not one control at two sizes.
  *
- * THREE GLUESTACK MODAL TRAPS, all already documented in SettingsDialog and
- * all of which apply here:
- *   1. `bg-background` must be spelled out on ModalContent -- the theme token
- *      doesn't resolve under NativeWind v5-preview and the sheet renders black.
- *   2. No `ModalBody`. It is itself a ScrollView whose className becomes its
- *      own style, so padding never reaches the content.
- *   3. Children are hoisted to an overlay root ABOVE the providers, so
- *      useTheme()/useVault() throw in here. Everything this needs arrives as
- *      props, which is why `folders` is passed in rather than read.
+ * ── ON A NATIVE SHEET SINCE 12.5, AND WHAT THAT RETIRED ───────────────────
+ *
+ * This was a Gluestack `Modal` dressed as a sheet, and it carried three traps
+ * that every new sheet in the app had to be told about:
+ *
+ *   1. `bg-background` had to be spelled out on `ModalContent` -- the theme
+ *      token does not resolve under NativeWind v5-preview and the sheet
+ *      rendered BLACK.
+ *   2. `ModalBody` was unusable: it is itself a ScrollView whose `className`
+ *      becomes its own style, so padding never reached the content.
+ *   3. Children were hoisted to an overlay root ABOVE the providers, so
+ *      `useTheme()` and `useVault()` threw inside. That one is not theoretical
+ *      -- Stage 12g hit it putting a storage section into Manage Account and
+ *      had to thread the callback down as a prop.
+ *
+ * `@swmansion/react-native-bottom-sheet` in `nativeOverlay` mode retires all
+ * three. The important one is the third: native overlay renders the sheet
+ * INLINE in the React tree and reparents it on the native side, so context
+ * reaches it normally. `folders` still arrives as a prop here, but now because
+ * the caller already has it, not because reading it would throw.
+ *
+ * Detents are in POINTS, which is the trap here: a numeric detent is returned
+ * unchanged by the library, so `0.8` means eight tenths of one point rather than
+ * four fifths of the screen. The sheet opened sub-pixel tall, rendered nothing,
+ * and threw no error. Hence the explicit `height * 0.8`, which reproduces the
+ * `h-4/5` the Gluestack version had.
  */
 
 export interface FolderPickerSheetProps {
@@ -74,6 +91,9 @@ export function FolderPickerSheet({
   onCreateFolder,
 }: FolderPickerSheetProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Four fifths of the WINDOW, in points. See the detent note below.
+  const sheetHeight = useWindowDimensions().height * 0.8;
+
   const [naming, setNaming] = useState(false);
 
   // Children keyed by parent. `folders` arrives already ordered by
@@ -132,9 +152,35 @@ export function FolderPickerSheet({
   pushLevel(null, 0);
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="full">
-      <ModalBackdrop />
-      <ModalContent className="w-full max-w-full h-4/5 mt-auto mb-0 mx-0 rounded-t-2xl rounded-b-none border-0 pb-8 bg-background">
+    <ModalBottomSheet
+      // Renders inline and reparents natively, so context survives -- see the
+      // header comment. It also means no BottomSheetProvider is needed.
+      nativeOverlay
+      // The Gluestack version had `<ModalBackdrop />`; the native sheet has no
+      // scrim unless one is named, and without it the sheet is invisible
+      // against the app -- both are `bg-background`, so the only thing that
+      // separated them was the dimming. Found on the phone: the picker
+      // presented at the right height and looked like the screen had simply
+      // rearranged itself.
+      scrimColor="rgba(0,0,0,0.4)"
+      // POINTS, NOT A FRACTION. `resolveDetent` returns a numeric detent
+      // unchanged, so `0.8` means eight tenths of ONE POINT -- the sheet opens
+      // sub-pixel tall, renders nothing, and throws no error. Found by a sheet
+      // that simply never appeared. `'content'` is deliberately not used: this
+      // sheet's height must not change with how many folders exist.
+      detents={[0, sheetHeight]}
+      index={isOpen ? 1 : 0}
+      // Fires when a drag settles, including the drag-to-dismiss the Gluestack
+      // version never had. Index 0 is the closed detent.
+      onSettle={(index) => {
+        if (index === 0 && isOpen) onClose();
+      }}
+      // `surface` is the sheet's own background, sized natively to the full
+      // sheet. Painting the background on a child instead leaves the corners
+      // and the area under a bounce showing through.
+      surface={<View className="flex-1 bg-background rounded-t-2xl" />}
+    >
+      <View className="flex-1 pb-8">
         <View className="flex-row items-center px-4 pt-4 pb-2">
           <IconButton icon={X} label="Cancel" onPress={onClose} />
 
@@ -226,8 +272,8 @@ export function FolderPickerSheet({
             }}
           />
         ) : null}
-      </ModalContent>
-    </Modal>
+      </View>
+    </ModalBottomSheet>
   );
 }
 

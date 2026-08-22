@@ -1,11 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { IconButton } from './IconButton';
-import { ScrollView, Text as RNText, View } from 'react-native';
-import {
-  Modal,
-  ModalBackdrop,
-  ModalContent,
-} from '@/components/ui/modal';
+import { ScrollView, Text as RNText, View, useWindowDimensions } from 'react-native';
+import { ModalBottomSheet } from '@swmansion/react-native-bottom-sheet';
 import { Pressable } from '@/components/ui/pressable';
 import { HStack } from '@/components/ui/hstack';
 import { Icon } from '@/components/ui/icon';
@@ -101,11 +97,22 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
   const [view, setView] = useState<
     'root' | 'advanced' | 'security' | 'endpoints' | 'appearance'
   >('root');
-  // Read here, in the normal tree, and handed down as props. Everything below
-  // <Modal> is hoisted to an overlay root above the providers, where these
-  // hooks would throw -- see the note on SecurityView.
+  /**
+   * Read here and handed down as props.
+   *
+   * This USED to be mandatory: the Gluestack `Modal` hoisted everything below
+   * it to an overlay root above the providers, so these hooks threw inside.
+   * On the native sheet (12.5) they no longer would — it renders inline and
+   * reparents natively. The props are kept anyway, because the sub-views are
+   * now testable without a provider and because rewiring five screens to prove
+   * a point is not what this stage is for. New sheets can read context
+   * directly.
+   */
   const { lockSettings, updateLockSettings } = useVault();
   const { preference, setPreference, bulletStyle, setBulletStyle, theme, setTheme } = useTheme();
+
+  // Four fifths of the WINDOW, in points. See the detent note below.
+  const sheetHeight = useWindowDimensions().height * 0.8;
 
   const handleClose = () => {
     setView('root');
@@ -113,16 +120,29 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} size="full">
-      <ModalBackdrop />
-      {/* Full-bleed sheet, matching ManageAccountDialog: full width, anchored
-          to the bottom, 4/5 tall, square bottom corners so it reads as
-          attached to the screen rather than floating. */}
-      {/* bg-background is explicit rather than inherited: gluestack's ModalContent
-          styles its background from a theme token that doesn't resolve under
-          NativeWind v5-preview, so the sheet rendered black behind its
-          children. */}
-      <ModalContent className="w-full max-w-full h-4/5 mt-auto mb-0 mx-0 rounded-t-2xl rounded-b-none border-0 pb-8 bg-background">
+    <ModalBottomSheet
+      // See FolderPickerSheet's header for what the native sheet retires: the
+      // black-background token, the unusable ModalBody, and the provider hoist.
+      nativeOverlay
+      // The Gluestack version had `<ModalBackdrop />`; the native sheet has no
+      // scrim unless one is named, and without it the sheet is invisible
+      // against the app -- both are `bg-background`, so the only thing that
+      // separated them was the dimming. Found on the phone: the picker
+      // presented at the right height and looked like the screen had simply
+      // rearranged itself.
+      scrimColor="rgba(0,0,0,0.4)"
+      // Points, not a fraction -- see FolderPickerSheet for the sub-pixel trap.
+      // Not 'content': Settings' height changes as you push into sub-views, and
+      // a sheet that resizes under your thumb as you navigate is worse than one
+      // that does not fit its shortest screen.
+      detents={[0, sheetHeight]}
+      index={isOpen ? 1 : 0}
+      onSettle={(index) => {
+        if (index === 0 && isOpen) handleClose();
+      }}
+      surface={<View className="flex-1 bg-background rounded-t-2xl" />}
+    >
+      <View className="flex-1 pb-8">
         {view === 'root' ? (
           <>
             <SettingsHeader
@@ -180,7 +200,7 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
         ) : (
           <AdvancedView onBack={() => setView('root')} />
         )}
-      </ModalContent>
-    </Modal>
+      </View>
+    </ModalBottomSheet>
   );
 }

@@ -1486,6 +1486,68 @@ BOTH platforms get both features. Separate layouts per platform — replace-fiel
 
 ---
 
+## Stage 12.5 — LIVE CHECKLIST (started 2026-08-22, branch `stage-12.5-sheets-and-dnd`)
+
+Updated as each item lands, so progress is inspectable in a diff rather than
+only in a chat log.
+
+- [x] **1. Four-library native rebuild.** ✅ Done. `ExpoBlur (15.0.8)`,
+      `Pulsar (1.7.0)` + `PulsarHaptics (1.4.0)`, `ReactNativeBottomSheet
+      (0.16.2)` all installed; `RNPulsarSpec` and `ReactNativeBottomSheetSpec`
+      codegen ran. `react-native-reanimated-dnd` has no native code, correctly.
+      Sign-in state survived the overwrite install.
+      **`expo run:ios` exits 1 even on success** — it calls `osascript` to bring
+      the Simulator window forward, which is the same Automation permission that
+      blocks rotation. The build and install both completed; launch with
+      `xcrun simctl launch` instead of trusting the exit code.
+      *(original item below)*
+- [ ] ~~**1. Four-library native rebuild.**~~ `react-native-pulsar` and `expo-blur`
+      have been in `package.json` since 12a without ever being in the binary;
+      this stage adds two more, so one prebuild pays for all four.
+      `LANG` is EMPTY in this shell — it must be a UTF-8 locale or `pod install`
+      dies on an ASCII-8BIT encoding error.
+- [x] **2. `react-native-pulsar` resolves.** ✅ Proved, not assumed: a temporary
+      `console.log` in the lazy loader printed `[haptics] RNPulsar loaded` on a
+      real button press, then was removed. Worth doing explicitly because the
+      guarded require is designed to swallow exactly this failure.
+      *(original item below)*
+- [ ] ~~**2. `react-native-pulsar` resolves.**~~ Not "haptics feel right" — no
+      simulator has a Taptic Engine. The check is that `RNPulsar` is registered,
+      which the lazy require currently swallows.
+- [x] **3. `FolderPickerSheet` on the native bottom sheet.** ✅ Scrim, rounded
+      corners, correct height, disabled rows intact, and drag-to-dismiss — which
+      the Gluestack version never had — verified working.
+- [x] **4. `SettingsDialog` on the native bottom sheet.** ✅ Sub-view navigation
+      (Settings → Appearance) verified; the sheet keeps its height rather than
+      resizing under the thumb as you push in.
+- [ ] **5. Drag-to-reorder folders**, driving `swapFolderOrder`, top level only.
+- [ ] **6. Checkpoint:** sheets behave as before with no Gluestack workarounds
+      left in either file; the new folder order survives a sync round-trip;
+      Skills stays pinned and undraggable.
+
+**Two traps found on the device, both silent:**
+
+*Numeric detents are POINTS, not fractions.* `resolveDetent` returns a number
+unchanged, so `detents={[0, 0.8]}` opened the sheet **eight tenths of one point**
+tall. It rendered nothing and threw nothing — the menu just closed and the screen
+looked unchanged. Now `useWindowDimensions().height * 0.8`, reproducing the
+`h-4/5` the Gluestack version had.
+
+*A native sheet has no scrim unless you name one.* The Gluestack version had
+`<ModalBackdrop />`; without `scrimColor` the sheet presented at the right height
+and was invisible against the app, because both are `bg-background` and the
+dimming was the only thing separating them.
+
+**Version call, made not escalated:** `react-native-reanimated-dnd@1.1.0`, not
+2.0.0. 2.0.0 peers on `react-native-reanimated >= 4.2.0` and Expo SDK 54 pins
+`~4.1.1` (`expo install --check` agrees). Bumping the core animation library —
+which the motion primitives, the icon button, the format bar and the vendored
+swipeable all sit on — to satisfy folder reordering is the wrong way round. Same
+reasoning as pinning `@powersync/web@2.1.0` rather than dragging
+`@powersync/common` up under native's feet.
+
+---
+
 ## Stage 12.5 — Native sheets + drag-to-reorder folders (NEW, added 2026-08-21)
 
 Two adopted libraries, batched into one stage because both are chrome-level swaps over
