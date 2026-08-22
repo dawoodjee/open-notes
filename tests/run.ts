@@ -12,6 +12,7 @@ import './htmlMigrate.test';
 import './paneChrome.test';
 import './toolbarContext.test';
 import './plainTextBody.test';
+import './paragraphStyle.test';
 import { report } from './harness';
 
 report();

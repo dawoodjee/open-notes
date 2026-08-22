@@ -66,6 +66,16 @@ export interface DesktopTopBarProps {
   /** Formatting controls the editor can actually perform right now. */
   onTextStyles?: () => void;
   onChecklist?: () => void;
+  /**
+   * False when the editor behind this bar cannot format at all -- which is
+   * every web session until Stage 13, since the web editor is plain text.
+   *
+   * The centre group then dims WHOLE, rather than being hidden or, worse, left
+   * live and silently doing nothing. Same treatment Table and Attach already
+   * get beside it, for the same reason: the bar's layout is final now and does
+   * not shift the day the editor gains the capability.
+   */
+  canFormat?: boolean;
 }
 
 /** The --muted-foreground token, for the one prop that cannot take a class.
@@ -82,6 +92,7 @@ export function DesktopTopBar({
   menuTrigger,
   onTextStyles,
   onChecklist,
+  canFormat = true,
 }: DesktopTopBarProps) {
   const { scheme } = useTheme();
 
@@ -127,8 +138,20 @@ export function DesktopTopBar({
           regardless of how wide the left and right groups happen to be. */}
       <View style={{ flex: 1, alignItems: 'center' }} pointerEvents="box-none">
         <IconButtonGroup>
-          <IconButton icon={Type} label="Text styles" onPress={onTextStyles} />
-          <IconButton icon={ListChecks} label="Checklist" onPress={onChecklist} />
+          <IconButton
+            icon={Type}
+            label="Text styles"
+            onPress={onTextStyles}
+            disabled={!canFormat}
+            disabledReason="Not available in this editor yet"
+          />
+          <IconButton
+            icon={ListChecks}
+            label="Checklist"
+            onPress={onChecklist}
+            disabled={!canFormat}
+            disabledReason="Not available in this editor yet"
+          />
           {/* Rendered, dimmed, in their real positions. The editor cannot do
               either yet, and hiding them would mean the bar's layout shifts
               the day it can -- see the Decisions Log. */}

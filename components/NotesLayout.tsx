@@ -64,6 +64,7 @@ import {
 import { isBlankNote, noteToPlainText } from '@/types/note';
 import { BootSpinner } from '@/components/BootSpinner';
 import { BACKGROUND, useTheme } from '@/contexts/ThemeContext';
+import { paneChrome } from '@/lib/layout/paneChrome';
 
 // How long the launch gate below will wait before giving up and painting
 // whatever it has. Deliberately generous -- it is a failsafe for a path that
@@ -121,6 +122,21 @@ export default function NotesLayout() {
    * an iPad" gets wrong.
    */
   const useCompactHeader = !isWideLayout;
+
+  /**
+   * Which pane owns which control, for the two collapsible panes.
+   *
+   * Decided in one place, by `lib/layout/paneChrome.ts`, with the invariants
+   * under test -- chiefly *never two ways to restore a pane, and never none*.
+   * The two booleans are the app's existing collapse flags and are deliberately
+   * NOT renamed: `isFolderSidebarCollapsed` hides the folder tree,
+   * `isSidebarTucked` hides the note LIST, which is confusing enough that
+   * translating them here, once, is the whole reason this line exists.
+   */
+  const chrome = paneChrome({
+    foldersVisible: !isFolderSidebarCollapsed,
+    listVisible: !isSidebarTucked,
+  });
   const foldersArePersistent = isWideLayout && (Platform.OS !== 'ios' || isLandscape);
   /** Wide but not persistent: the floating-panel case (iPad portrait). */
   const foldersOverlay = isWideLayout && !foldersArePersistent;
@@ -1113,6 +1129,12 @@ export default function NotesLayout() {
             }
             useCompactHeader={useCompactHeader}
             onToggleSidebar={() => setIsFolderSidebarCollapsed((v) => !v)}
+            chrome={chrome}
+            onCollapseList={
+              Platform.OS === 'web' && isWideLayout
+                ? () => setIsSidebarTucked(true)
+                : undefined
+            }
           />
         )}
 
@@ -1139,6 +1161,13 @@ export default function NotesLayout() {
           onNoteChange={handleNoteChange}
           initialEditorScrollOffset={restoredEditorScrollRef.current}
           onEditorScrollOffsetChange={handleEditorScrollChange}
+          chrome={chrome}
+          onRestorePanes={() => setIsSidebarTucked(false)}
+          onNewNote={handleCreateNotePressed}
+          searchQuery={searchQuery}
+          onSearchChange={(query) =>
+            dispatch({ type: 'SET_SEARCH_QUERY', payload: { query } })
+          }
         />
       </HStack>
     </View>

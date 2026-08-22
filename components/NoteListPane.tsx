@@ -10,7 +10,15 @@ import { Input, InputField, InputSlot, InputIcon } from '@/components/ui/input';
 import { Menu, MenuItem, MenuItemLabel } from '@/components/ui/menu';
 
 // Lucide Icons
-import { Search, SquarePen, PanelLeft, ChevronLeft, Check } from 'lucide-react-native';
+import {
+  Search,
+  SquarePen,
+  PanelLeft,
+  PanelLeftClose,
+  ChevronLeft,
+  Check,
+} from 'lucide-react-native';
+import type { PaneChrome } from '@/lib/layout/paneChrome';
 
 // Custom Types & Helpers
 import { Note, parseNoteContent } from '@/types/note';
@@ -63,6 +71,11 @@ export interface NoteListPaneProps {
   onOpenFolders?: () => void;
   /** Wide layouts only: collapse/expand the persistent folder pane. */
   onToggleSidebar?: () => void;
+  /** Which controls this pane owns right now. From `paneChrome()`. */
+  chrome: PaneChrome;
+  /** Hides the list into the editor. Desktop only -- there is nowhere for the
+   *  editor's restore control to live on a phone. */
+  onCollapseList?: () => void;
   /** True on phones. Decides the header shape -- see the note on the header. */
   useCompactHeader: boolean;
 }
@@ -90,6 +103,8 @@ export default function NoteListPane({
   onCreateFolder,
   onOpenFolders,
   onToggleSidebar,
+  chrome,
+  onCollapseList,
   useCompactHeader,
 }: NoteListPaneProps) {
   // The bottom bar is one of the few places styled with inline `style` rather
@@ -171,6 +186,14 @@ export default function NoteListPane({
   const [moveFlyoutAnchor, setMoveFlyoutAnchor] = useState<{ x: number; y: number } | null>(null);
 
   const isDesktop = Platform.OS === 'web';
+
+  /**
+   * True when the editor's floating bar is on screen carrying search and New
+   * Note. Deliberately the same condition NoteEditorPane uses to render that
+   * bar -- if these two ever disagree, the app has either two search fields or
+   * none, and "none" is the one nobody notices in review.
+   */
+  const useDesktopChrome = isDesktop && !useCompactHeader;
 
   // Leaving select mode has to drop the selection too. Keeping it "in case
   // they come back" means re-entering select mode silently arrives with notes
@@ -314,11 +337,17 @@ export default function NoteListPane({
         <HStack className="items-start justify-between">
           <HStack className="flex-1 min-w-0 items-center gap-2">
             {!useCompactHeader ? (
-              // WIDE LAYOUT (iPad both orientations, desktop): the reveal
+              // WIDE LAYOUT (iPad both orientations, desktop): the folder
               // control, INLINE with the title rather than stacked above it.
+              //
+              // THE LABEL IS NOT FIXED, and that was a real bug: it read "Show
+              // folders" while the folders were plainly on screen, so a screen
+              // reader announced the opposite of what the button did half the
+              // time. Which job it is doing right now is the matrix's answer,
+              // not this component's -- see lib/layout/paneChrome.ts.
               <IconButton
                 icon={PanelLeft}
-                label="Show folders"
+                label={chrome.listPaneShowsRestoreFolders ? 'Show folders' : 'Hide folders'}
                 // Bare: it sits inline with the large title rather than in a
                 // bar of its own, so a filled circle would read as chrome
                 // dropped into the middle of a heading.
@@ -345,11 +374,35 @@ export default function NoteListPane({
             isSelectMode ? (
               <DoneButton onPress={exitSelectMode} />
             ) : (
-              <AvatarMenuTrigger
-                variant="overflow"
-                className="shrink-0"
-                onSelectNotes={() => setIsSelectMode(true)}
-              />
+              <HStack className="items-center shrink-0">
+                {/*
+                  HIDE THE NOTE LIST -- a deliberate divergence from the
+                  reference, which shows no such control anywhere.
+
+                  It shows the RESULT of hiding the list
+                  (`desktop-minimize-restore-states.png`: the editor's left
+                  group becomes a restore+compose capsule) but never the control
+                  that got there, because macOS Notes puts it in the View menu
+                  and a menu bar is not something this app has. Without a
+                  button, the both-panes-hidden state is unreachable and half
+                  the minimize/restore matrix is dead code that tests pass over.
+
+                  `PanelLeftClose` rather than a second `PanelLeft`: the two
+                  controls sit inches apart and must not be the same glyph.
+                */}
+                {chrome.listPaneShowsCollapse && onCollapseList ? (
+                  <IconButton
+                    icon={PanelLeftClose}
+                    label="Hide note list"
+                    surface="none"
+                    onPress={onCollapseList}
+                  />
+                ) : null}
+                <AvatarMenuTrigger
+                  variant="overflow"
+                  onSelectNotes={() => setIsSelectMode(true)}
+                />
+              </HStack>
             )
           ) : null}
         </HStack>
@@ -482,10 +535,15 @@ export default function NoteListPane({
       ) : null}
 
       {/* Bottom Controls.
-          Search and New Note stay here for now on every platform. The
-          reference removes them from wide layouts, but Stage 12 is what
-          relocates them into the editor chrome -- taking them away first would
-          leave desktop and iPad with no way to make a note at all.
+          GONE on desktop as of 12c, and this is the debt Stage 11 recorded
+          being paid: search and New Note were kept here "for now on every
+          platform" because removing them before the editor chrome existed
+          would have left desktop with no way to make a note at all. The
+          floating bar now carries both, and two search fields on one screen is
+          worse than the wrong one -- you cannot tell which list either filters.
+
+          A wide iPad keeps this bar: it does not get the desktop chrome until
+          12e, so for now it is still the only place either control lives.
 
           HIDDEN WHILE SELECTING, for two reasons that happen to agree: the
           floating bulk pills dock to the bottom and would otherwise land on
@@ -493,7 +551,7 @@ export default function NoteListPane({
           searching would change the list out from under a selection, and
           creating a note during one is incoherent. The reference shows no
           bottom bar in select mode either. */}
-      {isSelectMode ? null : (
+      {isSelectMode || useDesktopChrome ? null : (
       <View
         style={{
           flexDirection: 'row',

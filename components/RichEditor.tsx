@@ -19,6 +19,8 @@ import { Box } from '@/components/ui/box';
 import { useTheme } from '@/contexts/ThemeContext';
 import { toEnrichedHtml } from '@/lib/notes/htmlMigrate';
 import { FormatBar } from './FormatBar';
+import { TextStylePanel } from './TextStylePanel';
+import { BLOCK_STYLES, paragraphStyleToggles } from '@/lib/notes/paragraphStyle';
 import { useKeyboardShown } from '@/hooks/useKeyboardShown';
 import type { ToolKey } from '@/lib/notes/toolbarContext';
 
@@ -66,6 +68,18 @@ export interface RichEditorProps {
    */
   contentInsetTop?: number;
   onScrollOffsetChange?: (offset: number) => void;
+  /**
+   * Desktop only: whether the top bar's `Aa` popover is open.
+   *
+   * The BAR owns this boolean because the bar owns the button; the editor owns
+   * everything the panel actually renders. See TextStylePanel for why the split
+   * falls there.
+   */
+  textStyleOpen?: boolean;
+  onCloseTextStyle?: () => void;
+  /** Distance from the top of this pane to the underside of a floating bar,
+   *  so the panel hangs from it rather than from the window edge. */
+  textStyleTop?: number;
 }
 
 /**
@@ -113,6 +127,13 @@ const RUN: Partial<Record<ToolKey, (r: EnrichedTextInputInstance) => void>> = {
   underline: (r) => r.toggleUnderline(),
   strikethrough: (r) => r.toggleStrikeThrough(),
   heading: (r) => r.toggleH1(),
+  heading2: (r) => r.toggleH2(),
+  heading3: (r) => r.toggleH3(),
+  // Body is the ABSENCE of a block style, so there is nothing to "turn on".
+  // Running it turns OFF whichever block style is currently active -- the
+  // library's toggles are their own inverse, so re-toggling the active one is
+  // the whole implementation. Which one that is comes from the caller's state,
+  // so this needs the caret's state and is handled in `runTool`, not here.
   bulletList: (r) => r.toggleUnorderedList(),
   numberedList: (r) => r.toggleOrderedList(),
   // `checked` is required, and false is the only sensible default: a fresh
@@ -120,6 +141,7 @@ const RUN: Partial<Record<ToolKey, (r: EnrichedTextInputInstance) => void>> = {
   checklist: (r) => r.toggleCheckboxList(false),
   blockquote: (r) => r.toggleBlockQuote(),
   code: (r) => r.toggleInlineCode(),
+  codeBlock: (r) => r.toggleCodeBlock(),
 };
 
 /** ToolKey -> the editor's own state key, for the selected/blocked flags. */
@@ -129,11 +151,14 @@ const STATE_KEY: Partial<Record<ToolKey, StyleKey>> = {
   underline: 'underline',
   strikethrough: 'strikeThrough',
   heading: 'h1',
+  heading2: 'h2',
+  heading3: 'h3',
   bulletList: 'unorderedList',
   numberedList: 'orderedList',
   checklist: 'checkboxList',
   blockquote: 'blockQuote',
   code: 'inlineCode',
+  codeBlock: 'codeBlock',
   link: 'link',
   image: 'image',
 };
@@ -148,9 +173,23 @@ const STATE_KEY: Partial<Record<ToolKey, StyleKey>> = {
  * pressed, and the keyboard stayed up. The library exposes `blur()` on its own
  * instance for precisely this, so the parent needs a way to reach it.
  */
+/**
+ * Whether the editor this platform got can apply formatting at all.
+ *
+ * A module constant rather than a prop or a handle method, because it is a
+ * build-time fact: Metro resolves `RichEditor.web.tsx` on web, where the editor
+ * is plain text and this is `false`. Chrome around the editor reads it to
+ * decide whether its formatting controls are live or dimmed -- the same
+ * standing rule that dims Table and Attach, applied to a whole editor.
+ */
+export const EDITOR_SUPPORTS_FORMATTING = true;
+
 export interface RichEditorHandle {
   /** Removes focus and dismisses the software keyboard. */
   blur: () => void;
+  /** Apply a formatting action. Used by the desktop bar, whose Checklist
+   *  button sits outside this component. */
+  run: (key: ToolKey) => void;
 }
 
 const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEditor(
@@ -159,12 +198,33 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
     onChange,
     autoFocus = false,
     contentInsetTop = 0,
+    textStyleOpen = false,
+    onCloseTextStyle,
+    textStyleTop = 0,
   },
   handle
 ) {
   const ref = useRef<EnrichedTextInputInstance>(null);
 
-  useImperativeHandle(handle, () => ({ blur: () => ref.current?.blur() }), []);
+  useImperativeHandle(
+    handle,
+    () => ({
+      blur: () => ref.current?.blur(),
+      run: (key: ToolKey) => runToolRef.current(key),
+    }),
+    []
+  );
+
+  /**
+   * `run` is reached through a ref rather than closed over directly.
+   *
+   * `runTool` depends on `styleState` (Body needs it), so it is a NEW function
+   * on every keystroke. Listing it in the handle's deps would rebuild the
+   * handle just as often, and a parent holding `editorRef.current` would be
+   * holding a stale object between renders. The ref is stable; what it points
+   * at is current.
+   */
+  const runToolRef = useRef<(key: ToolKey) => void>(() => {});
   const { scheme } = useTheme();
 
   const migrated = useMemo(() => toEnrichedHtml(initialContent), [initialContent]);
@@ -362,14 +422,43 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
 
   const keyboardShown = useKeyboardShown();
 
-  const runTool = useCallback((key: ToolKey) => {
-    const instance = ref.current;
-    const run = RUN[key];
-    // Unsupported keys reach here only if a disabled button were ever
-    // pressable. Ignored rather than thrown: a formatting bar is not the place
-    // to crash an editor holding unsaved text.
-    if (instance && run) run(instance);
-  }, []);
+  const runTool = useCallback(
+    (key: ToolKey) => {
+      const instance = ref.current;
+      if (!instance) return;
+
+      /**
+       * BODY IS NOT A FORMAT, it is the absence of one, and the editor has no
+       * "make this a paragraph" call. So it is implemented as: turn off
+       * whatever block style is on. The library's toggles are their own
+       * inverse, so re-running the active one clears it.
+       *
+       * This is why Body lives in `runTool` and not in the RUN map -- it is the
+       * one action that needs to know the caret's current state, which a static
+       * map of `(instance) => void` cannot see.
+       */
+      if (BLOCK_STYLES.includes(key) || key === 'body') {
+        // Which toggles to fire is decided by lib/notes/paragraphStyle.ts, and
+        // tested there. It matters that this is not written inline: "make this
+        // Body" is "toggle off whatever is on", and the naive version -- toggle
+        // every block style -- would turn six of them ON, because the editor's
+        // block toggles are their own inverse.
+        for (const style of paragraphStyleToggles(activeTools, key)) {
+          RUN[style]?.(instance);
+        }
+        return;
+      }
+
+      const run = RUN[key];
+      // Unsupported keys reach here only if a disabled button were ever
+      // pressable. Ignored rather than thrown: a formatting bar is not the
+      // place to crash an editor holding unsaved text.
+      if (run) run(instance);
+    },
+    [activeTools]
+  );
+
+  runToolRef.current = runTool;
 
   const isDark = scheme === 'dark';
   const text = isDark ? '#fafafa' : '#111111';
@@ -430,6 +519,15 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
           `styleState !== null` is still required: before the editor has reported
           any state the bar would render every control in its resting, unselected
           look, which is a lie about a document it has not read yet. */}
+      <TextStylePanel
+        open={textStyleOpen}
+        onClose={() => onCloseTextStyle?.()}
+        active={activeTools}
+        blocked={blockedTools}
+        onRun={runTool}
+        top={textStyleTop}
+      />
+
       <FormatBar
         active={activeTools}
         blocked={blockedTools}

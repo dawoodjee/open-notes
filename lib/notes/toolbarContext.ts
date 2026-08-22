@@ -29,17 +29,41 @@
  * the start of an empty line.
  */
 
+/**
+ * Every formatting action the app can NAME, which is deliberately more than
+ * any one surface shows.
+ *
+ * The phone's bar shows `RESTING_ORDER`; the desktop `Aa` panel shows a
+ * different, overlapping set (it has Title/Heading/Subheading as separate rows
+ * where the bar has one H1, and it names Body explicitly). Keeping one
+ * vocabulary means `isSupported` and the editor's RUN map are shared rather
+ * than duplicated per surface -- and a control that gains support gains it
+ * everywhere at once.
+ */
 export type ToolKey =
   | 'bold'
   | 'italic'
   | 'underline'
   | 'strikethrough'
   | 'heading'
+  /** h2 and h3, named by the reference's own labels: Heading and Subheading. */
+  | 'heading2'
+  | 'heading3'
+  /** The absence of any block style. Not a format the editor reports -- the
+   *  desktop panel derives it, and running it clears whatever is active. */
+  | 'body'
   | 'bulletList'
+  /** A bulleted list drawn with dashes. The app stores a bullet-style
+   *  preference already, but nothing yet applies it to the editor, so this is
+   *  a distinct action the editor cannot perform. */
+  | 'dashedList'
   | 'numberedList'
   | 'checklist'
   | 'blockquote'
   | 'code'
+  /** A monospaced BLOCK -- the reference's "Monostyled" row. Distinct from
+   *  `code`, which is the inline mark. */
+  | 'codeBlock'
   | 'link'
   | 'image'
   | 'indent'
@@ -66,6 +90,11 @@ export const UNSUPPORTED: readonly ToolKey[] = [
   'highlight',
   'textColor',
   'table',
+  // Rendered by the desktop panel, disabled: `react-native-enriched-html` has
+  // one bulleted list. The stored bullet-style preference (Settings ->
+  // Appearance) is not yet wired to the editor, so there is no second list
+  // style to switch to.
+  'dashedList',
 ] as const;
 
 export function isSupported(key: ToolKey): boolean {
@@ -74,7 +103,11 @@ export function isSupported(key: ToolKey): boolean {
 
 /**
  * Resting order: inline marks first, then block structure, then insertions.
- * Everything the bar can ever show appears here exactly once.
+ * Everything THE PHONE BAR can ever show appears here exactly once.
+ *
+ * Not every `ToolKey` is here, and that is the point: `heading2`, `heading3`,
+ * `body` and `dashedList` exist for the desktop `Aa` panel, which has room for
+ * named paragraph styles where a thumb-width scroller does not.
  */
 const RESTING_ORDER: readonly ToolKey[] = [
   'bold',

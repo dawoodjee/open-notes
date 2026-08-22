@@ -74,12 +74,27 @@ describe('toolbarOrder — invariants across every context', () => {
   it('unsupported controls are still present, never dropped', () => {
     // They render dimmed. Dropping them would make the bar's layout shift the
     // day the editor gains them, which is the whole reason for showing them.
+    //
+    // Scoped to the keys the BAR carries, not every unsupported key in the
+    // vocabulary: `ToolKey` also names actions that only the desktop `Aa`
+    // panel shows, and the bar is not wrong to leave those out.
+    const barUnsupported = toolbarOrder(PLAIN).filter((key) => UNSUPPORTED.includes(key));
+    expect(barUnsupported.length > 0).toBe(true);
+
     for (const ctx of ALL) {
       const order = toolbarOrder(ctx);
-      for (const key of UNSUPPORTED) {
+      for (const key of barUnsupported) {
         expect(order.includes(key)).toBe(true);
       }
     }
+  });
+
+  it('a key the bar does not carry is still a known tool', () => {
+    // The desktop panel's own rows go through the same isSupported() gate, so
+    // they have to be part of the vocabulary even though no bar shows them.
+    expect(isSupported('heading2')).toBe(true);
+    expect(isSupported('dashedList')).toBe(false);
+    expect(toolbarOrder(PLAIN).includes('heading2')).toBe(false);
   });
 
   it('the list context leads with two controls that do not work yet', () => {
