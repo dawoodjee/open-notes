@@ -7,6 +7,7 @@
  * <strong>/<em>, neither of which is documented upstream.
  */
 import { describe, it, expect } from './harness';
+import { isBlankNote } from '../types/note';
 import { toEnrichedHtml, isEnrichedHtml, stripEnrichedWrapper } from '../lib/notes/htmlMigrate';
 
 describe('toEnrichedHtml', () => {
@@ -20,9 +21,20 @@ describe('toEnrichedHtml', () => {
     expect(toEnrichedHtml('<h1>r</h1>')).toBe('<html>\n<h1>r</h1>\n</html>');
   });
 
-  it('turns an empty note into an empty paragraph', () => {
-    expect(toEnrichedHtml('')).toBe('<html>\n<p></p>\n</html>');
-    expect(toEnrichedHtml('   ')).toBe('<html>\n<p></p>\n</html>');
+  it('seeds an empty note as a HEADING, so the first line is the title', () => {
+    expect(toEnrichedHtml('')).toBe('<html>\n<h1></h1>\n</html>');
+    expect(toEnrichedHtml('   ')).toBe('<html>\n<h1></h1>\n</html>');
+  });
+
+  it('the heading seed is still BLANK, so abandoned notes are still deleted', () => {
+    // The seed has to survive isBlankNote unchanged. That function decides
+    // whether a note is permanently deleted, so a seed reading as non-blank
+    // would leak an empty note into the list every time one was opened and
+    // walked away from.
+    expect(isBlankNote(toEnrichedHtml(''))).toBe(true);
+    expect(isBlankNote(toEnrichedHtml('   '))).toBe(true);
+    // ...and a note with real text in that heading is NOT blank.
+    expect(isBlankNote(toEnrichedHtml('<h1>Groceries</h1>'))).toBe(false);
   });
 
   it('converts strong and em, which the library silently drops', () => {
