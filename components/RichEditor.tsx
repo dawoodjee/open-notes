@@ -1,4 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { View } from 'react-native';
 import {
   EnrichedTextInput,
@@ -11,6 +19,7 @@ import { Box } from '@/components/ui/box';
 import { useTheme } from '@/contexts/ThemeContext';
 import { toEnrichedHtml } from '@/lib/notes/htmlMigrate';
 import { FormatBar } from './FormatBar';
+import { useKeyboardShown } from '@/hooks/useKeyboardShown';
 import type { ToolKey } from '@/lib/notes/toolbarContext';
 
 /**
@@ -129,13 +138,33 @@ const STATE_KEY: Partial<Record<ToolKey, StyleKey>> = {
   image: 'image',
 };
 
-export default function RichEditor({
-  initialContent = '',
-  onChange,
-  autoFocus = false,
-  contentInsetTop = 0,
-}: RichEditorProps) {
+/**
+ * What a parent can ask the editor to do.
+ *
+ * Exactly one thing so far, and it exists because `Keyboard.dismiss()` does not
+ * work here. That RN helper blurs the focused *RN* TextInput; this editor is a
+ * real UITextView behind a Fabric component and never sees it, so the phone's
+ * Done button was inert on iOS from the moment it shipped -- it rendered, it
+ * pressed, and the keyboard stayed up. The library exposes `blur()` on its own
+ * instance for precisely this, so the parent needs a way to reach it.
+ */
+export interface RichEditorHandle {
+  /** Removes focus and dismisses the software keyboard. */
+  blur: () => void;
+}
+
+const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEditor(
+  {
+    initialContent = '',
+    onChange,
+    autoFocus = false,
+    contentInsetTop = 0,
+  },
+  handle
+) {
   const ref = useRef<EnrichedTextInputInstance>(null);
+
+  useImperativeHandle(handle, () => ({ blur: () => ref.current?.blur() }), []);
   const { scheme } = useTheme();
 
   const migrated = useMemo(() => toEnrichedHtml(initialContent), [initialContent]);
@@ -311,6 +340,28 @@ export default function RichEditor({
     return out;
   }, [styleState]);
 
+  /**
+   * Whether any text is actually SELECTED, as opposed to the caret merely
+   * sitting somewhere.
+   *
+   * This is the second half of when the formatting bar is allowed on screen.
+   * The keyboard covers the ordinary case -- you are typing, so you may want to
+   * format -- but not the one where the keyboard is down and a range is
+   * highlighted, which is exactly when someone reaches for bold. That happens
+   * with an external keyboard, and on iPad after a long-press selection
+   * dismisses the software keyboard.
+   */
+  const [hasSelection, setHasSelection] = useState(false);
+  const handleChangeSelection = useCallback(
+    (event: { nativeEvent: { start: number; end: number } }) => {
+      const { start, end } = event.nativeEvent;
+      setHasSelection(end > start);
+    },
+    []
+  );
+
+  const keyboardShown = useKeyboardShown();
+
   const runTool = useCallback((key: ToolKey) => {
     const instance = ref.current;
     const run = RUN[key];
@@ -334,6 +385,7 @@ export default function RichEditor({
           autoFocus={autoFocus}
           onChangeHtml={handleChangeHtml}
           onChangeState={handleChangeState}
+          onChangeSelection={handleChangeSelection}
           // color MUST be set explicitly. The input is a real UITextView and
           // defaults to black, so in dark mode the note rendered as black text
           // on a black background -- invisible, and it looked like the editor
@@ -365,8 +417,19 @@ export default function RichEditor({
         />
       </View>
 
-      {/* Docked to the keyboard, so it is only there when there is something
-          to format. */}
+      {/* ON SCREEN ONLY WHEN THERE IS SOMETHING TO FORMAT, and it rides the
+          keyboard the whole way (Adam, 2026-08-22).
+
+          It used to stay put when the keyboard went down, sitting on the home
+          indicator. The reasoning was that it is the only formatting affordance
+          on a phone -- but the consequence was a bar permanently occupying the
+          bottom of the screen while you were only READING a note, which is most
+          of what anybody does with one. Dismissing the keyboard is how you say
+          "I am done editing"; the bar has to hear that.
+
+          `styleState !== null` is still required: before the editor has reported
+          any state the bar would render every control in its resting, unselected
+          look, which is a lie about a document it has not read yet. */}
       <FormatBar
         active={activeTools}
         blocked={blockedTools}
@@ -375,8 +438,10 @@ export default function RichEditor({
         onRun={runTool}
         expanded={barExpanded}
         onToggleExpanded={() => setBarExpanded((v) => !v)}
-        visible={styleState !== null}
+        visible={styleState !== null && (keyboardShown || hasSelection)}
       />
     </Box>
   );
-}
+});
+
+export default RichEditor;

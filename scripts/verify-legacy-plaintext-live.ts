@@ -1,7 +1,7 @@
 /**
  * Live-stack proof for the plaintext-forwarding fix, against a real
  * Postgres -- the same kind of check that originally discovered the bug
- * (mvp-build-plan.md's Decisions Log, 2026-08-19: "found via the account
+ * (dev-docs/mvp-build-plan.md's Decisions Log, 2026-08-19: "found via the account
  * probe... a direct query").
  *
  * Reproduces the exact scenario: a note whose body/title are still

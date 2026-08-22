@@ -228,7 +228,7 @@ async function refreshSyncBaseIfSettled(): Promise<void> {
  * CURRENT LOCAL STATE on any queued op for it, not just the changed columns.
  * A metadata-only write on a note that's still plaintext locally forwards
  * that plaintext to Postgres as a legitimate update. This already happened
- * for real (see mvp-build-plan.md's Decisions Log, 2026-08-19).
+ * for real (see dev-docs/mvp-build-plan.md's Decisions Log, 2026-08-19).
  *
  * A per-function guard only protects the functions that remember to call it.
  * Running this once, before anything else touches the table, makes the bug

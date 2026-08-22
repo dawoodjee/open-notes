@@ -1,6 +1,6 @@
 /**
  * Verifies the fix for the plaintext-forwarding gap recorded in
- * mvp-build-plan.md's Decisions Log (2026-08-19): a note whose body/title
+ * dev-docs/mvp-build-plan.md's Decisions Log (2026-08-19): a note whose body/title
  * predate the vault (still plaintext locally) forwarded that plaintext to
  * Postgres the next time ANY metadata-only write touched it, because
  * connector.ts's uploadEntry uploads a row's current local state, not just

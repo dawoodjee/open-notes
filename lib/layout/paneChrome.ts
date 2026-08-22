@@ -16,8 +16,8 @@
  * discovered on a device.
  *
  * The reference for the two collapsed states is
- * `floating-menu/desktop-top-bar-groups.png` (folders hidden, list shown) and
- * `floating-menu/desktop-minimize-restore-states.png` (both hidden).
+ * `dev-docs/design/iteration-2/floating-menu/desktop-top-bar-groups.png` (folders hidden, list shown) and
+ * `dev-docs/design/iteration-2/floating-menu/desktop-minimize-restore-states.png` (both hidden).
  */
 
 export interface PaneVisibility {

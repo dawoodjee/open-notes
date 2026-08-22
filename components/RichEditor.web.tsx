@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { forwardRef, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { ScrollView, Text as RNText, TextInput, View } from 'react-native';
 
 import { isPlainTextSafe, toPlainText, toPlainTextHtml } from '@/lib/notes/plainTextBody';
-import type { RichEditorProps } from './RichEditor';
+import type { RichEditorHandle, RichEditorProps } from './RichEditor';
 
 /**
  * THE WEB EDITOR: plain text, and honest about it.
@@ -40,12 +40,15 @@ import type { RichEditorProps } from './RichEditor';
  *
  * That guard is why the badge below has two texts and not one.
  */
-export default function RichEditor({
-  initialContent = '',
-  onChange,
-  autoFocus,
-  contentInsetTop = 0,
-}: RichEditorProps) {
+const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEditor(
+  { initialContent = '', onChange, autoFocus, contentInsetTop = 0 },
+  handle
+) {
+  // The web editor IS a real RN TextInput (a <textarea>), so unlike the native
+  // one it would also answer to Keyboard.dismiss(). It still implements the
+  // handle, because the caller must not have to know which editor it got.
+  const inputRef = useRef<TextInput>(null);
+  useImperativeHandle(handle, () => ({ blur: () => inputRef.current?.blur() }), []);
   const editable = useMemo(() => isPlainTextSafe(initialContent), [initialContent]);
 
   /**
@@ -92,6 +95,7 @@ export default function RichEditor({
 
       {editable ? (
         <TextInput
+          ref={inputRef}
           multiline
           autoFocus={autoFocus}
           value={text}
@@ -117,4 +121,6 @@ export default function RichEditor({
       )}
     </ScrollView>
   );
-}
+});
+
+export default RichEditor;

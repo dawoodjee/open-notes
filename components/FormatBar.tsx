@@ -152,17 +152,35 @@ export function FormatBar({
   const keyboard = useAnimatedKeyboard();
 
   /**
-   * The bar STAYS when the keyboard goes down, sitting on the home-indicator
-   * inset instead. It is the only formatting affordance on a phone now that
-   * the toolbar above the canvas is gone, and dismissing the keyboard to read
-   * a note should not also take away the ability to format it.
+   * When the keyboard is down the bar is on its way out, but it can still be
+   * ON screen for a frame or two of the exit animation -- and during those
+   * frames it must clear the home indicator rather than sit under it.
    */
   const bottomPad = useDerivedValue(() =>
     keyboard.height.value > 0 ? 0 : insets.bottom
   );
 
+  /**
+   * Docking and appearing are TWO translateY entries in ONE transform array,
+   * not two styles in a style array.
+   *
+   * That distinction is the whole thing: React Native RESOLVES a style array by
+   * replacement, so a second style carrying its own `transform` discards the
+   * first one's entirely. Written as two styles, the appear animation silently
+   * cancelled the keyboard tracking and the bar stopped following the keyboard
+   * at all. Two entries in one array genuinely compose -- the bar can slide out
+   * from under a keyboard that is itself still moving, which is the real case,
+   * since dismissing the keyboard is what usually hides it.
+   *
+   * An unmount would be simpler and wrong: the bar would vanish instantly while
+   * the keyboard was still animating down, leaving a hole above it.
+   */
   const dock = useAnimatedStyle(() => ({
-    transform: [{ translateY: -keyboard.height.value }],
+    opacity: spring(visible ? 1 : 0, SPRING_EXPAND),
+    transform: [
+      { translateY: -keyboard.height.value },
+      { translateY: spring(visible ? 0 : SLOT + 16, SPRING_EXPAND) },
+    ],
     paddingBottom: bottomPad.value + 8,
   }));
 
@@ -175,8 +193,6 @@ export function FormatBar({
     height: spring(expanded ? Math.min(screenHeight * 0.32, 280) : 0, SPRING_EXPAND),
     opacity: spring(expanded ? 1 : 0, SPRING_EXPAND),
   }));
-
-  if (!visible) return null;
 
   const button = (key: ToolKey) => (
     <IconButton
@@ -200,7 +216,10 @@ export function FormatBar({
 
   return (
     <Animated.View
-      pointerEvents="box-none"
+      // 'none' while hidden, not just invisible: a bar animating out still
+      // occupies the bottom of the screen for the length of the animation, and
+      // it must not swallow a tap meant for the note underneath it.
+      pointerEvents={visible ? 'box-none' : 'none'}
       style={[{ position: 'absolute', left: 0, right: 0, bottom: 0 }, dock]}
     >
       {/* The expanded panel, above the bar and sharing its inset. */}
