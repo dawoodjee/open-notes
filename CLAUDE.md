@@ -24,6 +24,19 @@ The test when unsure: would undoing this in two weeks take minutes or days? Minu
 
 When I accept a tradeoff on an escalated decision, record it in the Decisions Log in `mvp-build-plan.md` — the decision, the reasoning, and the consequence I accepted — before moving on.
 
+## Devices
+Reuse the simulators and emulators that are already booted. Keep the app
+installed across a run. Don't uninstall, wipe, or `-wipe-data` unless a test
+genuinely requires a clean device — and when it does, say so and say why before
+doing it. Booting and reinstalling costs minutes and permission prompts every
+time, and it throws away sign-in state I then have to restore by hand.
+
+Before any UI step, confirm what is actually on screen — screenshot first, then
+act. Don't assume a tap landed, that the app is on the screen you left it on, or
+that a relaunch restored the same view. Conclusions drawn from a run that was
+executing in the wrong screen are worse than no conclusions, because they send
+the next hour after a bug that isn't there.
+
 ## Verification
 Prove things rather than asserting them: use the terminal to run, boot, query, or test what you built, and show me the result.
 
