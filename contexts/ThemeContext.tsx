@@ -171,7 +171,42 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    Appearance.setColorScheme(toColorScheme(preference));
+    const next = toColorScheme(preference);
+
+    /**
+     * WEB HAS NO `setColorScheme`. `react-native-web`'s Appearance module
+     * implements the listener half of the API and not the setter, so this line
+     * threw `Appearance.default.setColorScheme is not a function` from inside
+     * ThemeProvider and took the whole web app down before first paint. That
+     * is the boot failure Stage 13 recorded and Stage 12b was asked to clear.
+     *
+     * The feature check rather than a `Platform.OS` check because it is the
+     * honest test: what matters is whether the function exists.
+     */
+    if (typeof Appearance.setColorScheme === 'function') {
+      Appearance.setColorScheme(next);
+    }
+
+    /**
+     * On web the equivalent lever is a class on the document root -- global.css
+     * already defines `:root.dark` and `:root.light` alongside its
+     * prefers-color-scheme block, so the token values follow from here with no
+     * new CSS. No class at all is how "follow the device" is spelled, which
+     * leaves the media query in charge.
+     *
+     * PARTIAL, AND WORTH KNOWING: this moves the TOKENS (bg-background,
+     * text-foreground and the rest). Tailwind v4's `dark:` UTILITY variant
+     * still compiles to `@media (prefers-color-scheme: dark)` because this
+     * project has no `@custom-variant dark`, so on web those utilities keep
+     * following the OS regardless of the in-app preference. Adding that
+     * variant changes how global.css compiles for native too, so it belongs to
+     * Stage 13's web pass rather than to a boot fix.
+     */
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const root = document.documentElement;
+      root.classList.remove('light', 'dark');
+      if (next) root.classList.add(next);
+    }
   }, [preference]);
 
   const scheme: 'light' | 'dark' =
