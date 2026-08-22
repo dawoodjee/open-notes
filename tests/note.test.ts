@@ -135,3 +135,35 @@ describe('formatNoteDate', () => {
     ).toBe(false);
   });
 });
+
+describe('the new enriched format', () => {
+  // types/note.ts parses by stripping tags, so the <html> wrapper contributes
+  // nothing and these all worked unchanged after the editor swap. Pinned here
+  // because isBlankNote gates PERMANENT deletion, and "it happened to still
+  // work" is not something to leave unasserted.
+  it('an empty enriched document is blank', () => {
+    expect(isBlankNote('<html>\n<p></p>\n</html>')).toBe(true);
+    expect(isBlankNote('<html>\n<h1></h1>\n</html>')).toBe(true);
+  });
+
+  it('a one-character enriched note is NOT blank', () => {
+    // The exact note that the library corrupted before the migration wrapper.
+    expect(isBlankNote('<html>\n<h1>r</h1>\n</html>')).toBe(false);
+  });
+
+  it('titles come from the first block, wrapper ignored', () => {
+    expect(parseNoteContent('<html>\n<h1>Note</h1>\n<p>Body</p>\n</html>').title).toBe('Note');
+  });
+
+  it('plain text ignores the wrapper', () => {
+    expect(noteToPlainText('<html>\n<h1>Note</h1>\n<p>Body</p>\n</html>')).toBe('Note\n\nBody');
+  });
+
+  it('list items each become a line', () => {
+    expect(noteToPlainText('<html>\n<ul>\n<li>a</li>\n<li>b</li>\n</ul>\n</html>')).toBe('a\n\nb');
+  });
+
+  it('the non-standard codeblock tag does not leak into text', () => {
+    expect(noteToPlainText('<html>\n<codeblock>\n<p>x=1</p>\n</codeblock>\n</html>')).toBe('x=1');
+  });
+});
