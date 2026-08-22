@@ -8,10 +8,12 @@ import {
   // React Native, so sharing needs no new dependency.
   Share as RNShare,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import RichEditor from './RichEditor';
-import { GROUP_GAP, IconButton, IconButtonGroup } from './IconButton';
+import { ChromeScrim } from './ChromeScrim';
+import { GROUP_GAP, IconButton, IconButtonGroup, SURFACE } from './IconButton';
 
 // Gluestack UI Primitives
 import { HStack } from '@/components/ui/hstack';
@@ -27,15 +29,7 @@ import {
 } from '@/components/ui/menu';
 
 // Lucide Icons
-import {
-  ChevronLeft,
-  Share,
-  Menu,
-  Trash2,
-  MoreVertical,
-  Eye,
-  EyeOff,
-} from 'lucide-react-native';
+import { Check, ChevronLeft, Eye, EyeOff, Menu, MoreVertical, Share, Trash2, Undo2 } from 'lucide-react-native';
 
 // Custom Types
 import { Note, noteToPlainText } from '@/types/note';
@@ -107,6 +101,14 @@ export default function NoteEditorPane({
   // indicator as well leaves a dead band sitting between the text and the keys.
   // iOS itself makes exactly this swap.
   const keyboardShown = useKeyboardShown();
+
+  /**
+   * The phone bar floats, so the document has to be told how much to leave
+   * clear. Derived from the same numbers the bar is laid out with rather than
+   * a second literal, so the two cannot drift.
+   */
+  const useCompact = useWindowDimensions().width < 768;
+  const navBarHeight = insets.top + 8 + SURFACE + 12;
   const editorBottomInset = keyboardShown ? 0 : insets.bottom;
 
   // Named here rather than inlined twice, because `textValue` (what a screen
@@ -179,15 +181,67 @@ export default function NoteEditorPane({
     >
       {selectedNote ? (
         <>
-          {/* Top Navigation Row */}
+          {/*
+            FLOATS on a phone, sits in a row on wide layouts.
+
+            `mobile-navbar-default-aa-undo-redo.png` draws the phone bar over
+            the note's own text, not in a strip above it, and Adam's call was
+            that the screenshot wins over the prose here. So on a phone this is
+            absolutely positioned with a scrim behind it and the document is
+            inset to clear it; wide layouts keep the bordered row until 12e
+            gives the iPad its own chrome.
+          */}
+          {useCompact ? <ChromeScrim height={navBarHeight} /> : null}
           <HStack
-            className="justify-between items-center px-4 py-3 border-b border-border"
-            style={{ paddingTop: insets.top + 12 }}
+            className={
+              useCompact
+                ? 'justify-between items-center px-4 pb-3'
+                : 'justify-between items-center px-4 py-3 border-b border-border'
+            }
+            style={
+              useCompact
+                ? {
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    zIndex: 10,
+                    paddingTop: insets.top + 8,
+                  }
+                : { paddingTop: insets.top + 12 }
+            }
           >
-            <HStack className="items-center space-x-1">
+            <HStack className="items-center" style={{ gap: GROUP_GAP }}>
               {/* Mobile Back Button */}
               <View className="md:hidden">
                 <IconButton icon={ChevronLeft} label="Back to list" onPress={onBackToList} />
+              </View>
+
+              {/*
+                UNDO, and it does not work.
+
+                The reference gives Undo its own circle beside Back, and the
+                spec asks for a contextual Redo. `react-native-enriched-html`
+                exposes NO undo or redo API at all -- not on the instance, not
+                on the native side. So Undo renders dimmed under the standing
+                rule for controls the editor cannot perform, and Redo, being
+                specified as hidden until something has been undone, simply
+                never arms. That satisfies both rules at once and leaves no
+                permanently visible dead button.
+
+                Worth revisiting at the end of the iteration: this editor
+                already keeps a ledger of every document version it has
+                produced (see `echoesRef`), so an undo stack built on
+                `setValue` is plausible. The open question is the caret, which
+                `setValue` does not preserve.
+              */}
+              <View className="md:hidden">
+                <IconButton
+                  icon={Undo2}
+                  label="Undo"
+                  disabled
+                  disabledReason="Not available in this editor yet"
+                />
               </View>
 
               {/* Desktop Sidebar Tuck/Untuck Toggle */}
@@ -287,6 +341,23 @@ export default function NoteEditorPane({
                 action on this note, so it does not belong in a group whose
                 meaning is "act on this note". */}
             <AvatarMenuTrigger className="hidden md:flex" />
+
+            {/*
+              DONE -- the accent circle the reference puts at the right end.
+              Only while the keyboard is up, because that is the only time
+              there is anything to be done WITH: it dismisses the keyboard.
+              Rendering it permanently would be a button that mostly does
+              nothing, which is the dead-button case the spec rules out for
+              Redo and applies just as well here.
+            */}
+            {useCompact && keyboardShown ? (
+              <IconButton
+                icon={Check}
+                label="Done editing"
+                variant="accent"
+                onPress={() => Keyboard.dismiss()}
+              />
+            ) : null}
           </HStack>
           </HStack>
 
@@ -303,6 +374,9 @@ export default function NoteEditorPane({
               autoFocus={!selectedNote.body || selectedNote.body === ''}
               initialScrollOffset={initialEditorScrollOffset}
               onScrollOffsetChange={onEditorScrollOffsetChange}
+              // Clears the floating bar on a phone; wide layouts still have a
+              // real row above the document and need nothing.
+              contentInsetTop={useCompact ? navBarHeight : 0}
             />
           </Box>
         </>

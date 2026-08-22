@@ -13,6 +13,7 @@ import {
 } from 'lucide-react-native';
 
 import { GROUP_GAP, IconButton, IconButtonGroup, SURFACE } from './IconButton';
+import { ChromeScrim } from './ChromeScrim';
 import { useTheme } from '@/contexts/ThemeContext';
 import type { PaneChrome } from '@/lib/layout/paneChrome';
 
@@ -52,54 +53,6 @@ import type { PaneChrome } from '@/lib/layout/paneChrome';
 
 /** Bar height including its padding. Callers inset their content by this. */
 export const BAR_HEIGHT = SURFACE + 20;
-
-/** How far past the bar the scrim keeps fading. */
-const SCRIM_FADE = 24;
-/** Strips in the fade. Enough that the banding is invisible, few enough that
- *  it costs nothing -- 12 views is less than one icon button. */
-const SCRIM_STEPS = 12;
-
-/**
- * The gradient behind the bar.
- *
- * NOT DECORATION -- it is what keeps the controls readable. The bar floats, so
- * once the note is scrolled its text runs directly under the icon groups, and
- * a fully transparent bar leaves paragraphs threading between the capsules and
- * the glyphs unreadable against them. Caught by scrolling the harness rather
- * than by reasoning about it, and clearly visible in that screenshot.
- *
- * Built from stacked strips of `bg-background` at falling opacity rather than
- * with `expo-linear-gradient`, because that is another native module and
- * another rebuild for one gradient. Twelve strips over 80pt banding-free, and
- * because every strip is the `background` TOKEN it is theme-tinted for free
- * and flips with dark mode on its own.
- */
-function Scrim() {
-  const total = BAR_HEIGHT + SCRIM_FADE;
-  const step = total / SCRIM_STEPS;
-  return (
-    <View
-      pointerEvents="none"
-      style={{ position: 'absolute', top: 0, left: 0, right: 0, height: total }}
-    >
-      {Array.from({ length: SCRIM_STEPS }, (_, i) => {
-        // Solid across the bar itself, then easing out through the fade, so
-        // the controls always sit on a full-strength ground.
-        const progress = i / (SCRIM_STEPS - 1);
-        const solidUntil = BAR_HEIGHT / total;
-        const opacity =
-          progress <= solidUntil ? 1 : 1 - (progress - solidUntil) / (1 - solidUntil);
-        return (
-          <View
-            key={i}
-            className="bg-background"
-            style={{ position: 'absolute', top: i * step, left: 0, right: 0, height: step + 1, opacity }}
-          />
-        );
-      })}
-    </View>
-  );
-}
 
 export interface DesktopTopBarProps {
   chrome: PaneChrome;
@@ -155,7 +108,7 @@ export function DesktopTopBar({
         zIndex: 10,
       }}
     >
-      <Scrim />
+      <ChromeScrim height={BAR_HEIGHT} />
 
       {/* LEFT */}
       <IconButtonGroup>

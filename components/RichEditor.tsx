@@ -47,6 +47,15 @@ export interface RichEditorProps {
   onChange?: (html: string) => void;
   autoFocus?: boolean;
   initialScrollOffset?: number;
+  /**
+   * Space to leave clear at the top of the document.
+   *
+   * The phone's nav bar FLOATS over the note, so the first line has to start
+   * below it or the title is hidden behind the controls before you have typed
+   * a character. Content then scrolls UNDER the bar, which is the behaviour the
+   * reference shows -- same rule as the desktop bar's own inset.
+   */
+  contentInsetTop?: number;
   onScrollOffsetChange?: (offset: number) => void;
 }
 
@@ -124,6 +133,7 @@ export default function RichEditor({
   initialContent = '',
   onChange,
   autoFocus = false,
+  contentInsetTop = 0,
 }: RichEditorProps) {
   const ref = useRef<EnrichedTextInputInstance>(null);
   const { scheme } = useTheme();
@@ -331,7 +341,7 @@ export default function RichEditor({
           style={{
             flex: 1,
             paddingHorizontal: 16,
-            paddingTop: 12,
+            paddingTop: 12 + contentInsetTop,
             color: text,
             fontSize: 17,
             lineHeight: 24,
