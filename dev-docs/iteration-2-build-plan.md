@@ -1659,7 +1659,19 @@ a sync round-trip, and Skills stays pinned and undraggable.
 
 **Direction (decided):** build web out properly as an **installable, offline-capable PWA** — not a degraded read-only view. Technology choice is open, judged on three criteria in this order: performs well, stays simple, and integrates with the existing Expo/PowerSync/Supabase stack without undue complexity. Don't introduce a parallel architecture to make web work.
 
-**Phase 0 — spike first, no UI (see prompt below).** The question is no longer
+**⚠️ PHASE 0 IS DONE. It was run on 2026-08-21 and the answer is GO** —
+`dev-docs/web-at-rest-findings.md`, with a 2026-08-25 addendum re-proving it on
+this app's own pipeline. It sat on an unmerged branch (`spike/powersync-web-at-rest`,
+off Stage 10) that nothing in this plan pointed at, so two later sessions
+believed it still needed running. **This is the third time on this project that
+work has existed only in a commit message.** The prompt below is kept because it
+is the brief the spike answered, not because it is still to be run.
+
+**Four questions from that spike are still Adam's**, and Phase 1 cannot start
+without them — guarantee wording, bundle size, and whether web gets a lock
+screen at all. See the addendum's status table for which one has since closed.
+
+**Phase 0's original framing (superseded, kept for the reasoning).** The question is no longer
 "can web run at all" — Stage 12g settled that — but **what web is allowed to
 write down**. Web today deliberately persists *nothing*: an in-memory VFS and an
 in-memory key store, so a refresh is a new session with an empty database. That
