@@ -343,10 +343,21 @@ rule:
   ~+0.2 MB net on `OPFSCoopSyncVFS`, see the addendum.
 - **`@powersync/web` in the main app** — ✅ **Closed.** Stage 12g added it,
   pinned to 2.1.0.
-- **Does the web build need a lock screen?** — ✅ **No.** Same reasoning: OS-level
-  lock is the user's responsibility, and a web lock screen would be decorative.
+- **Does the web build need a lock screen?** — ⚠️ **Answered "no", then REVERSED the
+  same day.** Web gets a biometric (WebAuthn PRF) or 6-digit PIN lock that wipes
+  keys from memory on lock. See the Decisions Log, 2026-08-25 (later).
 
-### Final guarantee wording (approved 2026-08-25)
+### Final guarantee wording — SUPERSEDED the same day
+
+**Do not ship the wording below.** It was approved on 2026-08-25 and overtaken
+hours later, when Adam reversed the no-lock-screen decision: web now gets a
+biometric-or-PIN lock that wipes keys from memory. The paragraph beginning
+"There is no separate unlock step, by design" is therefore false about the build
+being written. New wording is owed at the end of 13b, when the lock exists and
+its real behaviour is known. Kept here because the *first* paragraph — what
+encryption actually protects — is unchanged and still correct.
+
+### Final guarantee wording (approved 2026-08-25, second paragraph now stale)
 
 Supersedes the draft above. The change is the second paragraph: the draft hedged
 around the missing unlock step, and Adam's position is that this is a stated
