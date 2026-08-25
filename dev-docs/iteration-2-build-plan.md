@@ -1659,44 +1659,87 @@ a sync round-trip, and Skills stays pinned and undraggable.
 
 **Direction (decided):** build web out properly as an **installable, offline-capable PWA** — not a degraded read-only view. Technology choice is open, judged on three criteria in this order: performs well, stays simple, and integrates with the existing Expo/PowerSync/Supabase stack without undue complexity. Don't introduce a parallel architecture to make web work.
 
-**Phase 0 — spike first, no UI (see prompt below).** The at-rest encryption story is genuinely unsolved: `@powersync/web` uses wa-sqlite/WASM, which has no SQLCipher equivalent, so whole-file encryption can't simply be ported from native. This phase's only deliverable is a written answer plus a go/no-go, before any UI time is spent.
+**Phase 0 — spike first, no UI (see prompt below).** The question is no longer
+"can web run at all" — Stage 12g settled that — but **what web is allowed to
+write down**. Web today deliberately persists *nothing*: an in-memory VFS and an
+in-memory key store, so a refresh is a new session with an empty database. That
+was chosen precisely so this spike would not be pre-empted. Phase 0's only
+deliverable is a written answer plus a go/no-go, before any UI time is spent.
 
-**Known breakage waiting for this stage** (confirmed 2026-08-21, `main` @ `b586da5`): web currently **fails to boot** with `Appearance.setColorScheme is not a function`, thrown from `ThemeContext`. Pre-existing since Stage 9, deliberately not patched in Stages 10–12 — web is its own stage by decision, and a one-off shim before the Phase 0 spike would be guessing at an architecture that spike is meant to settle. Expect web to be broken on `main` until this stage runs; that is intended, not drift.
+**What Stage 12g already settled, so the spike does not re-ask it** (main @
+`a5ccd9f`):
+- Web **boots and runs the real app**. The `Appearance.setColorScheme` failure is
+  fixed; so are `expo-secure-store` and `expo-navigation-bar`.
+- `@powersync/web` is installed and working, **pinned to 2.1.0** — the last
+  release whose peer range accepts the `@powersync/common@2.0.0` that the native
+  SDK pins. 2.2.0 would drag the shared core up under native's feet.
+- The platform split already exists and is small:
+  `lib/crypto/secureStorage.ts` / `.web.ts`, `lib/powersync/openDatabase.ts` /
+  `.web.ts`, `lib/powersync/migrateToEncrypted.web.ts`. `lib/crypto/` proper and
+  `VaultContext` are shared **unchanged**.
+- The wa-sqlite worker is pre-bundled and committed in `public/@powersync/`,
+  with `metro.config.js` aliasing `@powersync/web` to its
+  `index.react_native_web.js` build. Running wa-sqlite *in the tab* is a dead
+  end under Metro — `import.meta` in the Emscripten module kills the bundle.
+
+**A correction the spike must start from.** This stage's original brief said web
+"has no SQLCipher equivalent, so whole-file encryption can't simply be ported."
+**That is wrong.** `@powersync/web` accepts an `encryptionKey` and encrypts the
+database file with **ChaCha20 via SQLite3MultipleCiphers** (see its README, and
+`encryptionKey` in `db/adapters/options.d.ts`). Whole-file encryption on web is
+available and supported. So Phase 0's real question is not *whether* the bytes
+can be encrypted — it is **where the key lives in a browser**, which is the part
+that has no Keychain to hide behind.
 
 **Phase 1+ (blocked on Phase 0's outcome):**
-- Fix the `Appearance.setColorScheme` boot failure above as the first Phase 1 task — nothing else on web is testable until it boots.
+- Turn on whatever persistence Phase 0 recommends, and retire the
+  "this session only" badges (`isSessionOnly`, `isSessionOnlyDatabase`) that
+  currently tell the truth about a memory-only build.
 - Feature-parity pass against the finalized native UI from Stages 10–12.
-- PWA installability: manifest, service worker, offline shell, install prompt. (The TWA article you linked is an Android-packaging path — evaluate against a plain PWA during Phase 0's write-up rather than committing now.)
-- Reconcile "move New Note + search into the editor section" against wherever Stage 12 landed them — confirm, don't re-decide.
+- PWA installability: manifest, service worker, offline shell, install prompt.
+- The web editor is **plain text and read-only for formatted notes**
+  (`components/RichEditor.web.tsx`). Decide whether Stage 13 raises it, and if
+  so onto what — the `@tiptap` chain the library ships for web is marked
+  experimental and currently unresolvable in this tree.
+- Reconcile "move New Note + search into the editor section" against wherever
+  Stage 12 landed them — confirm, don't re-decide.
 
-**Prompt — Phase 0 spike (ready to run, no screenshots needed):**
+**Prompt — Phase 0 spike (REWRITTEN 2026-08-25; the pre-12g version is dead —
+it told you to fix a boot failure that no longer exists and not to add a package
+that is already installed):**
 
 ```
-Create a branch `spike/powersync-web-at-rest` off main. This is an INVESTIGATION, not a feature. Do not build UI. Do not modify any existing app code outside a throwaway spike directory. The deliverable is a written recommendation plus working proof, and a clear go/no-go.
+Create a branch `spike/powersync-web-at-rest` off main. This is an INVESTIGATION, not a feature. Do not build UI. Do not modify existing app code outside a throwaway spike directory. The deliverable is a written recommendation plus working proof, and a clear go/no-go.
 
-CONTEXT: The app currently runs on PowerSync with native op-sqlite + SQLCipher, giving whole-file encryption at rest. Note title/body (and, as of Stage 10, folder names) are additionally encrypted client-side with AES-GCM via @noble/ciphers before they ever reach the server — that layer is platform-independent and ports to web unchanged. What does NOT port is the SQLCipher whole-file layer: PowerSync's web client uses @powersync/web with wa-sqlite/WASM, which has no SQLCipher equivalent. See dev-docs/mvp-build-plan.md Stage 6 for the original at-rest reasoning and Stage 6.5 for the device-native unlock model that replaced the PIN.
+CONTEXT — READ THIS BEFORE PLANNING, IT HAS CHANGED:
 
-GOAL: We intend to ship web as an installable, offline-capable PWA with real local persistence. Before committing UI time, answer definitively what at-rest protection is actually achievable in a browser, and whether it's enough.
+Native runs PowerSync on op-sqlite + SQLCipher (whole-file encryption at rest), with note title/body and folder names ADDITIONALLY encrypted client-side with AES-GCM via @noble/ciphers before they reach the server. That field layer is platform-independent and already runs on web unchanged.
+
+Web works. Stage 12g (main @ a5ccd9f) put @powersync/web@2.1.0 in and the real app boots in a browser. It persists NOTHING on purpose: WASQLiteVFS.InMemoryVfs for the database, an in-memory Map for the vault keys. Read lib/powersync/openDatabase.web.ts and lib/crypto/secureStorage.web.ts first — the reasoning is written in them, and the two are deliberately coupled.
+
+CORRECTION TO THE OLD BRIEF: @powersync/web DOES support whole-file encryption — it takes an `encryptionKey` and uses ChaCha20 via SQLite3MultipleCiphers. The earlier claim that there is no SQLCipher equivalent on web is false. Verify this yourself rather than taking it from me, then plan around what you find.
+
+GOAL: decide what web is allowed to write to disk, and what the resulting user-facing guarantee is. The unsolved part is KEY CUSTODY, not cipher availability.
 
 INVESTIGATE AND REPORT ON:
 
-1. What @powersync/web actually persists and where — OPFS, IndexedDB, or both — and what that means for data sitting on disk after the tab closes.
+1. The persistent VFS choices @powersync/web offers (IDBBatchAtomicVFS, OPFSCoopSyncVFS, AccessHandlePoolVFS, OPFSWriteAheadVFS) — where each actually writes, durability, multi-tab behaviour, and which survive a browser clearing "site data". Say which one you would pick and why.
 
-2. Whether any credible whole-file or page-level encryption option exists for wa-sqlite/WASM. Check for SQLite encryption extensions with WASM builds, any PowerSync-supported encryption hooks, and community approaches. Report what you find honestly, including "nothing production-ready" if that's the answer — an accurate no is more useful than a strained yes.
+2. Confirm the encryptionKey path end to end on the VFS you picked: that the file on disk is genuinely unreadable without the key. Not "the API accepts it" — bytes.
 
-3. If whole-file encryption isn't available: what does the threat model actually look like with ONLY the existing client-side AES-GCM field encryption? Be specific about what stays protected (note content, folder names) versus what sits in the clear locally (ids, timestamps, trash state, folder structure, sync metadata, the ui_state and note_sync_base tables). Compare honestly to the native guarantee — this is a downgrade; quantify it rather than glossing it.
+3. KEY CUSTODY, the real question. No Keychain, no Keystore, no expo-secure-store. Evaluate: WebCrypto non-extractable CryptoKey in IndexedDB; WebAuthn PRF extension; passphrase-derived key held only in memory per session; and any combination. Judge each on (a) does the raw key ever sit recoverable on disk, (b) what does the user have to do per session, (c) what happens on a shared or stolen machine. The native app unlocks via OS biometric/passcode — say what the closest honest web equivalent is, and how far short it falls.
 
-4. Key storage in a browser. There is no Keychain/Keystore and no expo-secure-store. Evaluate the realistic options — WebCrypto non-extractable CryptoKey in IndexedDB, WebAuthn PRF extension, passphrase-derived key held only in memory per session — against: does the raw key ever sit recoverable on disk, and what's the UX cost per session? The native app unlocks via OS biometric/passcode; say what the closest honest web equivalent is.
+4. THE THREAT MODEL, stated concretely. Whatever you recommend: what is protected, and against whom? Be specific about the attacker who has the device versus the attacker who has script access to the origin — an XSS reads any key the page can read, which is the case native does not have. Name what sits in the clear locally even with the DB encrypted (ids, timestamps, trash state, folder structure, sync metadata, ui_state, note_sync_base).
 
-5. Whether the existing lib/crypto/ and VaultContext code can be shared across platforms as-is or needs a platform-split, and how large that split is.
+5. Quantify the delta versus native, honestly. This is likely a downgrade; say by how much rather than glossing it. Include what happens to the "session only" story — if persistence lands, the current in-memory design and its badges go away, and that is a user-visible change to what the app promises.
 
-6. PROVE IT: build a minimal standalone spike — @powersync/web running in a browser with a couple of rows written, closed, and reloaded — and demonstrate what is actually readable from the browser's storage inspector before and after applying whichever protection you recommend. Screenshot it. This is the part that turns the write-up from research into evidence.
+6. PROVE IT. Build a minimal spike: @powersync/web on the persistent VFS you chose, write rows, close the tab, reopen, show the data comes back. Then open the browser's storage inspector and screenshot what is actually readable on disk — WITHOUT the encryption key and WITH it. That contrast is the deliverable's evidence.
 
-7. Also evaluate PWA vs. Trusted Web Activity for distribution, briefly. TWA is an Android packaging path around a PWA, so it's a downstream question, not an alternative architecture — say whether it's worth doing at all given the app already ships native Android.
+7. PWA vs Trusted Web Activity for distribution, briefly. TWA is an Android packaging path around a PWA, so it is downstream, not an alternative architecture — say whether it is worth doing at all given the app already ships native Android.
 
-DELIVERABLE: docs/web-at-rest-findings.md — findings, the recommended approach, the honest security delta versus native, and an explicit GO or NO-GO on proceeding to web UI work. If GO, include what the resulting user-facing guarantee is in plain language, since it has to be documented publicly the same way the native E2EE guarantee is. If the answer is "web can't match native at rest," say so plainly and recommend what to ship instead — that's a legitimate outcome of this spike, not a failure.
+DELIVERABLE: docs/web-at-rest-findings.md — findings, recommendation, the honest security delta versus native, and an explicit GO or NO-GO on proceeding to web UI work. If GO, write the resulting user-facing guarantee in plain language, since it has to be documented publicly the same way the native E2EE guarantee is. "Web cannot match native at rest, ship it session-only and lean on export/import" is a legitimate outcome, not a failure — the in-memory design already works and is honest.
 
-Escalate to me before making any decision that would change the app's stated encryption guarantee, add a dependency to the main app, or alter shared crypto code. This spike should leave main untouched.
+Escalate before making any decision that changes the app's stated encryption guarantee, adds a dependency to the main app, or alters shared crypto code. Leave main untouched.
 ```
 
 **📸 SCREENSHOTS:** none required — this stage ports Stages 10–12's screenshots, doesn't need new ones.
