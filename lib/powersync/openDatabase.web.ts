@@ -1,89 +1,122 @@
-import { PowerSyncDatabase, TemporaryStorageOption, WASQLiteVFS } from '@powersync/web';
+import { PowerSyncDatabase, WASQLiteVFS } from '@powersync/web';
 import type { CommonPowerSyncDatabase, Schema } from '@powersync/common';
 import type { OpenOptions } from './openDatabase';
 
 /**
- * The web database: wa-sqlite, entirely in memory, gone when the tab closes.
+ * The web database: wa-sqlite on OPFS, encrypted, and it survives the tab.
  *
- * ── WHY THIS EXISTS AT ALL ────────────────────────────────────────────────
+ * ── WHAT CHANGED IN 13a, AND WHY THE OLD ANSWER WAS THE RIGHT ONE ─────────
  *
- * Until now web had no database. `@powersync/react-native` and op-sqlite are
- * native modules, so `initPowerSync()` threw at import, VaultContext caught it,
- * and every route on web was replaced by BootFailureScreen. Adam's call
- * (2026-08-22): that screen "should never be seen by the user, there has to be
- * a way through it". A read-only error page is not a way through, so web needed
- * a real, writable database -- hence `@powersync/web`, pinned to 2.1.0 because
- * that is the last release whose peer range is satisfied by the
- * `@powersync/common@2.0.0` the native SDK already pins. 2.2.0 would drag the
- * shared core up under native's feet to make a web-only feature work.
+ * Until now this opened an in-memory database that was gone on refresh. That
+ * was deliberate: persisting on web means answering the at-rest question for
+ * real, and memory-only sidestepped it rather than pre-empting it -- nothing
+ * written down, so nothing at rest and no key to store.
  *
- * ── WHY IN MEMORY, WHICH IS THE INTERESTING PART ──────────────────────────
+ * Stage 13's Phase 0 spike answered it (`dev-docs/web-at-rest-findings.md`),
+ * and the answer corrected the premise the whole stage was written on:
+ * `@powersync/web` DOES ship whole-file encryption. It takes an `encryptionKey`
+ * and applies it as `PRAGMA key` against a **SQLite3MultipleCiphers** build of
+ * wa-sqlite (ChaCha20), which is the same CLASS of protection SQLCipher gives
+ * us natively -- not a field-level workaround.
  *
- * Persisting on web means IndexedDB or OPFS, and the moment notes persist in a
- * browser the at-rest question has to be answered for real: SQLCipher does not
- * exist here, wa-sqlite's own encryption is ChaCha20 with a key that would then
- * need somewhere to live, and the only places to put it on web are readable by
- * any script on the origin. That is Stage 13's Phase 0 spike, and it is a
- * genuinely hard question.
+ * ── WHY OPFSCoopSyncVFS AND NOT THE INDEXEDDB DEFAULT ─────────────────────
  *
- * Memory-only sidesteps it rather than pre-empting it: nothing is written down,
- * so there is nothing at rest and no key to store. `secureStorage.web.ts` makes
- * the identical trade for the vault keys -- the two have to agree, or the
- * database would outlive the key that reads it (or worse, the reverse).
+ * Two reasons that happen to agree, which is rare enough to just take.
  *
- * The trade Adam accepted: a refresh is a new session with an empty database.
- * Export-then-reimport is what makes that survivable, and it lands in Stage 13.
+ * `vfs.js` routes ONLY `IDBBatchAtomicVFS` through the async module factory, so
+ * with encryption on it pulls `mc-wa-sqlite-async.wasm` -- 2.50 MB. Every OPFS
+ * VFS uses the sync factory and `mc-wa-sqlite.wasm`, 1.31 MB. Half the payload
+ * for a decision that is otherwise invisible to the user.
  *
- * ── THE WORKER, AND WHY IT IS NOT OPTIONAL HERE ──────────────────────────
+ * And OPFSCoopSync is the SDK's own recommendation for multi-tab and Safari,
+ * which is the case IndexedDB handles worse anyway.
  *
- * `InMemoryVfs` has three configurations, and the tempting one is the third:
- * no worker at all, database hosted in the tab, queries running synchronously.
- * It is the fastest, and it was the first thing tried.
+ * ── ENCRYPTION IS NOT OPTIONAL HERE ───────────────────────────────────────
  *
- * It does not work under Metro. Running in the tab means the app bundle has to
- * import wa-sqlite's Emscripten module directly, and that module opens with
- * `var _scriptName = import.meta.url`. Metro emits a classic script rather than
- * an ES module, so the page died at parse time with `Cannot use 'import.meta'
- * outside a module` -- before any app code ran, which is the same class of dead
- * end this whole sub-phase exists to remove.
+ * Adam's call, 2026-08-25: mandatory. `db.ts` has always passed the key in --
+ * this file simply ignored it -- so the guard below is what makes "mandatory"
+ * structural rather than a comment.
  *
- * The worker is the SDK's own answer, and the reason it ships a pre-bundled one
- * plus a `copy-assets` CLI. The worker is a real ES module served as a static
- * file from `public/@powersync/`, so it loads wa-sqlite and its wasm itself and
+ * The reason it has to be a throw and not a fallback is `note_sync_base`. That
+ * table stores the last body the server was known to have, in PLAINTEXT, for
+ * every note ever edited, and `schema.ts` justifies it explicitly on the
+ * grounds that the whole database file is encrypted at rest. Open unencrypted
+ * and that sentence silently becomes false -- not a metadata leak, full note
+ * plaintext sitting in browser storage. Mirrors the native discipline where
+ * `getDatabaseKey()` throwing is PREFERRED over opening unencrypted.
+ *
+ * ── THE WORKER, AND WHY IT IS NOT OPTIONAL ────────────────────────────────
+ *
+ * `InMemoryVfs` could in principle run in the tab with no worker at all. It
+ * does not work under Metro: the app bundle would have to import wa-sqlite's
+ * Emscripten module directly, and that module opens with
+ * `var _scriptName = import.meta.url`. Metro emits a classic script, so the
+ * page died at parse time with `Cannot use 'import.meta' outside a module`.
+ *
+ * The worker is the SDK's own answer and the reason it ships a pre-bundled one
+ * plus a `copy-assets` CLI: it is a real ES module served as a static file from
+ * `public/@powersync/`, so it loads wa-sqlite and its wasm itself and
  * `import.meta` never enters the Metro bundle. `metro.config.js` has the other
- * half of this story.
+ * half. NOTE that `npm run powersync:assets` had to stop pruning `mc-*` for any
+ * of the above to work -- that prune was correct for the memory-only build and
+ * would now silently remove the only wasm that can decrypt anything.
  *
- * `enableMultiTabs: false` picks the DEDICATED worker rather than a shared one,
- * which is the honest match for a session-only database: one tab, one database,
- * cleared when that tab closes. A shared worker would silently give two tabs one
- * database and make "session" mean something different in each.
- *
- * No `encryptionKey` is passed, and that is not an oversight. Encryption at
- * rest protects bytes on a disk; these bytes never reach one.
+ * `enableMultiTabs: false` keeps one dedicated worker per tab. Multi-tab is a
+ * later question; OPFSCoopSync is chosen so that answering it does not mean
+ * changing the storage format underneath existing users.
  */
 
 export type { OpenOptions };
 
-export const isSessionOnlyDatabase = true;
+export const isSessionOnlyDatabase = false;
 
 export function openDatabase({
   schema,
   dbFilename,
+  encryptionKey,
 }: {
   schema: Schema;
   dbFilename: string;
   encryptionKey: string;
 }): CommonPowerSyncDatabase {
+  if (!encryptionKey) {
+    throw new Error(
+      'Refusing to open the web database without an encryption key. ' +
+        'See lib/powersync/openDatabase.web.ts -- note_sync_base holds note plaintext.'
+    );
+  }
+
+  /**
+   * Ask the browser to stop treating this as disposable.
+   *
+   * Origin storage is evictable under pressure by default -- confirmed
+   * first-hand during Stage 13's re-verification, where `persisted()` returned
+   * false. For an offline-first app that is a data-loss path that has nothing
+   * to do with encryption: notes that never synced would simply be gone.
+   *
+   * Deliberately not awaited, and deliberately not checked. Requesting it needs
+   * no result to be worth doing, and a database open must not wait on a
+   * permission heuristic.
+   *
+   * MEASURED, so nobody re-debugs it: on a bare `localhost` origin Chrome
+   * REFUSES this -- `persist()` resolves `false` and `persisted()` stays false,
+   * even called by hand from the console. That is policy, not a bug here.
+   * Chrome grants persistence on engagement signals: an installed PWA, a
+   * bookmark, or repeated use. So this is expected to start returning true once
+   * the PWA slice of Stage 13 lands and the app is installable, and until then
+   * a dev build genuinely is evictable.
+   */
+  void navigator.storage?.persist?.().catch(() => {});
+
   return new PowerSyncDatabase({
     schema,
     database: {
       dbFilename,
-      vfs: WASQLiteVFS.InMemoryVfs,
+      vfs: WASQLiteVFS.OPFSCoopSyncVFS,
       enableMultiTabs: false,
-      // Served from public/@powersync -- see the README there for how it gets
-      // regenerated and why it is committed.
+      // Served from public/@powersync -- see the README there.
       worker: '/@powersync/worker.js',
-      temporaryStorage: TemporaryStorageOption.MEMORY,
+      encryptionKey,
     },
   });
 }

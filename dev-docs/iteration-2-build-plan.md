@@ -1704,6 +1704,67 @@ available and supported. So Phase 0's real question is not *whether* the bytes
 can be encrypted — it is **where the key lives in a browser**, which is the part
 that has no Keychain to hide behind.
 
+## Stage 13a — LIVE CHECKLIST (branch `stage-13a-web-persistence`)
+
+- [x] **1. `secureStorage.web.ts` is an encrypted IndexedDB store.** Every value
+      crossing the seam is AES-GCM encrypted under a **non-extractable** WebCrypto
+      key whose handle lives in IndexedDB — `exportKey()` on it throws. Applied at
+      the seam rather than to the device key alone, so the Supabase session token
+      and the plaintext-endpoint tokens are covered without opting in.
+      `isSessionOnly` → false.
+- [x] **2. The database persists and is encrypted.** `OPFSCoopSyncVFS`, the
+      `encryptionKey` that `db.ts` was already passing and this file ignored, and
+      **a missing key is now a throw** — Adam's "mandatory" made structural.
+      `isSessionOnlyDatabase` → false.
+- [x] **3. `powersync:assets` keeps the ciphers WASM.** The old prune deleted
+      `mc-*`, which *is* the encryption build; as committed the app could not have
+      opened an encrypted database whatever the code asked for. Now exactly one
+      wasm ships: `mc-wa-sqlite-*.wasm`, 1.31 MB. Directory went 1.5 MB → 1.7 MB,
+      the **+0.2 MB net** that was approved.
+- [x] **4. `wipeLocalDatabase()` is async on both platforms**, awaited at all four
+      `VaultContext` call sites.
+- [x] **5. Two badges stopped lying.** `RichEditor.web.tsx` had *"this session
+      only"* **hardcoded**, not read from the flag, so it survived the change and
+      confidently told the user the opposite of the truth. Caught by reading the
+      screen. `SyncRecoverySection`'s footnote now has web-specific wording.
+
+### Verified in a browser, on the bytes
+
+| Check | Result |
+|---|---|
+| Note survives a hard reload | ✅ text and folder intact |
+| `notes-v2.db` header | ✅ zeros — no `SQLite format 3` magic |
+| Note-body canary on disk | ✅ not readable |
+| **Scanner self-test** | ✅ finds a canary in a file that really is in the clear |
+| `note_sync_base` plaintext row | ✅ plaintext **in** the db, absent **on disk** |
+| Field encryption still on | ✅ `notes.body` reads `enc:v1:…` |
+| Reset: close → wipe | ✅ `.db`, `-wal`, `-journal` all gone; reinit gives 0 notes |
+| Native regression | ✅ iPhone 17 Pro boots, 4 notes decrypt |
+
+**`note_sync_base` needed making non-vacuous.** The table was *empty* — nothing had
+synced — so "the canary is not on disk" would have proved nothing. A plaintext row
+was inserted deliberately, confirmed plaintext by reading it back through SQL, and
+only then looked for in the file. A check that passes because the table is empty is
+worse than no check.
+
+**A silent failure found by verification, then fixed.** Wiping *without* closing
+the database first returned cleanly and deleted **nothing** — OPFS refuses to
+remove a file with a live access handle, and a bare `catch {}` turned that into a
+successful-looking no-op. On a control whose whole job is destroying data, that
+means telling a user their notes are gone when they are not. `NotFoundError` is now
+the only swallowed error; everything else throws. Re-verified both ways.
+
+### Not passing, and it is not a code defect
+
+`navigator.storage.persisted()` is **false**. The call is made; Chrome refuses it
+on a bare `localhost` origin — `persist()` resolves `false` even called by hand
+from the console. Chrome grants persistence on engagement signals (installed PWA,
+bookmark, repeated use), so this is expected to flip when the PWA slice lands.
+Until then a dev build genuinely is evictable, which is worth knowing rather than
+papering over.
+
+---
+
 **Phase 1+ (blocked on Phase 0's outcome):**
 - Turn on whatever persistence Phase 0 recommends, and retire the
   "this session only" badges (`isSessionOnly`, `isSessionOnlyDatabase`) that

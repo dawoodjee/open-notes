@@ -147,8 +147,19 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
     >
       <View className="mb-3 self-start rounded-full bg-foreground/10 px-3 py-1">
         <RNText className="text-xs text-muted-foreground">
+          {/*
+            "· this session only" was here until 13a and is now gone, not
+            reworded. It was a hardcoded string rather than a read of
+            `isSessionOnly`, so when the web database started persisting it
+            became a badge confidently telling the user the opposite of the
+            truth -- caught by reading the screen after the change, not by the
+            compiler, which is exactly why this text is worth a comment.
+
+            What is left is the one thing still true and still worth saying: on
+            web this is a plain-text editor.
+          */}
           {editable
-            ? 'Plain text on web · this session only'
+            ? 'Plain text on web'
             : 'Read-only here — this note has formatting web can’t edit yet'}
         </RNText>
       </View>

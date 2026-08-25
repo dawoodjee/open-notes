@@ -11,7 +11,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "test": "tsx tests/run.ts",
-    "powersync:assets": "powersync-web copy-assets && find public/@powersync -name '*.map' -delete && find public/@powersync/assets -name 'mc-*' -delete -o -name '*-async-*' -delete"
+    "powersync:assets": "powersync-web copy-assets && find public/@powersync -name '*.map' -delete && find public/@powersync/assets \\( -name '*-async-*' -o -name 'wa-sqlite-*.wasm' \\) -delete"
   },
   "dependencies": {
     "@expo/html-elements": "^0.12.5",

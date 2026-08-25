@@ -88,11 +88,11 @@ export function useVault() {
 async function loadKeys(): Promise<boolean> {
   if (await hasLegacyVault()) {
     await clearLegacyVault();
-    wipeLocalDatabase();
+    await wipeLocalDatabase();
   }
 
   if (!(await hasVault())) {
-    wipeLocalDatabase();
+    await wipeLocalDatabase();
     await createLocalVault();
     return true;
   }
@@ -103,7 +103,7 @@ async function loadKeys(): Promise<boolean> {
   // while the data container does not, so odd pairings can outlive a
   // reinstall. Nothing here is recoverable locally -- signing in restores the
   // notes from the server.
-  wipeLocalDatabase();
+  await wipeLocalDatabase();
   await createLocalVault();
   return true;
 }
@@ -280,7 +280,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       // deleted inode -- the reset would appear to work and then undo itself.
       await closePowerSync();
       await clearLegacyVault();
-      wipeLocalDatabase();
+      await wipeLocalDatabase();
       await createLocalVault();
       await initPowerSync();
       setHasBooted(true);

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ActivityIndicator } from 'react-native';
+import { ActivityIndicator, Platform } from 'react-native';
 
 import { SettingsGroup, SettingsRow } from '@/components/ui/settings-group';
 import { isSessionOnlyDatabase } from '@/lib/powersync/db';
@@ -65,8 +65,10 @@ export function SyncRecoverySection({ onReset }: { onReset: () => Promise<void> 
         confirming
           ? 'This deletes every note stored on this device. Notes synced to your account come back when you sign in. Notes written before you signed in will not.'
           : isSessionOnlyDatabase
-            ? 'On the web the database is held in memory, so closing this tab clears it. Export anything you want to keep. Nothing is written to browser storage, which is also why nothing about it can be read by another site.'
-            : 'Notes are stored encrypted on this device. Only this device holds the key.'
+            ? 'The database is held in memory, so closing this tab clears it. Export anything you want to keep.'
+            : Platform.OS === 'web'
+              ? 'Notes are stored encrypted in this browser. The key is held so that no website, including this one, can read it out — but anything running in this browser can still use it, so keep your computer locked.'
+              : 'Notes are stored encrypted on this device. Only this device holds the key.'
       }
     >
       <SettingsRow
