@@ -334,18 +334,50 @@ rule:
 > not against someone who can run code inside your browser session. For the
 > strongest protection, use the phone app.
 
-### Open questions for you
+### Open questions for you — ALL ANSWERED 2026-08-25
 
-- **The guarantee wording above** — it changes the public security story, so
-  it's yours to approve, edit, or reject.
-- **Bundle size:** +1.3–2.5 MB WASM. Acceptable for an installable PWA, but it
-  is a visible first-load cost and worth an explicit yes.
-- **Web adds `@powersync/web` to the main app.** A new dependency on the main
-  app needs your call before any UI stage starts.
-- **Does the web build need a lock screen at all?** Native has `LockSettings`.
-  Without PRF there is nothing real behind a web lock screen — it would be
-  decorative. My recommendation is to omit it rather than imply protection that
-  isn't there, but it's a product call.
+- **The guarantee wording** — ✅ **Answered.** Adam: *"Security is mandatory, the
+  user will be expected to keep their computer locked. Not our problem if their
+  security is lax."* Final wording below.
+- **Bundle size** — ✅ **Yes.** And it is cheaper than the estimate above:
+  ~+0.2 MB net on `OPFSCoopSyncVFS`, see the addendum.
+- **`@powersync/web` in the main app** — ✅ **Closed.** Stage 12g added it,
+  pinned to 2.1.0.
+- **Does the web build need a lock screen?** — ✅ **No.** Same reasoning: OS-level
+  lock is the user's responsibility, and a web lock screen would be decorative.
+
+### Final guarantee wording (approved 2026-08-25)
+
+Supersedes the draft above. The change is the second paragraph: the draft hedged
+around the missing unlock step, and Adam's position is that this is a stated
+expectation of the user rather than something to apologise for. It still must
+not oversell — "your files are encrypted" and "you are safe" are different
+claims, and only the first one is true here.
+
+> **On the web, your notes are encrypted on your device.** Note text and folder
+> names are encrypted before they ever leave your browser, and the local
+> database itself is fully encrypted too — so someone who copies files off your
+> computer cannot read your notes without the key. The key is stored so that no
+> website script, including ours, can read it out.
+>
+> **There is no separate unlock step, by design.** Browsers have no equivalent
+> of the phone's security hardware, so instead of a lock screen that would only
+> look like protection, the web app relies on your computer's own lock. If your
+> computer is unlocked and you open the app, your notes are there. **Keeping
+> your computer locked is how you keep them private.** The encryption protects
+> your notes at rest; it does not protect a session someone else is sitting in
+> front of. For protection that survives an unlocked machine, use the phone app.
+
+**Where it goes:** alongside the native E2EE description in the user-facing docs
+(`docs/`), during Phase 1 — not before, since it describes a build that does not
+exist yet. Saying it early would be the same mistake as the "session only"
+badges saying the opposite of what shipped.
+
+**What follows from "no lock screen":** `LockSettings` and the `locked` vault
+state stay native-only. `VaultContext`'s web implementation reports the lock as
+unavailable rather than off — the existing `LockCapability` type already models
+that, so this is a value, not a new branch.
+
 
 ---
 

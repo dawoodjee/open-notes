@@ -1667,9 +1667,10 @@ believed it still needed running. **This is the third time on this project that
 work has existed only in a commit message.** The prompt below is kept because it
 is the brief the spike answered, not because it is still to be run.
 
-**Four questions from that spike are still Adam's**, and Phase 1 cannot start
-without them — guarantee wording, bundle size, and whether web gets a lock
-screen at all. See the addendum's status table for which one has since closed.
+**All four questions are now answered (2026-08-25) and Phase 1 is unblocked.**
+Encryption is mandatory, the bundle cost is approved, there is no web lock
+screen, and the public guarantee wording is settled — see the findings doc and
+the Decisions Log.
 
 **Phase 0's original framing (superseded, kept for the reasoning).** The question is no longer
 "can web run at all" — Stage 12g settled that — but **what web is allowed to
@@ -1929,6 +1930,18 @@ One blocking item; the rest is settled and recorded in the Decisions Log below.
 ## Decisions Log
 
 *(iteration-2-specific decisions, same terse format as `dev-docs/mvp-build-plan.md` — decision / reasoning / verification / status. Don't duplicate MVP-era entries.)*
+
+### 2026-08-25 — Web ships encrypted, with no lock screen, and says so plainly
+- **Decision:** Adam cleared all three remaining Phase 0 gates. (a) Encryption at rest on web is **mandatory** — a missing key is a hard failure at open time, mirroring native's `getDatabaseKey()` discipline. (b) The ~+0.2 MB net WASM cost is **approved**. (c) The web build gets **no lock screen**. Adam: *"Security is mandatory, the user will be expected to keep their computer locked. Not our problem if their security is lax."* Final public wording is in `dev-docs/web-at-rest-findings.md`.
+- **Reasoning:** Without WebAuthn PRF there is nothing real behind a web lock screen — it would be a dialog that implies a protection the browser cannot provide, which is worse than its absence. The OS lock is the honest boundary, and the user is the right party to own it. Encryption stays mandatory regardless, because it defends the case the user cannot control: files copied off the machine.
+- **Consequence accepted:** On the web, an attacker sitting at an unlocked machine gets the notes — there is no second gate. That is a real difference from the phone app and the public wording states it in those words rather than hedging. It also means `LockSettings` and the `locked` vault state stay native-only, and the web build reports the lock as *unavailable* rather than *off*.
+- **Status:** Phase 0 is fully closed and **Phase 1 is unblocked.** The wording goes into user-facing `docs/` during Phase 1, not before — it describes a build that does not exist yet.
+
+### 2026-08-25 — `OPFSCoopSyncVFS`, not the IndexedDB default
+- **Decision:** When web persistence lands, use `WASQLiteVFS.OPFSCoopSyncVFS`.
+- **Reasoning:** `vfs.js` routes only `IDBBatchAtomicVFS` through the async module factory, so with encryption on it needs `mc-wa-sqlite-async.wasm` (2.50 MB) where OPFS needs `mc-wa-sqlite.wasm` (1.31 MB). OPFSCoopSync is *also* the SDK's own multi-tab/Safari recommendation, so the cheaper option is the better one — the two criteria point the same way, which is rare enough to just take.
+- **Consequence accepted:** OPFS rather than IndexedDB means slightly narrower browser support than the SDK default, and the `.ahp-*` access-handle pools are visible in origin storage. Both were exercised on this machine. The prune in `package.json`'s `powersync:assets` has to stop deleting `mc-*`, and the larger `.wasm` gets committed.
+- **Status:** decided, not yet implemented — Phase 1 owns it. A file-placement/config call rather than an escalated one; logged because it changes what gets committed to the repo.
 
 ### 2026-08-23 — Drag-to-reorder is hand-built, not a dependency
 - **Decision:** Adam chose option 1 of three. Build folder drag-to-reorder directly on `react-native-gesture-handler` + Reanimated 4 (`components/ReorderableFolderList.tsx` + `lib/notes/reorder.ts`), and drop `react-native-reanimated-dnd` entirely.
