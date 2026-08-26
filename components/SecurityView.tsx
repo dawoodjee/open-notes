@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/settings-group';
 import { Cog, Lock, Plug, ScrollText, ShieldCheck } from 'lucide-react-native';
 import { UnlockLabels, getUnlockLabels } from '@/lib/auth/deviceAuth';
-import type { LockSettings } from '@/lib/crypto/vault';
+import type { LockSettings } from '@/lib/settings/lockSettings';
 import {
   GATE_WINDOW_OPTIONS,
   GateState,

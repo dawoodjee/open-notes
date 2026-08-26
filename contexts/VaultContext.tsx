@@ -2,17 +2,20 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { AppState, AppStateStatus } from 'react-native';
 import { authenticateWithDeviceCredential } from '@/lib/auth/deviceAuth';
 import {
-  DEFAULT_LOCK_SETTINGS,
-  LockSettings,
   clearLegacyVault,
   createLocalVault,
-  getLockSettings,
   hasLegacyVault,
   hasVault,
-  setLockSettings,
   unlockWithDeviceKey,
   isUnlocked as vaultIsUnlocked,
 } from '@/lib/crypto/vault';
+import {
+  DEFAULT_LOCK_SETTINGS,
+  getLockSettings,
+  setLockSettings,
+  type LockSettings,
+} from '@/lib/settings/lockSettings';
+import { LOCK_SETTINGS_KEY, reconcileSettings } from '@/lib/settings/syncedSettings';
 import { withTimeout } from '@/lib/auth/withTimeout';
 import { wipeLocalDatabase } from '@/lib/powersync/migrateToEncrypted';
 import { closePowerSync, initPowerSync } from '@/lib/powersync/db';
@@ -183,6 +186,28 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
         setHasBooted(true);
         setStatus('unlocked');
+
+        /**
+         * Pull the account's settings into the mirror, now that there IS a
+         * database to read them from.
+         *
+         * Deliberately after `setStatus('unlocked')` and deliberately not
+         * awaited by anything above it. The mirror is what boot reads (see
+         * lib/settings/syncedSettings.ts), so a setting changed on another
+         * device lands one boot late by design -- blocking the app on a sync
+         * round trip to avoid that would trade a cosmetic delay for a
+         * launch that hangs when the network is slow.
+         *
+         * The lock is re-read because it is the one setting whose remote value
+         * should take effect without waiting: a lock switched on elsewhere
+         * ought to arm here as soon as we know about it.
+         */
+        void reconcileSettings()
+          .then(async (changed) => {
+            if (cancelled || !changed.includes(LOCK_SETTINGS_KEY)) return;
+            setLockSettingsState(await getLockSettings());
+          })
+          .catch((err) => console.warn('Settings reconcile failed:', err));
       } catch (err) {
         if (cancelled) return;
         console.error('Vault boot failed:', err);

@@ -16,6 +16,8 @@ import './paragraphStyle.test';
 import './editorChrome.test';
 import './findMatches.test';
 import './reorder.test';
+import './syncedSettings.test';
+import './gateKey.test';
 import { report } from './harness';
 
 report();

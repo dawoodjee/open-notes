@@ -202,9 +202,34 @@ export const noteSyncBaseTable = new Table(
   { localOnly: true }
 );
 
+/**
+ * Settings that follow the user rather than the device (Stage 13b).
+ *
+ * KEY-VALUE, and the reason is how this app uploads. PowerSync's connector
+ * sends a row's ENTIRE current local state on any write, so a single wide
+ * settings row would make changing the appearance on the phone silently revert
+ * a lock change made on the iPad seconds earlier. One row per setting means
+ * unrelated preferences occupy unrelated rows and merge instead of racing. The
+ * migration carries the long version.
+ *
+ * NOT localOnly -- unlike ui_state, which is the deliberate opposite: ui_state
+ * describes what THIS device is showing, and this describes what the USER
+ * prefers everywhere.
+ *
+ * `value` is JSON in a text column and is plaintext, not an enc:v1 envelope. A
+ * preference is structure, not content, in the same category as sort_order.
+ */
+export const userSettingsTable = new Table({
+  user_id: column.text,
+  key: column.text,
+  value: column.text,
+  updated_at: column.text,
+});
+
 export const AppSchema = new Schema({
   notes: notesTable,
   folders: foldersTable,
+  user_settings: userSettingsTable,
   ui_state: uiStateTable,
   sync_issues: syncIssuesTable,
   note_sync_base: noteSyncBaseTable,
