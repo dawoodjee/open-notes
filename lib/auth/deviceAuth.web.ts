@@ -1,9 +1,12 @@
+import { bytesToHex } from '@noble/ciphers/utils.js';
+
 import {
   gateKind,
   hasGate,
   isBiometricGateAvailable,
   unlockWithBiometric,
 } from '@/lib/crypto/webGate';
+import { setUnlockedDeviceKey } from '@/lib/crypto/deviceKeyStore';
 import type { AuthOutcome, LockCapability, UnlockLabels } from './deviceAuth';
 
 /**
@@ -41,11 +44,28 @@ import type { AuthOutcome, LockCapability, UnlockLabels } from './deviceAuth';
 
 export type { AuthOutcome, LockCapability, UnlockLabels };
 
+/**
+ * What the gate CAN do, not what it currently is -- and the distinction was a
+ * bug before it was a design note.
+ *
+ * The first version reported 'none' whenever no gate was enrolled. That reads
+ * correctly and produces a dead end: `SecurityView` disables the "Require
+ * unlock" toggle when the capability is 'none', so the only control that can
+ * create a gate was greyed out until a gate existed. Caught by opening the
+ * screen, which is the only way it could have been caught -- every layer below
+ * was behaving exactly as written.
+ *
+ * Native's 'none' means "this device has no passcode and no biometrics", a
+ * state the app cannot change and should not nag about. Web has no equivalent:
+ * a 6-digit PIN can always be set. So 'none' is unreachable here, and that is
+ * the honest answer rather than a workaround.
+ */
 export async function getLockCapability(): Promise<LockCapability> {
   const kind = await gateKind();
   if (kind === 'prf') return 'biometric';
   if (kind === 'passcode') return 'credential-only';
-  return 'none';
+  // Nothing enrolled yet: report what could be enrolled.
+  return (await isBiometricGateAvailable()) ? 'biometric' : 'credential-only';
 }
 
 /** True when a passkey gate could be offered on this browser but is not set up
@@ -61,7 +81,10 @@ export async function getUnlockLabels(): Promise<UnlockLabels> {
   // credential is the app's own 6-digit code, not the machine's. Calling it a
   // "passcode" would invite the user to type their computer's.
   const credential = 'PIN';
-  const biometric = capability === 'biometric' ? 'your passkey' : null;
+  // Only claim a passkey once one is actually enrolled. Before that the
+  // capability is a statement about what is possible, and "unlocks with your
+  // passkey" would be describing a credential that does not exist yet.
+  const biometric = (await gateKind()) === 'prf' ? 'your passkey' : null;
 
   const phrase =
     capability === 'none' ? '' : biometric ? `${biometric}` : `your ${credential}`;
@@ -77,6 +100,22 @@ export async function getUnlockLabels(): Promise<UnlockLabels> {
  * screen. Callers on web must check the capability first; VaultContext does.
  */
 export async function authenticateWithDeviceCredential(_reason: string): Promise<AuthOutcome> {
-  if ((await getLockCapability()) !== 'biometric') return 'unavailable';
-  return (await unlockWithBiometric()) ? 'ok' : 'cancelled';
+  // The ENROLLED kind, deliberately not getLockCapability() -- that now reports
+  // what could be set up, which would send a passcode user into a passkey
+  // prompt that has no credential to find.
+  if ((await gateKind()) !== 'prf') return 'unavailable';
+
+  const deviceKey = await unlockWithBiometric();
+  if (!deviceKey) return 'cancelled';
+
+  /**
+   * The difference between this and the native implementation, in one line.
+   *
+   * Native returns a boolean and the keys were never gone -- the gate is
+   * advisory. Here the passkey has just produced the ONLY copy of the device
+   * key in existence outside its wrapped blob, and handing back 'ok' without
+   * keeping it would unlock a session that then cannot open its own database.
+   */
+  setUnlockedDeviceKey(bytesToHex(deviceKey));
+  return 'ok';
 }

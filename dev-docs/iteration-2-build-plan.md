@@ -1704,6 +1704,69 @@ available and supported. So Phase 0's real question is not *whether* the bytes
 can be encrypted — it is **where the key lives in a browser**, which is the part
 that has no Keychain to hide behind.
 
+## Stage 13b — LIVE CHECKLIST (branch `stage-13b-web-lock`)
+
+- [x] **1. `user_settings`, applied to DEV.** Key-value, one row per setting, with
+      a deterministic `(user_id, key)` row id. Every constraint proven to reject
+      what it should; RLS on with four owner-only policies; in the powersync
+      publication with a role grant; PowerSync restarted clean and replicates it.
+- [ ] **2. `supabase db push` to LIVE — ADAM.** Blocked: the CLI prompts for the
+      database password interactively, which is a credential I will not enter.
+      One command, and 13b is not shippable to a device until it runs.
+- [x] **3. Both sync configs.** `sync-rules.yaml` (dev, `bucket_definitions`) and
+      `sync-streams.yaml` (live, Sync Streams edition 3). Different formats, both real.
+- [x] **4. Settings sync with a boot mirror.** Table is the source of truth;
+      `secureStorage` holds what boot reads. Lock settings moved out of `vault.ts`
+      because calling the settings layer from there closes a real import cycle
+      through `powersync/db.ts`.
+- [x] **5. Gate crypto.** `HKDF(scrypt(PIN, salt) ‖ browserSecret)`, 10 tests. The
+      PIN is never the only input — see the Decisions Log.
+- [x] **6. WebAuthn PRF + passcode gate**, attempt counter, self-destruct.
+- [x] **7. Locking wipes the keys.** `lockBehaviour.web.ts` closes the database
+      then zeroes the keys; native's is an empty function, deliberately.
+- [x] **8. PIN pad, lock screen and setup dialog.**
+
+### Verified in a browser, end to end
+
+| Check | Result |
+|---|---|
+| Enable lock → set PIN → enrol | ✅ |
+| Plain device key after enrolment | ✅ **gone**; only the gate-wrapped copy remains |
+| KEK | ✅ `extractable: false`, AES-GCM |
+| Every stored item | ✅ `{iv, ciphertext}` — no plaintext |
+| Reload | ✅ boots **locked** |
+| Correct PIN | ✅ unlocks, and the canary note decrypts from the encrypted DB |
+| Wrong PIN | ✅ rejected, counter decrements 9…1 |
+| 10 wrong PINs | ✅ gate self-destructs |
+| Disable → re-enable | ✅ gate retired, plain key restored, fresh enrolment |
+| Old blob after the KDF retune | ✅ still opens — stored params are honoured |
+| Native regression | ✅ iPhone 17 Pro boots and decrypts throughout |
+
+**Three bugs found by running it, none of which the compiler could see:**
+
+1. **The lock toggle was disabled until a gate existed** — and the toggle was the
+   only way to create one. `getLockCapability()` returned `'none'` when nothing
+   was enrolled, which is right on native and a dead end here. It now reports
+   what *could* be enrolled; `'none'` is unreachable on web, because a PIN can
+   always be set.
+2. **Self-destruct bricked the app.** Destroying the gate removes the only copy
+   of the device key, but the lock setting stayed `enabled` — so the next boot
+   returned to a keypad that could never succeed. The notes were gone *and*
+   there was no way past the screen. The wipe now also disables the lock and
+   resets local data, which is what its own message already promised.
+3. **The KDF was 7x too slow**, and the browser could not be trusted to say so.
+   See the Decisions Log.
+
+### Not verified, and it cannot be from here
+
+**The WebAuthn/passkey path.** This browser exposes no platform authenticator, so
+`isBiometricGateAvailable()` is false and the setup dialog correctly offered only
+a PIN — which does exercise the fallback, but never the passkey. Enrolment,
+PRF evaluation and passkey unlock are written and type-check; **none has ever
+run.** Adam's Mac (Touch ID) or phone is the only place that can settle it.
+
+---
+
 ## Stage 13a — LIVE CHECKLIST (branch `stage-13a-web-persistence`)
 
 - [x] **1. `secureStorage.web.ts` is an encrypted IndexedDB store.** Every value
@@ -1991,6 +2054,12 @@ One blocking item; the rest is settled and recorded in the Decisions Log below.
 ## Decisions Log
 
 *(iteration-2-specific decisions, same terse format as `dev-docs/mvp-build-plan.md` — decision / reasoning / verification / status. Don't duplicate MVP-era entries.)*
+
+### 2026-08-27 — The gate KDF is scrypt N=2^13, chosen on measurement
+- **Decision:** `GATE_KDF_PARAMS` = scrypt N=2^13, r=8 — **434 ms** per attempt, ~5 days for a browser-confined sweep of all 10^6 PINs. Down from N=2^16, which was written on an estimate and actually costs **3,123 ms**.
+- **Reasoning:** Pure-JS scrypt normally loses badly to a native attacker, and native WebCrypto PBKDF2 at 1M iterations costs only 126 ms here — a 44x better rate. That argument does **not** apply, for one specific reason: guessing requires `browserSecret`, which is sealed under a non-extractable WebCrypto key, so its bytes cannot leave the browser. Any sweep has to run in the victim's own browser, in JavaScript, at our speed. Defender/attacker is ~1:1 either way, so the only question is cost per unlock, and scrypt's memory hardness comes free.
+- **Consequence accepted:** ~430 ms on every web unlock, about a Face ID prompt. Raising it later costs existing users nothing because the parameters travel with each stored blob — which was proven by accident when the retune landed and an already-enrolled PIN kept working at its old cost.
+- **Status:** done. `npx tsx scripts/bench-gate-kdf.ts` reproduces the table. **Do not measure this in the automated browser** — it reports `visibilityState: hidden`, which clamps setTimeout to 1s and pauses rAF, so every reading pinned near 6000 ms regardless of parameters and a second retune was nearly made on that garbage.
 
 ### 2026-08-25 (later) — Web gets a real lock: biometric, or a 6-digit PIN
 - **Decision:** Reverses the "no lock screen" call above, made hours earlier. Adam: *"on mobile and macos, the web app should use the usual biometric lock, if these are unavailable without locking the whole computer, a 6 digit pin can secure the app."* Locking **wipes the keys from memory**; unlocking re-derives them. Lock settings **inherit from native, and all settings sync across devices**.

@@ -50,3 +50,22 @@ export function setUnlockedDeviceKey(_hex: string): void {}
 export async function isDeviceKeyGated(): Promise<boolean> {
   return false;
 }
+
+/**
+ * Web-only, and present here so the seam has one shape.
+ *
+ * Native has no gate to enrol into: `deviceAuth.ts` is a presence check over a
+ * key the keychain keeps regardless, which is the documented native design.
+ * Returning false is the honest answer -- "there is nothing here to move the
+ * key behind" -- rather than a throw, because the caller is UI that simply does
+ * not render on this platform.
+ */
+export async function enrolGate(
+  _enrol: () => Promise<boolean>,
+  _deviceKeyHex: string
+): Promise<boolean> {
+  return false;
+}
+
+/** Web-only counterpart to enrolGate. See above. */
+export async function retireGate(_deviceKey: Uint8Array): Promise<void> {}

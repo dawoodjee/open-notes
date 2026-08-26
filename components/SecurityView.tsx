@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ScrollView, Text as RNText, View } from 'react-native';
+import { Platform, ScrollView, Text as RNText, View } from 'react-native';
 import {
   SettingsGroup,
   SettingsRow,
@@ -10,6 +10,10 @@ import {
 import { Cog, Lock, Plug, ScrollText, ShieldCheck } from 'lucide-react-native';
 import { UnlockLabels, getUnlockLabels } from '@/lib/auth/deviceAuth';
 import type { LockSettings } from '@/lib/settings/lockSettings';
+import { PasscodeSetupDialog } from '@/components/PasscodeSetupDialog';
+import { clearGate } from '@/lib/crypto/webGate';
+import { isDeviceKeyGated, retireGate } from '@/lib/crypto/deviceKeyStore';
+import { getDeviceKey } from '@/lib/crypto/vault';
 import {
   GATE_WINDOW_OPTIONS,
   GateState,
@@ -56,6 +60,44 @@ export function SecurityView({
   onManageEndpoints: () => void;
 }) {
   const [unlock, setUnlock] = useState<UnlockLabels | null>(null);
+  const [setupOpen, setSetupOpen] = useState(false);
+
+  /**
+   * Turning the lock ON is a two-step act on web and a one-step act natively.
+   *
+   * Native's lock is a gate over keys that are never discarded, so there is
+   * nothing to set up -- the OS already holds the credential. On web the keys
+   * ARE discarded, and the only way back in is a passcode or passkey that does
+   * not exist yet. Writing `enabled: true` first would produce a tab nobody can
+   * open, so the setting is written by the dialog below, only after an
+   * enrolment has actually succeeded.
+   *
+   * Turning it OFF is symmetrical and just as necessary: the gate is retired
+   * and the device key goes back to plain storage. Skipping that would leave a
+   * device demanding a credential the user has just been told they no longer
+   * need.
+   */
+  const handleLockToggle = useCallback(
+    async (next: boolean) => {
+      if (Platform.OS !== 'web') {
+        await updateLockSettings({ ...lockSettings, enabled: next });
+        return;
+      }
+      if (next) {
+        // Already enrolled -- re-enabling after a previous disable.
+        if (await isDeviceKeyGated()) {
+          await updateLockSettings({ ...lockSettings, enabled: true });
+          return;
+        }
+        setSetupOpen(true);
+        return;
+      }
+      await clearGate();
+      await retireGate(getDeviceKey());
+      await updateLockSettings({ ...lockSettings, enabled: false });
+    },
+    [lockSettings, updateLockSettings]
+  );
   const [gate, setGate] = useState<GateState | null>(null);
   const [disclosures, setDisclosures] = useState<Disclosure[]>([]);
   const [skillsVisible, setSkillsVisible] = useState(true);
@@ -134,7 +176,7 @@ export function SecurityView({
               <SettingsToggle
                 value={lockSettings.enabled && canLock}
                 disabled={!canLock}
-                onChange={(next) => void updateLockSettings({ ...lockSettings, enabled: next })}
+                onChange={(next) => void handleLockToggle(next)}
               />
             }
           />
@@ -152,6 +194,17 @@ export function SecurityView({
             />
           ) : null}
         </SettingsGroup>
+
+        {Platform.OS === 'web' ? (
+          <PasscodeSetupDialog
+            isOpen={setupOpen}
+            onCancel={() => setSetupOpen(false)}
+            onEnrolled={() => {
+              setSetupOpen(false);
+              void updateLockSettings({ ...lockSettings, enabled: true });
+            }}
+          />
+        ) : null}
 
         <SettingsGroup
           caption="Data access"

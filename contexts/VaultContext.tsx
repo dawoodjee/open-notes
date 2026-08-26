@@ -16,6 +16,8 @@ import {
   type LockSettings,
 } from '@/lib/settings/lockSettings';
 import { LOCK_SETTINGS_KEY, reconcileSettings } from '@/lib/settings/syncedSettings';
+import { onLock } from '@/lib/auth/lockBehaviour';
+import { isDeviceKeyGated } from '@/lib/crypto/deviceKeyStore';
 import { withTimeout } from '@/lib/auth/withTimeout';
 import { wipeLocalDatabase } from '@/lib/powersync/migrateToEncrypted';
 import { closePowerSync, initPowerSync } from '@/lib/powersync/db';
@@ -101,6 +103,27 @@ async function loadKeys(): Promise<boolean> {
   }
 
   if (await unlockWithDeviceKey()) return true;
+
+  /**
+   * "Device key gone" means START OVER on native and LOCKED on web, and getting
+   * that backwards destroys notes.
+   *
+   * On web with a gate enrolled, the device key is DELIBERATELY absent from
+   * storage -- it exists only wrapped under the passcode or passkey, which is
+   * the entire mechanism (see lib/crypto/deviceKeyStore.web.ts). Falling
+   * through to the wipe below would read a working lock as a corrupt install
+   * and delete every local note the moment anything reached this line with the
+   * vault still locked.
+   *
+   * The normal locked boot never gets here -- the effect below returns at
+   * `status = 'locked'` before calling this. This guard is for the paths that
+   * do not: a stale `enabled: false` arriving from sync while a gate is still
+   * enrolled, or any future caller. A silent wipe is not a failure mode worth
+   * leaving to call-site discipline.
+   */
+  if (await isDeviceKeyGated()) {
+    throw new Error('Locked: the device key is behind the passcode or passkey.');
+  }
 
   // Vault present, device key gone. On iOS the keychain survives app deletion
   // while the data container does not, so odd pairings can outlive a
@@ -317,7 +340,20 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const lock = useCallback(() => setStatus('locked'), []);
+  /**
+   * Async now, because on web locking actually does something -- it closes the
+   * database and zeroes the keys (see lib/auth/lockBehaviour.web.ts). Native's
+   * implementation is an empty function, so nothing changes there.
+   *
+   * The status flips FIRST. If `onLock()` were awaited before painting the lock
+   * screen, the note UI would stay on screen for the duration of a database
+   * close -- which is precisely the window the lock exists to eliminate, and on
+   * a slow machine it is visible.
+   */
+  const lock = useCallback(() => {
+    setStatus('locked');
+    void onLock().catch((err) => console.error('Lock teardown failed:', err));
+  }, []);
 
   const updateLockSettings = useCallback(async (next: LockSettings) => {
     await setLockSettings(next);

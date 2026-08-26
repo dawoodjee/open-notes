@@ -53,18 +53,58 @@ import { utf8ToBytes } from '@noble/ciphers/utils.js';
  */
 
 /**
- * scrypt cost. Deliberately a named constant that TRAVELS WITH THE STORED
- * BLOB (see WebGateConfig), for the same reason RECOVERY_KDF_PARAMS does:
- * raising the cost later must not strand a PIN somebody already set.
+ * scrypt cost. Deliberately a named constant that TRAVELS WITH THE STORED BLOB
+ * (see WebGateConfig), for the same reason RECOVERY_KDF_PARAMS does: changing
+ * the cost later must not strand a PIN somebody already set. That property was
+ * immediately useful -- these numbers changed once already, after measurement,
+ * and existing enrolments kept working.
  *
- * N = 2^16 with r = 8 is ~64 MB and a few hundred milliseconds of pure JS in a
- * browser -- measured, not guessed; see the Stage 13b verification notes. That
- * is tolerable once per unlock and turns an in-page sweep of all 10^6 PINs into
- * days rather than minutes.
+ * ── THE NUMBERS ARE MEASURED, AND THE FIRST GUESS WAS BADLY WRONG ─────────
+ *
+ * N = 2^16, r = 8 was written here on the estimate of "a few hundred
+ * milliseconds". It actually costs **~3.1 seconds** per attempt. Not a tuning
+ * detail -- a lock nobody would keep switched on.
+ *
+ * Measure with `npx tsx scripts/bench-gate-kdf.ts` rather than in a browser.
+ * The browser was tried first and lied: an automated pane reports
+ * `visibilityState === 'hidden'`, which clamps setTimeout to 1s and pauses
+ * requestAnimationFrame, so every reading came back pinned near 6000ms whatever
+ * the parameters were -- including for an 8x change that should have been
+ * obvious. A second retune was very nearly made on those numbers.
+ *
+ * ── WHY scrypt AT ALL, WHEN NATIVE PBKDF2 IS 44x FASTER ──────────────────
+ *
+ * Measured in the same browser: WebCrypto PBKDF2-SHA256 at 1,000,000
+ * iterations costs 126 ms, against 5,500 ms for this pure-JS scrypt. The
+ * obvious conclusion -- pure JS is a terrible place to pay for a KDF, because
+ * an attacker using an optimised native implementation gets a 50x head start --
+ * is the RIGHT conclusion in general and does not apply here, for one specific
+ * reason worth writing down:
+ *
+ * **The attacker is confined to the same browser we are.** Guessing the PIN
+ * requires `browserSecret`, which is sealed under a non-extractable WebCrypto
+ * key. Non-extractable means the bytes never leave that key store, so the
+ * material cannot be carried off to a GPU farm or a native binary -- any sweep
+ * has to execute in the victim's own browser, in JavaScript, at our speed. The
+ * defender/attacker ratio is therefore ~1:1 whichever KDF we pick, and the only
+ * question left is cost per attempt versus cost per unlock. scrypt's memory
+ * hardness is then a free bonus rather than the point.
+ *
+ * ── THE CHOSEN POINT ──────────────────────────────────────────────────────
+ *
+ * N = 2^13, r = 8: ~8 MB and **434 ms** per attempt, against 3,123 ms for the
+ * original. A browser-confined sweep of all 10^6 PINs then costs about **5
+ * days**, for a user cost comparable to a Face ID prompt. The 10-attempt wipe
+ * in webGate covers the legitimate entry path; this covers the one that
+ * bypasses it.
+ *
+ * Raising it is cheap if that trade ever looks wrong -- 2^14 buys 9.2 days at
+ * 793 ms -- and costs nothing to existing users, because the parameters travel
+ * with each stored blob rather than being implied by this constant.
  */
 export const GATE_KDF_PARAMS = {
   alg: 'scrypt' as const,
-  N: 65536,
+  N: 8192,
   r: 8,
   p: 1,
   dkLen: 32,

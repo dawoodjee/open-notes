@@ -183,6 +183,21 @@ export function getDataKey(): Uint8Array {
   return dataKey;
 }
 
+/**
+ * The device key, for the one caller that needs the key ITSELF rather than what
+ * it unwraps: the web gate, which re-wraps it under a passcode or passkey.
+ *
+ * Deliberately not exported before Stage 13b. Everything else in the app wants
+ * `getDataKey()`; handing out the device key is only defensible because the web
+ * gate's whole job is to put it somewhere better than where it currently is.
+ */
+export function getDeviceKey(): Uint8Array {
+  if (!deviceKey) {
+    throw new Error('The vault is locked -- no device key available.');
+  }
+  return deviceKey;
+}
+
 /** Only for sign-out and account switches, where the next user must not
  *  inherit the previous one's key. Showing the lock screen does not call this. */
 export function forgetDataKey(): void {
