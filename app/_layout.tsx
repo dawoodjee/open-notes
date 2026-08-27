@@ -15,6 +15,8 @@ import { BootSpinner } from '@/components/BootSpinner';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { StatusBar } from 'expo-status-bar';
 
+import { injectPwaHead, registerServiceWorker } from '@/lib/pwa/install';
+
 import '@/global.css';
 
 // Suppress the on-device LogBox overlay -- the yellow/red toasts that sat over
@@ -67,6 +69,22 @@ function KeyStepOverlay() {
     </View>
   );
 }
+
+/**
+ * Offline support, registered once at launch.
+ *
+ * Module scope rather than an effect, for the same reason the splash hold above
+ * is: by the time an effect runs the first paint has already happened, and the
+ * worker's own `load` listener inside this call is what keeps it off the
+ * critical path. A no-op on native -- see lib/pwa/install.ts.
+ *
+ * `injectPwaHead()` is the dev-server equivalent of what
+ * scripts/inject-pwa-head.ts writes into the exported HTML: Expo's SPA output
+ * emits a fixed template and ignores `app/+html.tsx`, so the manifest link has
+ * to arrive one of those two ways. See lib/pwa/headTags.ts.
+ */
+registerServiceWorker();
+injectPwaHead();
 
 export default function RootLayout() {
   // ThemeProvider sits outermost: the appearance has to be settled before

@@ -62,3 +62,6 @@ supabase/backups/
 
 # Editor swap files. One of these was committed once.
 *.sw[a-p]
+
+# Web export output. Rebuild with `npm run build:web`.
+dist/

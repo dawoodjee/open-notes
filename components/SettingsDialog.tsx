@@ -2,18 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { IconButton } from './IconButton';
 import { ScrollView, Text as RNText, View, useWindowDimensions } from 'react-native';
 import { ModalBottomSheet } from './ModalSheet';
+import { useInstallPrompt } from '@/lib/pwa/install';
 import { Pressable } from '@/components/ui/pressable';
 import { HStack } from '@/components/ui/hstack';
 import { Icon } from '@/components/ui/icon';
-import {
-  X,
-  AlertTriangle,
-  Settings as SettingsIcon,
-  ShieldCheck,
-  Wrench,
-  Palette,
-  Type,
-} from 'lucide-react-native';
+import { AlertTriangle, Download, Palette, Settings as SettingsIcon, ShieldCheck, Type, Wrench, X } from 'lucide-react-native';
 import { getPowerSync } from '@/lib/powersync/db';
 import {
   SettingsGroup,
@@ -109,6 +102,7 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
    * directly.
    */
   const { lockSettings, updateLockSettings } = useVault();
+  const install = useInstallPrompt();
   const { preference, setPreference, bulletStyle, setBulletStyle, theme, setTheme } = useTheme();
 
   // Four fifths of the WINDOW, in points. See the detent note below.
@@ -174,6 +168,30 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
                 />
                 <SettingsRow icon={Wrench} label="Advanced" onPress={() => setView('advanced')} />
               </SettingsGroup>
+
+              {/*
+                Only when the browser has actually offered an install.
+
+                `canInstall` is false on native, false once installed, and false
+                in any browser that has not fired `beforeinstallprompt` -- which
+                includes iOS Safari, where installing is a manual Share-sheet
+                action the page cannot trigger. A permanently visible "Install"
+                row that does nothing on a third of devices is worse than no row,
+                so this appears only when pressing it will genuinely open the
+                browser's dialog.
+              */}
+              {install.canInstall ? (
+                <SettingsGroup
+                  caption="This browser"
+                  footnote="Installing keeps your notes available offline and asks the browser to stop treating their storage as disposable."
+                >
+                  <SettingsRow
+                    icon={Download}
+                    label="Install Notes"
+                    onPress={() => void install.promptInstall()}
+                  />
+                </SettingsGroup>
+              ) : null}
 
               <View className="h-8" />
             </ScrollView>
