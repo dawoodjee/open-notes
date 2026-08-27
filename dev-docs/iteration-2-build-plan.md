@@ -1705,6 +1705,72 @@ available and supported. So Phase 0's real question is not *whether* the bytes
 can be encrypted — it is **where the key lives in a browser**, which is the part
 that has no Keychain to hide behind.
 
+## Stage 13d — LIVE CHECKLIST (branch `stage-13d-pwa`)
+
+- [x] **1. Manifest, icons, head tags.** `public/manifest.webmanifest`, 192/512
+      plus a maskable 512 padded into the safe zone, and the `<head>` tags an
+      installable app needs.
+- [x] **2. Service worker** (`public/sw.js`) — network-first for navigations so
+      a deploy is picked up rather than pinned by a cached HTML entry;
+      cache-first for hashed assets. Precaches `/@powersync/worker.js`
+      **explicitly**, because the worker fetches its own wasm and a
+      "cache what the page requested" strategy misses it — without which the
+      app launches offline and then cannot open its database, which is worse
+      than saying it is offline. Notes are never cached: a service worker cache
+      is plaintext, and caching a note response would quietly undo 13a.
+- [x] **3. Install prompt.** `beforeinstallprompt` captured at **module scope**,
+      not in the hook — it fires once, early, usually before React has mounted
+      anything, and a hook that only starts listening on mount misses it and
+      reports "not installable" forever. The Settings row appears only when the
+      browser has genuinely offered an install, so it is absent on iOS Safari
+      rather than present and inert.
+- [x] **4. `navigator.storage.persist()` on install.** 13a measured it returning
+      false on a bare origin; an installed PWA is the strongest engagement signal
+      Chrome accepts, so this is the moment it is likely to be granted.
+- [x] **5. `npm run build:web`**, and 199 tests.
+
+**`app/+html.tsx` does not work here, and failed silently.** It is the documented
+way to control the HTML shell and is only read by Expo's STATIC renderer; this
+app builds `web.output: "single"`, where Expo emits a fixed template and never
+looks at it. Written, exported, ignored — the built `index.html` came out as the
+stock template with no manifest link. Switching to `output: "static"` would fix
+it and would also turn on per-route prerendering, which an auth-gated app whose
+providers touch browser APIs at module scope should not take on for four meta
+tags. So the tags are data in `lib/pwa/headTags.ts` with two consumers that
+cannot drift: a runtime injector for `expo start --web`, and a post-export script
+for the shipped page. Every tag carries a `replaces` selector, which is what
+makes the injection idempotent — proven by running it twice and diffing.
+
+**A registration that registered nothing, silently.** `registerServiceWorker()`
+deferred to `window.addEventListener('load', …)`. In the built app the bundle is
+deferred and this module is reached through expo-router's lazy layout, so by the
+time it evaluates the document is already `complete` — the listener was attached
+to an event that had already fired and waited forever. No error, no worker, no
+offline support, nothing in the console. Found by reading `document.readyState`
+from the page rather than trusting the code. It now registers immediately when
+the document is already complete.
+
+### Cannot be verified here, and this one is large
+
+**Service workers are disabled in this browser pane.** Registering a
+*trivially valid empty worker* fails with the identical error as registering a
+file that does not exist — `An unknown error occurred when fetching the script`
+— so the browser is not fetching at all. That is the environment, not the code.
+
+Unverified as a direct consequence: worker registration, the offline shell,
+`beforeinstallprompt` (which requires an active worker with a fetch handler), the
+install row appearing, and `persisted()` flipping to true. **Adam's own Chrome
+settles all five at once:** `npm run build:web`, serve `dist/` over HTTP/1.1
+(Python's `http.server` speaks 1.0 and Chrome's worker fetch dislikes it), then
+install from the omnibox.
+
+Verified instead: the manifest is linked and parses with the right name, display
+and three icons; every asset resolves; the head injection is idempotent; `sw.js`
+is syntactically valid and served as `text/javascript`; and 7 tests cover the
+head-tag invariants including the two-viewport trap.
+
+---
+
 ## Stage 13c — LIVE CHECKLIST (branch `stage-13b-web-lock`, continues 13b)
 
 - [x] **1. Appearance, app theme and bullet style are account settings.**
