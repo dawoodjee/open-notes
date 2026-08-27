@@ -17,23 +17,13 @@
 
 > ## ▶ NEXT SESSION STARTS HERE (written 2026-08-22, end of the Stage 11 / 11.5 run)
 >
-> **Position:** `main` @ `9a6c315`. Working tree clean. `tsc` clean, `npm test`
-> 86/86, `npx expo lint` 8 warnings / 0 errors (was 11 — three left with the
-> deleted web editor). Stages 9, 10, 11, 11.5 all merged.
+> **Position:** `main` @ the Stage 13e merge. Working tree clean. `tsc` clean,
+> `npm test` **199/199**, `npx expo lint` 8 warnings / 0 errors. Stages 9, 10,
+> 11, 11.5, 12, 12.5, 13a–13e all merged.
 >
-> **Needs Adam's hands, in priority order:**
-> 1. **One swipe by hand on iOS.** ~~The hand-rolled gesture was broken.~~
->    **Superseded by Stage 11.6**: the pan is now the vendored
->    `ReanimatedSwipeable`, the same code on both platforms, and it is fully
->    verified on Android including full swipe in both directions. iOS gestures
->    still cannot be automated, so a single confirming swipe by hand is worth
->    having, but it is no longer blocking anything — `/dev-swipe` PASSes all
->    four actions on iOS already.
-> 2. **iPad rotation.** `simctl` has no clean rotation hook. The standing rule
->    (folder sidebar = split-view in landscape, overlay in portrait) is still
->    unverified.
-> 3. **Web.** Still does not boot (`Appearance.setColorScheme`), deliberately,
->    until Stage 13.
+> **Anything needing Adam's hands now lives in `dev-docs/needs-adam.md`**, with
+> the reason I cannot do each one. Four items, one of which (the PowerSync Cloud
+> stream) blocks a shipped feature on live devices.
 >
 > **Decision waiting for Stage 12:** neither `react-native-enriched-html` nor
 > markdown can represent **highlight** or **text colour**, and
