@@ -34,6 +34,35 @@ against the live REST endpoint (`42501` for `anon`, identical to `folders`).
 
 ---
 
+## 1b. OPEN BUG — Settings unreachable on the iPad  ·  *reported 2026-08-27, not yet investigated*
+
+Adam, while doing item 1: sync set up on the iPhone and iPad simulators, set
+Dark on one, it did not reach the iPad — **and "there seems to be a bug
+preventing me from checking the settings"**.
+
+**The non-syncing half is almost certainly item 1, not a bug.** The dashboard
+still reports `Sync Streams: 2`, so `user_settings` is not deployed; the row
+never leaves the server and appearance stays device-local. That is what a
+missing stream looks like.
+
+**The "cannot check the settings" half is a real and separate report** and is
+the one to chase. Detail still needed: does the Settings sheet fail to open, open
+and stay empty, or open and crash — and on which device. Suspects, in order:
+
+1. `SettingsDialog` now calls `useInstallPrompt()` (Stage 13d). Its native
+   implementation is a plain function, but it is called unconditionally on every
+   platform — worth confirming it is harmless on a native modal.
+2. `SecurityView` gained `Platform.OS === 'web'` branches and imports
+   `getDeviceKey()` from the vault (13b). `getDeviceKey()` **throws when the
+   vault is locked**, and the native path calls it in `handleLockToggle` — which
+   should be unreachable natively, but that needs proving rather than assuming.
+3. The appearance settings moved onto the synced layer in 13c; a failed read
+   there would surface when the Appearance view mounts.
+
+Deliberately not fixed yet at Adam's request — batched with the item 1 retry.
+
+---
+
 ## 2. Grant Automation permission for **System Events**  ·  *unblocks my testing*
 
 **Where:** System Settings → Privacy & Security → Automation → the terminal /
