@@ -8,7 +8,7 @@ Updated 2026-08-27, against `main` @ the Stage 13e merge.
 
 ---
 
-## 1. Add the `user_settings` stream to PowerSync Cloud  ·  *blocks a shipped feature*
+## 1. Deploy the `user_settings` stream in PowerSync Cloud  ·  *blocks a shipped feature*
 
 **Where:** the PowerSync Cloud dashboard for the live instance.
 
@@ -16,7 +16,16 @@ Updated 2026-08-27, against `main` @ the Stage 13e merge.
 deployed one — `docs/two-stacks.md` states the dashboard is the source of truth
 for what is actually running live. There is no CLI in this repo that deploys it.
 
-**What to add**, matching the two streams already there:
+**The config edit is saved but was never DEPLOYED.** Adam's dashboard shows the
+most recent entry in Deploy History as **Aug 9, 21:43** — 18 days stale — while
+the status card still reports `Sync Streams: 2 (a2b1)` as Active. Left nav →
+**Sync Streams** → confirm the YAML → press **Deploy**. Deploy History should
+gain a new entry and the card should read `3`.
+
+Also confirm the instance selector (it reads **"Development"**) is the one
+`EXPO_PUBLIC_POWERSYNC_URL` actually points at, or the deploy lands elsewhere.
+
+**What the stream should be**, matching the two already there:
 
 ```yaml
   user_settings:
@@ -63,52 +72,13 @@ Deliberately not fixed yet at Adam's request — batched with the item 1 retry.
 
 ---
 
-## 2. Grant Automation permission for **System Events**  ·  *unblocks my testing*
-
-**Where:** System Settings → Privacy & Security → Automation → the terminal /
-Claude entry → tick **System Events**.
-
-**Why me:** this is an OS permission dialog. Note it is a *different* entry from
-the one you already granted: `osascript -e 'tell application "Simulator" to
-activate'` now succeeds, so Simulator itself is authorised. Anything driving the
-keyboard or menus goes through System Events, which still fails:
-
-```
-execution error: Not authorized to send Apple events to System Events. (-1743)
-```
-
-**What it unblocks:** simulator rotation (⌘← / ⌘→), which is the only way to
-verify the iPad's landscape/portrait rule — the folder sidebar is a split-view
-column in landscape and an overlay in portrait, and that rule has been unverified
-since Stage 11. It should also stop `expo run:ios` exiting 1 on success, which it
-does purely because it shells out to `osascript` to front the window.
-
----
-
-## 3. Check the PWA in a real Chrome  ·  *verifies written-but-unrun code*
-
-```bash
-npm run build:web
-node <a static server over HTTP/1.1>   # NOT python -m http.server
-```
-
-Then open it, install from the omnibox, and check: the app still opens with the
-network off, and `navigator.storage.persisted()` returns `true` afterwards.
-
-**Why me:** service workers cannot register in the automated browser at all — a
-*trivially valid empty worker* fails with the identical error as a file that does
-not exist, so it is not fetching. That makes registration, the offline shell,
-`beforeinstallprompt` and `persist()` all unverifiable here.
-
-**Why not Python's `http.server`:** it speaks HTTP/1.0 and Chrome's service
-worker script fetch fails against it. That cost me an hour of chasing my own
-code; the registration bug I *did* find was real, but this masked it.
-
----
-
-## 4. Exercise the passkey on your Mac or phone  ·  *you have already accepted this*
+## 2. Exercise the passkey on your Mac  ·  *now unblocked*
 
 Settings → Security → Require unlock → **Use a passkey**, then lock and unlock.
+
+**Previously blocked by a bug of mine**, now fixed: the Settings sheet was
+rendering *inside the note-list column* under the editor, so it could not be
+reached. See the ModalSheet note in the build plan.
 
 **Why me:** no platform authenticator exists in the automated browser, so
 `isBiometricGateAvailable()` is false and the setup dialog correctly offers only
@@ -125,4 +95,7 @@ If PRF misbehaves, the PIN path is unaffected — they are separate branches in
 
 - ~~Drag a folder on the phone to confirm the reorder survives a sync round-trip~~ — done 2026-08-27, worked.
 - ~~`supabase db push` to live~~ — done 2026-08-27, verified against the live REST endpoint.
-- ~~Automation permission for Simulator itself~~ — granted; only System Events is still missing (item 2).
+- ~~Automation permission for Simulator itself~~ — granted.
+- ~~Automation permission for System Events~~ — **closed 2026-08-27.** The grant was correct all along; the *running* Claude Code process was version 2.1.235, whose binary had been deleted by a self-update to 2.1.237, so its TCC identity matched nothing and every Apple event failed with `-1743` and no prompt. Restarting the app fixed it. Simulator rotation is now available to me for the first time.
+- ~~Check the PWA in a real Chrome~~ — **done 2026-08-27.** Service worker registers, installs, and runs offline on the desktop. Two real bugs found and fixed (offline shell served an uncached bundle; `persisted()` handling).
+- ~~"iPad app crashing after load"~~ — **not a bug.** Metro was not running; a dev build with no packager paints a blank screen. Confirmed working once 8081 was back up.
