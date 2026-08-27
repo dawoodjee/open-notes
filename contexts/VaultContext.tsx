@@ -2,17 +2,27 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { AppState, AppStateStatus } from 'react-native';
 import { authenticateWithDeviceCredential } from '@/lib/auth/deviceAuth';
 import {
-  DEFAULT_LOCK_SETTINGS,
-  LockSettings,
   clearLegacyVault,
   createLocalVault,
-  getLockSettings,
   hasLegacyVault,
   hasVault,
-  setLockSettings,
   unlockWithDeviceKey,
   isUnlocked as vaultIsUnlocked,
 } from '@/lib/crypto/vault';
+import {
+  DEFAULT_LOCK_SETTINGS,
+  getLockSettings,
+  setLockSettings,
+  type LockSettings,
+} from '@/lib/settings/lockSettings';
+import {
+  ALL_SETTING_KEYS,
+  LOCK_SETTINGS_KEY,
+  adoptLocalSettings,
+  reconcileSettings,
+} from '@/lib/settings/syncedSettings';
+import { onLock } from '@/lib/auth/lockBehaviour';
+import { isDeviceKeyGated } from '@/lib/crypto/deviceKeyStore';
 import { withTimeout } from '@/lib/auth/withTimeout';
 import { wipeLocalDatabase } from '@/lib/powersync/migrateToEncrypted';
 import { closePowerSync, initPowerSync } from '@/lib/powersync/db';
@@ -99,6 +109,27 @@ async function loadKeys(): Promise<boolean> {
 
   if (await unlockWithDeviceKey()) return true;
 
+  /**
+   * "Device key gone" means START OVER on native and LOCKED on web, and getting
+   * that backwards destroys notes.
+   *
+   * On web with a gate enrolled, the device key is DELIBERATELY absent from
+   * storage -- it exists only wrapped under the passcode or passkey, which is
+   * the entire mechanism (see lib/crypto/deviceKeyStore.web.ts). Falling
+   * through to the wipe below would read a working lock as a corrupt install
+   * and delete every local note the moment anything reached this line with the
+   * vault still locked.
+   *
+   * The normal locked boot never gets here -- the effect below returns at
+   * `status = 'locked'` before calling this. This guard is for the paths that
+   * do not: a stale `enabled: false` arriving from sync while a gate is still
+   * enrolled, or any future caller. A silent wipe is not a failure mode worth
+   * leaving to call-site discipline.
+   */
+  if (await isDeviceKeyGated()) {
+    throw new Error('Locked: the device key is behind the passcode or passkey.');
+  }
+
   // Vault present, device key gone. On iOS the keychain survives app deletion
   // while the data container does not, so odd pairings can outlive a
   // reinstall. Nothing here is recoverable locally -- signing in restores the
@@ -183,6 +214,37 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
         setHasBooted(true);
         setStatus('unlocked');
+
+        /**
+         * Pull the account's settings into the mirror, now that there IS a
+         * database to read them from.
+         *
+         * Deliberately after `setStatus('unlocked')` and deliberately not
+         * awaited by anything above it. The mirror is what boot reads (see
+         * lib/settings/syncedSettings.ts), so a setting changed on another
+         * device lands one boot late by design -- blocking the app on a sync
+         * round trip to avoid that would trade a cosmetic delay for a
+         * launch that hangs when the network is slow.
+         *
+         * The lock is re-read because it is the one setting whose remote value
+         * should take effect without waiting: a lock switched on elsewhere
+         * ought to arm here as soon as we know about it.
+         *
+         * ADOPT BEFORE RECONCILE, and the order is not interchangeable.
+         * Preferences chosen before there was an account exist only in the
+         * mirror. Reconciling first would find an empty table, change nothing,
+         * and leave those choices to be overwritten the moment any device wrote
+         * a real row -- so they are pushed up first, and only for keys the
+         * account does not already have. An existing row is a choice made on
+         * another device and outranks whatever this one did while signed out.
+         */
+        void adoptLocalSettings(ALL_SETTING_KEYS)
+          .then(() => reconcileSettings())
+          .then(async (changed) => {
+            if (cancelled || !changed.includes(LOCK_SETTINGS_KEY)) return;
+            setLockSettingsState(await getLockSettings());
+          })
+          .catch((err) => console.warn('Settings reconcile failed:', err));
       } catch (err) {
         if (cancelled) return;
         console.error('Vault boot failed:', err);
@@ -292,7 +354,20 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const lock = useCallback(() => setStatus('locked'), []);
+  /**
+   * Async now, because on web locking actually does something -- it closes the
+   * database and zeroes the keys (see lib/auth/lockBehaviour.web.ts). Native's
+   * implementation is an empty function, so nothing changes there.
+   *
+   * The status flips FIRST. If `onLock()` were awaited before painting the lock
+   * screen, the note UI would stay on screen for the duration of a database
+   * close -- which is precisely the window the lock exists to eliminate, and on
+   * a slow machine it is visible.
+   */
+  const lock = useCallback(() => {
+    setStatus('locked');
+    void onLock().catch((err) => console.error('Lock teardown failed:', err));
+  }, []);
 
   const updateLockSettings = useCallback(async (next: LockSettings) => {
     await setLockSettings(next);

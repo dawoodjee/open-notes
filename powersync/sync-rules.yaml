@@ -25,3 +25,24 @@ bucket_definitions:
     parameters: select request.user_id() as user_id
     data:
       - select * from folders where user_id = bucket.user_id
+
+  # Settings, Stage 13b. Same per-user keying as the two above.
+  #
+  # WHY THESE SYNC AT ALL, since every other per-device preference does not:
+  # Adam's call, 2026-08-25 -- settings follow the user across devices, and the
+  # forcing case is the web lock, which has to inherit whatever was set on the
+  # phone.
+  #
+  # `value` is JSON in a text column and is NOT encrypted, unlike folders.name.
+  # A preference is structure, not content -- the same category as sort_order
+  # and include_in_notes, which have always synced in the clear. See the
+  # migration for the full reasoning and for what that does expose.
+  #
+  # NOTE the boot ordering this creates on web, which is not obvious: the synced
+  # value cannot be read before the database is open, and on web the database
+  # needs the vault unlocked. So the lock setting is read from its local mirror
+  # at boot and reconciled from here afterwards. See lib/settings/.
+  user_settings:
+    parameters: select request.user_id() as user_id
+    data:
+      - select * from user_settings where user_id = bucket.user_id

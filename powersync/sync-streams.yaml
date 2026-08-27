@@ -42,3 +42,12 @@ streams:
   user_folders:
     auto_subscribe: true
     query: SELECT * FROM folders WHERE user_id = auth.user_id()
+
+  # The Sync Streams translation of user_settings in sync-rules.yaml. Both files
+  # are real and are edited together -- see docs/two-stacks.md. auto_subscribe
+  # for the same reason the two above have it: @powersync/common 2.0.0 predates
+  # the subscribe API, so a non-auto stream would sync nothing and look like a
+  # connection fault.
+  user_settings:
+    auto_subscribe: true
+    query: SELECT * FROM user_settings WHERE user_id = auth.user_id()

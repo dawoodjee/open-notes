@@ -6,6 +6,7 @@
 import 'react-native-get-random-values';
 
 import * as SecureStore from './secureStorage';
+import { forgetUnlockedDeviceKey, readDeviceKey, writeDeviceKey } from './deviceKeyStore';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, utf8ToBytes } from '@noble/ciphers/utils.js';
@@ -48,7 +49,9 @@ import {
  */
 
 const VAULT_KEY = 'notes.vault.v2';
-const DEVICE_KEY_ITEM = 'notes.devicekey.v2';
+// Moved to lib/crypto/deviceKeyStore.ts in Stage 13b. Native behaviour is
+// unchanged -- the seam exists so web can put the same key behind a passcode or
+// passkey without a Platform branch inside the vault.
 
 /**
  * The pre-6.5 vault, which wrapped its keys under scrypt(6-digit PIN).
@@ -180,6 +183,21 @@ export function getDataKey(): Uint8Array {
   return dataKey;
 }
 
+/**
+ * The device key, for the one caller that needs the key ITSELF rather than what
+ * it unwraps: the web gate, which re-wraps it under a passcode or passkey.
+ *
+ * Deliberately not exported before Stage 13b. Everything else in the app wants
+ * `getDataKey()`; handing out the device key is only defensible because the web
+ * gate's whole job is to put it somewhere better than where it currently is.
+ */
+export function getDeviceKey(): Uint8Array {
+  if (!deviceKey) {
+    throw new Error('The vault is locked -- no device key available.');
+  }
+  return deviceKey;
+}
+
 /** Only for sign-out and account switches, where the next user must not
  *  inherit the previous one's key. Showing the lock screen does not call this. */
 export function forgetDataKey(): void {
@@ -189,6 +207,10 @@ export function forgetDataKey(): void {
   dbSeed = null;
   if (deviceKey) deviceKey.fill(0);
   deviceKey = null;
+  // Web keeps its own unwrapped copy so it can be re-derived through the gate;
+  // forgetting the vault's copy while leaving that one would make "wipe on
+  // lock" a lie. A no-op on native, which has no such copy.
+  forgetUnlockedDeviceKey();
 }
 
 // --- persistence ------------------------------------------------------------
@@ -240,7 +262,7 @@ export async function createLocalVault(): Promise<void> {
   const seed = generateDataKey(); // same shape, different job -- see wrappedDbSeedByDevice
   const device = generateDeviceKey();
 
-  await SecureStore.setItemAsync(DEVICE_KEY_ITEM, bytesToHex(device), SECURE_STORE_OPTIONS);
+  await writeDeviceKey(bytesToHex(device));
   await writeVault({
     wrappedByDevice: wrapWith(key, device),
     wrappedDbSeedByDevice: wrapWith(seed, device),
@@ -274,7 +296,7 @@ export async function unlockWithDeviceKey(): Promise<boolean> {
   const vault = await readVault();
   if (!vault) return false;
 
-  const hex = await SecureStore.getItemAsync(DEVICE_KEY_ITEM, SECURE_STORE_OPTIONS);
+  const hex = await readDeviceKey();
   if (!hex) return false;
 
   try {
@@ -292,15 +314,23 @@ export async function unlockWithDeviceKey(): Promise<boolean> {
 
 /** Readable before the database is open, which is the whole reason the
  *  settings are mirrored into the vault blob. */
-export async function getLockSettings(): Promise<LockSettings> {
+/**
+ * The pre-13b home of the lock settings, kept for one purpose: reading the
+ * value off a device that upgraded into this stage.
+ *
+ * Ownership moved to `lib/settings/lockSettings.ts` when Adam made settings
+ * sync across devices (2026-08-25). It could not move by having this file call
+ * the settings layer, because that closes an import cycle --
+ * `vault.ts -> syncedSettings -> powersync/db -> vault.ts`, since db.ts has
+ * needed `getDatabaseKey()` from here since Stage 6. So the settings layer
+ * calls DOWN into this instead, which is the direction that does not loop.
+ *
+ * `writeVault({...vault, lock})` is deliberately gone. Two writable copies of
+ * one setting is how they drift; this one is now read-only history.
+ */
+export async function getLegacyLockSettings(): Promise<LockSettings> {
   const vault = await readVault();
   return vault?.lock ?? DEFAULT_LOCK_SETTINGS;
-}
-
-export async function setLockSettings(lock: LockSettings): Promise<void> {
-  const vault = await readVault();
-  if (!vault) return;
-  await writeVault({ ...vault, lock });
 }
 
 // --- recovery code ----------------------------------------------------------
