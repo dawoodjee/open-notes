@@ -1705,6 +1705,67 @@ available and supported. So Phase 0's real question is not *whether* the bytes
 can be encrypted — it is **where the key lives in a browser**, which is the part
 that has no Keychain to hide behind.
 
+## Stage 13e — WEB PARITY AUDIT (branch `stage-13e-web-parity`)
+
+Web is much closer to native than this plan assumed. What was actually
+exercised in a browser, and what was not, kept separate on purpose.
+
+### Verified working on web
+
+| Area | Evidence |
+|---|---|
+| Folder CRUD + context menu | create/rename/subfolder driven through the UI |
+| Drag-to-reorder folders | Stage 12.5 — exact landing slot, both clamps, drop-in-place |
+| **Find & Replace** | ⌘F opens it; "alpha" over three occurrences reports **3 matches**; Previous/Next/Replace/Done all present |
+| Desktop chrome | **New Note and Search are both present** — this closes the plan's "reconcile where Stage 12 landed them" item. Confirmed, not re-decided. |
+| Unsupported formatting | present and genuinely `aria-disabled="true"`, `tabindex="-1"` — the Stage 12 decision to show them greyed rather than hide them, working as specified |
+| Persistence + encryption + lock | Stages 13a/13b |
+| PWA head tags in dev | manifest linked, `theme-color`, `viewport-fit=cover` |
+
+**A bug I nearly reported that was not one.** ⌘F looked broken because the body
+text contained no "Find" — the string is a *placeholder*, not visible text.
+Checking the DOM instead of the rendered text showed the bar had opened
+correctly the first time. Worth recording as a reminder that
+`innerText.includes(...)` is a weak assertion about a UI.
+
+### Not exercised in this pass, and not claimed
+
+Note-row swipe actions, trash restore/purge, sign-in, and share/export. The
+swipe path uses the same gesture-handler machinery the folder drag already
+proves on web, but "the mechanism works" is not the same claim as "this feature
+works", and it is not made here.
+
+### The editor: the blocker is gone
+
+Web has a plain-text editor because Stage 12b had to keep the whole `@tiptap`
+chain out of the bundle. **That blocker is a resolution artefact and it is now
+fixed** — the library's web build loads:
+
+```
+LOADED. exports: EnrichedTextInput, EnrichedText
+```
+
+npm hoisted half the tiptap stack to the top level and left half nested inside
+`react-native-enriched-html`, and the two halves could not see each other:
+hoisted `@tiptap/extension-history` imports `@tiptap/extensions`, which exists
+only nested. **Not a version conflict** — every copy in the tree is 3.27.1.
+
+The fix hands Metro a resolution ORIGIN inside the library rather than a path,
+so Node's own upward walk finds nested packages nested and the top-level ones at
+the top. Two earlier attempts are recorded in `metro.config.js` because each
+looked right: a single alias produced whack-a-mole across a dozen packages, and
+redirecting names to paths broke subpath exports
+(`@tiptap/extensions/placeholder`). **No new dependency** — only a path.
+
+**Deliberately stopped here.** The alias is inert until something imports the
+library on web; wiring `RichEditor.web.tsx` onto `EnrichedTextInput` is a real
+sub-phase — props API, HTML in/out, the echo ledger, formatting commands, and
+Find's selection integration — and it touches the note content path, which is
+encrypted and merge-sensitive. That is not work to start at the end of a long
+session. It is now unblocked and costed rather than unknown.
+
+---
+
 ## Stage 13d — LIVE CHECKLIST (branch `stage-13d-pwa`)
 
 - [x] **1. Manifest, icons, head tags.** `public/manifest.webmanifest`, 192/512
