@@ -34,8 +34,17 @@ export const ENCRYPTED_DB_FILENAME = 'notes-v2.db';
  * The reason this works without a key: SQLCipher defers key verification to
  * the first read, so open() succeeds on any file. It's the query that would
  * fail with "file is not a database", and we never run one.
+ *
+ * ASYNC ONLY TO MATCH WEB, and worth stating so nobody "simplifies" it back.
+ * The body here is synchronous -- op-sqlite's delete() is -- and this returns
+ * an already-settled promise. But `migrateToEncrypted.web.ts` removes OPFS
+ * entries, which cannot be synchronous, and every caller in VaultContext
+ * follows this immediately with createLocalVault() + initPowerSync(). An
+ * unawaited delete there races the reopen. One signature across both platforms
+ * means one calling discipline, instead of a rule about which platform you have
+ * to await on.
  */
-export function wipeLocalDatabase(): void {
+export async function wipeLocalDatabase(): Promise<void> {
   for (const name of [ENCRYPTED_DB_FILENAME, LEGACY_DB_FILENAME]) {
     try {
       open({ name }).delete();
