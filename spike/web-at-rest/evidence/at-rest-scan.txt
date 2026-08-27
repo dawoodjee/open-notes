@@ -1,0 +1,58 @@
+Running full sequence...
+
+=== Writing to spike-plain.db (PLAINTEXT) ===
+  wrote notes=1, note_sync_base=1, ui_state=1
+  db closed (flushed to storage)
+
+=== Writing to spike-encrypted.db (ENCRYPTED) ===
+  wrote notes=1, note_sync_base=1, ui_state=1
+  db closed (flushed to storage)
+
+============ OPFS-backed VFS (OPFSCoopSyncVFS) ============
+  wrote 1 plaintext row via OPFS VFS
+
+============ Scanning raw browser storage ============
+scanner self-test (must be FOUND): PASS
+
+IndexedDB databases: spike-encrypted.db, spike-plain.db
+
+--- IndexedDB: spike-encrypted.db (61 blobs, 120.6 KB) ---
+  not readable           noteBody
+  not readable           syncBase
+  not readable           folderName
+  not readable           metadata
+
+--- IndexedDB: spike-plain.db (61 blobs, 120.5 KB) ---
+  not readable           noteBody
+  READABLE IN THE CLEAR  syncBase
+  not readable           folderName
+  READABLE IN THE CLEAR  metadata
+
+OPFS files: /spike-opfs.db-wal, /spike-opfs.db-journal, /spike-opfs.db, /.ahp-9kk37j0xj3/9.tmp, /.ahp-9kk37j0xj3/8.tmp, /.ahp-9kk37j0xj3/7.tmp, /.ahp-9kk37j0xj3/6.tmp, /.ahp-9kk37j0xj3/5.tmp, /.ahp-9kk37j0xj3/4.tmp, /.ahp-9kk37j0xj3/3.tmp, /.ahp-9kk37j0xj3/2.tmp, /.ahp-9kk37j0xj3/1.tmp, /.ahp-9kk37j0xj3/0.tmp
+
+--- OPFS (all files) (13 blobs, 120.0 KB) ---
+  not readable           noteBody
+  READABLE IN THE CLEAR  syncBase
+  not readable           folderName
+  READABLE IN THE CLEAR  metadata
+
+============ Reopening the encrypted db ============
+  correct key -> read back note_sync_base.body = "CANARY_SYNCBASE_BODY_4d5e6f"
+  matches what we wrote: YES
+  wrong key   -> rejected: file is not a database
+
+============ Non-extractable key in IndexedDB ============
+  stored one non-extractable and one extractable key
+  reloaded handle still decrypts: YES
+  extractable flag on reloaded key: false
+  exportKey() refused: InvalidAccessError
+  raw key bytes of the EXTRACTABLE key found on disk: no
+    (the non-extractable one has no raw form to find)
+
+============ Proposed design: KEK-wrapped db key ============
+  persisted: non-extractable KEK handle + wrapped db key
+  unwrapped db key matches: YES
+  reopened encrypted db with unwrapped key: "CANARY_SYNCBASE_BODY_4d5e6f"
+  db key recoverable from IndexedDB: no
+
+=== done ===

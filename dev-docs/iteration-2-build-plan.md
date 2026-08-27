@@ -1659,7 +1659,20 @@ a sync round-trip, and Skills stays pinned and undraggable.
 
 **Direction (decided):** build web out properly as an **installable, offline-capable PWA** — not a degraded read-only view. Technology choice is open, judged on three criteria in this order: performs well, stays simple, and integrates with the existing Expo/PowerSync/Supabase stack without undue complexity. Don't introduce a parallel architecture to make web work.
 
-**Phase 0 — spike first, no UI (see prompt below).** The question is no longer
+**⚠️ PHASE 0 IS DONE. It was run on 2026-08-21 and the answer is GO** —
+`dev-docs/web-at-rest-findings.md`, with a 2026-08-25 addendum re-proving it on
+this app's own pipeline. It sat on an unmerged branch (`spike/powersync-web-at-rest`,
+off Stage 10) that nothing in this plan pointed at, so two later sessions
+believed it still needed running. **This is the third time on this project that
+work has existed only in a commit message.** The prompt below is kept because it
+is the brief the spike answered, not because it is still to be run.
+
+**All four questions are now answered (2026-08-25) and Phase 1 is unblocked.**
+Encryption is mandatory, the bundle cost is approved, there is no web lock
+screen, and the public guarantee wording is settled — see the findings doc and
+the Decisions Log.
+
+**Phase 0's original framing (superseded, kept for the reasoning).** The question is no longer
 "can web run at all" — Stage 12g settled that — but **what web is allowed to
 write down**. Web today deliberately persists *nothing*: an in-memory VFS and an
 in-memory key store, so a refresh is a new session with an empty database. That
@@ -1917,6 +1930,30 @@ One blocking item; the rest is settled and recorded in the Decisions Log below.
 ## Decisions Log
 
 *(iteration-2-specific decisions, same terse format as `dev-docs/mvp-build-plan.md` — decision / reasoning / verification / status. Don't duplicate MVP-era entries.)*
+
+### 2026-08-25 (later) — Web gets a real lock: biometric, or a 6-digit PIN
+- **Decision:** Reverses the "no lock screen" call above, made hours earlier. Adam: *"on mobile and macos, the web app should use the usual biometric lock, if these are unavailable without locking the whole computer, a 6 digit pin can secure the app."* Locking **wipes the keys from memory**; unlocking re-derives them. Lock settings **inherit from native, and all settings sync across devices**.
+- **Reasoning:** The earlier call rested on "without WebAuthn PRF there is nothing real behind a web lock screen". That premise was too pessimistic — PRF *is* available on the platforms Adam named (Touch ID on macOS, Face ID on iOS Safari 18+, Android), and where it is not, a PIN combined with the non-extractable browser key is a genuine gate rather than a decorative one. Adam's position is that the web app should not be the weak platform.
+- **Consequence accepted:** Web's lock is now **stronger than native's**, which is a deliberate asymmetry rather than an oversight — native keeps keys resident while locked so sync continues in a pocket (`lib/crypto/vault.ts:160-168`); web discards them, so a locked tab holds nothing. It also means a locked web tab stops syncing until unlocked. The PIN adds a credential the app did not have, and Stage 6.5 removed one for good reason — so the PIN is **never** the sole protection: the non-extractable KEK is a required input, which is what stops an attacker with the files from attempting even one guess. The 12-word recovery code remains the independent path if the PIN is forgotten or the authenticator is lost.
+- **Status:** planned across 13a/13b/13c. **The biometric path cannot be verified here** — no platform authenticator is available to this browser, so PRF needs Adam's hands on a Mac and a phone. The PIN path is fully testable.
+
+### 2026-08-25 (later) — Settings sync, and the boot circularity it creates
+- **Decision:** A new synced `user_settings` table (owner-only RLS) becomes the source of truth for lock settings (13b) and then appearance/theme/bullet style (13c). `secureStorage` keeps a **local mirror** that boot reads.
+- **Reasoning:** Adam asked for settings to sync. A synced setting alone cannot work for the lock: reading PowerSync needs the database, which needs the key, which needs the unlock, which needs the lock setting — circular. The mirror breaks it, and it is not a new invention: `vault.ts:292` already mirrors lock settings into the vault blob for exactly this reason ("readable before the database is open").
+- **Consequence accepted:** Two copies of every setting, so a sync conflict or a stale mirror is now possible where it was not before; the mirror is authoritative at boot and the table wins afterwards. Also a **schema change** — new migration file, applied locally then `supabase db push`, never an edit to an applied migration.
+- **Status:** planned; 13b carries lock settings, 13c the rest.
+
+### 2026-08-25 — Web ships encrypted (the lock half of this was REVERSED same day — see below)
+- **Decision:** Adam cleared all three remaining Phase 0 gates. (a) Encryption at rest on web is **mandatory** — a missing key is a hard failure at open time, mirroring native's `getDatabaseKey()` discipline. (b) The ~+0.2 MB net WASM cost is **approved**. (c) The web build gets **no lock screen**. Adam: *"Security is mandatory, the user will be expected to keep their computer locked. Not our problem if their security is lax."* Final public wording is in `dev-docs/web-at-rest-findings.md`.
+- **Reasoning:** Without WebAuthn PRF there is nothing real behind a web lock screen — it would be a dialog that implies a protection the browser cannot provide, which is worse than its absence. The OS lock is the honest boundary, and the user is the right party to own it. Encryption stays mandatory regardless, because it defends the case the user cannot control: files copied off the machine.
+- **Consequence accepted:** On the web, an attacker sitting at an unlocked machine gets the notes — there is no second gate. That is a real difference from the phone app and the public wording states it in those words rather than hedging. It also means `LockSettings` and the `locked` vault state stay native-only, and the web build reports the lock as *unavailable* rather than *off*.
+- **Status:** the encryption and bundle-size halves stand. **The "no lock screen" half was reversed the same day** — see the next entry. The public wording below is therefore also superseded; it described a build with no lock.
+
+### 2026-08-25 — `OPFSCoopSyncVFS`, not the IndexedDB default
+- **Decision:** When web persistence lands, use `WASQLiteVFS.OPFSCoopSyncVFS`.
+- **Reasoning:** `vfs.js` routes only `IDBBatchAtomicVFS` through the async module factory, so with encryption on it needs `mc-wa-sqlite-async.wasm` (2.50 MB) where OPFS needs `mc-wa-sqlite.wasm` (1.31 MB). OPFSCoopSync is *also* the SDK's own multi-tab/Safari recommendation, so the cheaper option is the better one — the two criteria point the same way, which is rare enough to just take.
+- **Consequence accepted:** OPFS rather than IndexedDB means slightly narrower browser support than the SDK default, and the `.ahp-*` access-handle pools are visible in origin storage. Both were exercised on this machine. The prune in `package.json`'s `powersync:assets` has to stop deleting `mc-*`, and the larger `.wasm` gets committed.
+- **Status:** decided, not yet implemented — Phase 1 owns it. A file-placement/config call rather than an escalated one; logged because it changes what gets committed to the repo.
 
 ### 2026-08-23 — Drag-to-reorder is hand-built, not a dependency
 - **Decision:** Adam chose option 1 of three. Build folder drag-to-reorder directly on `react-native-gesture-handler` + Reanimated 4 (`components/ReorderableFolderList.tsx` + `lib/notes/reorder.ts`), and drop `react-native-reanimated-dnd` entirely.

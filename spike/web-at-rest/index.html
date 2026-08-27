@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>PowerSync web at-rest spike</title>
+    <style>
+      body { font-family: ui-monospace, Menlo, monospace; margin: 24px; background:#111; color:#eee; }
+      h1 { font-size: 16px; }
+      button { font: inherit; padding: 6px 10px; margin-right: 8px; }
+      #out { white-space: pre-wrap; margin-top: 16px; line-height: 1.5; }
+      .leak { color:#ff5555; font-weight:bold; }
+      .safe { color:#50fa7b; font-weight:bold; }
+      .k { color:#8be9fd; }
+    </style>
+  </head>
+  <body>
+    <h1>PowerSync web — what actually lands on disk</h1>
+    <div>
+      <button id="plain">1. Write PLAINTEXT db</button>
+      <button id="enc">2. Write ENCRYPTED db</button>
+      <button id="scan">3. Scan storage for canary</button>
+      <button id="verify">4. Reopen encrypted db</button>
+      <button id="opfs">5. OPFS VFS test</button>
+      <button id="keys">6. Key storage test</button>
+      <button id="arch">7. Proposed design</button>
+      <button id="wipe">Wipe all storage</button>
+    </div>
+    <div id="out">Ready.</div>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
