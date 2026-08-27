@@ -1560,14 +1560,15 @@ only in a chat log.
       grip — confirmed on iPhone 17 Pro. Drag proved end to end in the browser
       (table below).
 
-      **One checkpoint line is short of proved, and it is not a formality.**
-      "The new folder order survives a sync round-trip" was not observed. What
-      *was* checked: `sort_order` is `column.integer` in `lib/powersync/schema.ts`
-      and the `user_folders` bucket is `select * from folders`, so the column
-      replicates and a `sort_order` UPDATE enters the CRUD queue exactly as a
-      rename does — and rename's round-trip is proved from Stage 11. That is a
-      sound argument, not an observation. **Adam's hands:** drag a folder on the
-      phone, confirm the order on the iPad. One drag settles it.
+      **The last checkpoint line is now observed.** "The new folder order
+      survives a sync round-trip" could not be proved here — injected simulator
+      touches never reach a gesture-handler recogniser — so it stood as a sound
+      argument rather than an observation: `sort_order` is `column.integer` in
+      `lib/powersync/schema.ts`, the `user_folders` bucket is
+      `select * from folders`, so the column replicates and a `sort_order`
+      UPDATE enters the CRUD queue exactly as a rename does. **Adam confirmed it
+      by hand on 2026-08-27, dragging a folder on the iPhone 17 Pro: worked
+      fine.** Stage 12.5 is complete.
 
 **The gesture cannot be tested on a simulator, so it was tested in a browser.**
 Injected `simctl` touches drive React Native's own responder system but never
@@ -1752,9 +1753,20 @@ detect the bug it was meant to catch.** The precedence moved into a pure
       a deterministic `(user_id, key)` row id. Every constraint proven to reject
       what it should; RLS on with four owner-only policies; in the powersync
       publication with a role grant; PowerSync restarted clean and replicates it.
-- [ ] **2. `supabase db push` to LIVE — ADAM.** Blocked: the CLI prompts for the
-      database password interactively, which is a credential I will not enter.
-      One command, and 13b is not shippable to a device until it runs.
+- [x] **2. `supabase db push` to LIVE — done by Adam, 2026-08-27.** The CLI
+      prompts for the database password interactively, which is a credential I
+      will not enter. **Verified afterwards rather than assumed:** the live
+      PostgREST endpoint returns `42501 permission denied` for `user_settings`
+      under the anon key — byte-identical to how `folders` behaves, and exactly
+      right, since the migration grants to `authenticated` only and never to
+      `anon`. A missing table would have returned `PGRST205`.
+
+      ⚠️ **Still outstanding on live, and it is a dashboard action:**
+      `powersync/sync-streams.yaml` is the reviewable copy, not the deployed
+      one — `docs/two-stacks.md` says the PowerSync Cloud dashboard is the
+      source of truth for what is actually running. The `user_settings` stream
+      has to be added there or live devices sync notes and folders but never
+      settings, with every container reporting healthy.
 - [x] **3. Both sync configs.** `sync-rules.yaml` (dev, `bucket_definitions`) and
       `sync-streams.yaml` (live, Sync Streams edition 3). Different formats, both real.
 - [x] **4. Settings sync with a boot mirror.** Table is the source of truth;

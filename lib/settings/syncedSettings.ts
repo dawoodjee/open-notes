@@ -1,9 +1,9 @@
 import * as SecureStore from '@/lib/crypto/secureStorage';
-import { settingRowId } from './settingRowId';
+import { isValidSettingKey, settingRowId } from './settingRowId';
 import { getCurrentUserId } from '@/lib/auth/currentUser';
 import { getPowerSync, isPowerSyncReady } from '@/lib/powersync/db';
 
-export { settingRowId };
+export { isValidSettingKey, settingRowId };
 
 /**
  * Settings that follow the user across devices, and the mirror that makes them
@@ -116,6 +116,30 @@ export async function readSetting<T>(key: string, fallback: T): Promise<T> {
  * Sync catches up on its own schedule.
  */
 export async function writeSetting<T>(key: string, value: T): Promise<void> {
+  /**
+   * Refuse an invalid key HERE, where it is a loud local error, rather than
+   * letting Postgres refuse it later, where it is not.
+   *
+   * `user_settings_key_shape` constrains keys to `^[a-z0-9]+(\.[a-z0-9]+)*$`.
+   * A key that breaks it -- `bulletStyle.v1` was the one that nearly shipped --
+   * type-checks, writes to the mirror happily, and only fails on UPLOAD, inside
+   * the connector, where `isStructuralError()` does not classify a constraint
+   * violation. It would retry forever and block every operation queued behind
+   * it: no error surface, no sync, and nothing on screen to explain it.
+   *
+   * A test covers the keys this app ships today (`isValidSettingKey`), but a
+   * test only covers the list someone remembered to add to. This covers the
+   * next caller, including one written by someone who never read the migration.
+   * The throw is deliberate rather than a silent skip -- a preference that
+   * cannot sync should fail where it is written.
+   */
+  if (!isValidSettingKey(key)) {
+    throw new Error(
+      `Invalid setting key "${key}". Keys must match ^[a-z0-9]+(\\.[a-z0-9]+)*$ ` +
+        '(lowercase, dot-separated) or Postgres will reject the row and jam the upload queue.'
+    );
+  }
+
   const encoded = JSON.stringify(value);
   await SecureStore.setItemAsync(MIRROR_PREFIX + key, encoded);
 
