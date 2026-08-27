@@ -43,6 +43,7 @@ import {
   deleteFolderInDB,
   mapRowToFolder,
   moveTopLevelFolder,
+  moveTopLevelFolderToIndex,
   renameFolderInDB,
   seedSkillsFolderIfSettled,
   setFolderGroupByDate,
@@ -868,6 +869,14 @@ export default function NotesLayout() {
     }
   }, []);
 
+  const handleMoveFolderToIndex = useCallback(async (folderId: string, toIndex: number) => {
+    try {
+      await moveTopLevelFolderToIndex(folderId, toIndex);
+    } catch (err) {
+      console.error('Failed to reorder folder:', err);
+    }
+  }, []);
+
   const handleRestoreNote = useCallback(async (id: string) => {
     try {
       await restoreNoteInDB(id);
@@ -1079,6 +1088,7 @@ export default function NotesLayout() {
           onToggleIncludeInNotes={handleToggleIncludeInNotes}
           onToggleGroupByDate={handleToggleGroupByDate}
           onMoveFolder={handleMoveFolder}
+          onMoveFolderToIndex={handleMoveFolderToIndex}
         />
 
         {/* ========================================================= */}

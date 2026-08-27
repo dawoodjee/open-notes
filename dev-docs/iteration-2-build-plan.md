@@ -2,7 +2,7 @@
 
 **Governs:** iteration 2 only (folders, list view, floating menu chrome, web parity, website, export/import, env toggle). MVP history stays in `dev-docs/mvp-build-plan.md` — don't merge this into it; keep the two files separate so a Claude Code session planning a folder icon doesn't have to read Stage 0–8 and the E2EE Decisions Log first.
 
-**Status (2026-08-22):** Stage 9 ✅ merged · Stage 10 ✅ merged · **Stage 11 ✅ merged to `main`** — every checkpoint item verified except web, which is blocked until Stage 13 (the accent-border rule itself was since confirmed on iPad). **Stage 11.5 ✅ done** — TenTap and the WebView are gone; the editor is native. Spike said NO-GO, Adam overrode it, and a wrap-on-read migration preserved old notes anyway. See `docs/editor-migration-findings.md` plus the Decisions Log. Stage 12, 12.5, 13–16 not started.
+**Status (2026-08-23):** Stage 9 ✅ merged · Stage 10 ✅ merged · **Stage 11 ✅ merged to `main`** — every checkpoint item verified except web, which is blocked until Stage 13 (the accent-border rule itself was since confirmed on iPad). **Stage 11.5 ✅ done** — TenTap and the WebView are gone; the editor is native. Spike said NO-GO, Adam overrode it, and a wrap-on-read migration preserved old notes anyway. See `docs/editor-migration-findings.md` plus the Decisions Log. Stage 12, 12.5, 13–16 not started.
 
 > **Stage 11 checkpoint — what was actually verified, and how.**
 > - **Date buckets** — unit tests (`npm test`, 86 tests overall) walking every boundary from both sides, including 6-vs-7 days and a future timestamp collapsing into Today.
@@ -1486,6 +1486,146 @@ BOTH platforms get both features. Separate layouts per platform — replace-fiel
 
 ---
 
+## Stage 12.5 — LIVE CHECKLIST (started 2026-08-22, branch `stage-12.5-sheets-and-dnd`)
+
+Updated as each item lands, so progress is inspectable in a diff rather than
+only in a chat log.
+
+- [x] **1. Four-library native rebuild.** ✅ Done. `ExpoBlur (15.0.8)`,
+      `Pulsar (1.7.0)` + `PulsarHaptics (1.4.0)`, `ReactNativeBottomSheet
+      (0.16.2)` all installed; `RNPulsarSpec` and `ReactNativeBottomSheetSpec`
+      codegen ran. `react-native-reanimated-dnd` has no native code, correctly.
+      Sign-in state survived the overwrite install.
+      **`expo run:ios` exits 1 even on success** — it calls `osascript` to bring
+      the Simulator window forward, which is the same Automation permission that
+      blocks rotation. The build and install both completed; launch with
+      `xcrun simctl launch` instead of trusting the exit code.
+      *(original item below)*
+- [ ] ~~**1. Four-library native rebuild.**~~ `react-native-pulsar` and `expo-blur`
+      have been in `package.json` since 12a without ever being in the binary;
+      this stage adds two more, so one prebuild pays for all four.
+      `LANG` is EMPTY in this shell — it must be a UTF-8 locale or `pod install`
+      dies on an ASCII-8BIT encoding error.
+- [x] **2. `react-native-pulsar` resolves.** ✅ Proved, not assumed: a temporary
+      `console.log` in the lazy loader printed `[haptics] RNPulsar loaded` on a
+      real button press, then was removed. Worth doing explicitly because the
+      guarded require is designed to swallow exactly this failure.
+      *(original item below)*
+- [ ] ~~**2. `react-native-pulsar` resolves.**~~ Not "haptics feel right" — no
+      simulator has a Taptic Engine. The check is that `RNPulsar` is registered,
+      which the lazy require currently swallows.
+- [x] **3. `FolderPickerSheet` on the native bottom sheet.** ✅ Scrim, rounded
+      corners, correct height, disabled rows intact, and drag-to-dismiss — which
+      the Gluestack version never had — verified working.
+- [x] **4. `SettingsDialog` on the native bottom sheet.** ✅ Sub-view navigation
+      (Settings → Appearance) verified; the sheet keeps its height rather than
+      resizing under the thumb as you push in.
+- [x] **5. Drag-to-reorder folders.** ✅ Done — built directly on
+      gesture-handler + Reanimated 4, **no dependency**. Adam chose option 1,
+      2026-08-23.
+
+      `react-native-reanimated-dnd` was tried first and is unusable at BOTH
+      published versions:
+      - `1.1.0` peers on `react-native-reanimated >= 3.0.0` but calls
+        `useAnimatedGestureHandler`, which **Reanimated 4 removed**. It
+        installs, type-checks and builds, then throws
+        `useAnimatedGestureHandler is not a function` from `useSortable` the
+        moment edit mode renders. The peer range is simply wrong.
+      - `2.0.0` requires `react-native-reanimated >= 4.2.0`; Expo SDK 54 pins
+        `~4.1.1` (we are on 4.1.7) and `expo install --check` treats that as
+        current.
+
+      What shipped instead:
+      - `lib/notes/reorder.ts` — `moveToIndex`, `targetIndexFor`, `rowShift`,
+        with 16 tests. The last two are worklets; all three are pure, which is
+        the only reason any of this is testable (see below).
+      - `lib/powersync/folders.ts` — `moveTopLevelFolderToIndex`, renumbering
+        the level contiguously from 0 in one transaction. Deliberately NOT the
+        swap `moveTopLevelFolder` uses; see the Decisions Log.
+      - `components/ReorderableFolderList.tsx` — the pan, the displacement, and
+        the settle.
+      - `FolderRow` gains `dragHandle`, which replaces the up/down arrows in
+        edit mode, and publishes `onMove` as VoiceOver `moveUp`/`moveDown`
+        actions so reordering does not become sighted-only.
+      - The sidebar's `ScrollView` is now gesture-handler's, so
+        `blocksExternalGesture` has a recogniser to outrank.
+
+      **Children are hidden in edit mode.** Load-bearing, not tidiness: the
+      drag maths assumes every row is one row tall, and an expanded parent is as
+      tall as its subtree. Reordering was already top-level-only, so this also
+      stops the list offering rows that would refuse to be dragged.
+- [x] **6. Checkpoint.** `tsc` clean, **167/167 tests** (151 + 16), `expo lint`
+      at the 8-warning / 0-error baseline. Both sheets behave as before with no
+      Gluestack workaround left in either file. Skills stays pinned and has no
+      grip — confirmed on iPhone 17 Pro. Drag proved end to end in the browser
+      (table below).
+
+      **One checkpoint line is short of proved, and it is not a formality.**
+      "The new folder order survives a sync round-trip" was not observed. What
+      *was* checked: `sort_order` is `column.integer` in `lib/powersync/schema.ts`
+      and the `user_folders` bucket is `select * from folders`, so the column
+      replicates and a `sort_order` UPDATE enters the CRUD queue exactly as a
+      rename does — and rename's round-trip is proved from Stage 11. That is a
+      sound argument, not an observation. **Adam's hands:** drag a folder on the
+      phone, confirm the order on the iPad. One drag settles it.
+
+**The gesture cannot be tested on a simulator, so it was tested in a browser.**
+Injected `simctl` touches drive React Native's own responder system but never
+fire a `UIGestureRecognizer`, so every gesture-handler recogniser in the app is
+invisible to them. On web, gesture-handler listens on pointer events — which
+*can* be synthesised. Four folders (Alpha/Bravo/Charlie/Delta) created in the
+session-only web database, then:
+
+| Case | Result |
+|---|---|
+| Alpha (0) dragged +132px = 3 rows | lands at index 3 ✅ |
+| Delta (2) dragged −88px = 2 rows | lands at index 0 ✅ |
+| First row dragged −400px | clamps, no write ✅ |
+| Last row dragged +400px | clamps, no write ✅ |
+| Any row dragged 6px (under half a row) | springs back, no write ✅ |
+| Mid-drag | neighbours slide out of the way, gap opens at the target ✅ |
+
+The order re-renders from `SELECT … FROM folders ORDER BY sort_order`, so the
+list changing IS proof the write landed rather than a local animation.
+
+What this does **not** prove, stated plainly: whether the pan wins against
+iOS's scroll view on a real finger. Two independent defences are in
+(`blocksExternalGesture`, plus `scrollEnabled={false}` for the duration), and
+haptics still need a physical device — no simulator has a Taptic Engine.
+
+**A regression this caught, unrelated to the drag:** the browser run opened on a
+red error screen — `(0, _reactNativeWebDistIndex.codegenNativeComponent) is not
+a function`. `@swmansion/react-native-bottom-sheet` is a Fabric component with
+no web implementation, so items 3 and 4 had silently taken web from working
+(12g) back to not booting. Fixed with `components/ModalSheet.tsx` /
+`.web.tsx` — a platform seam, because the throw is at *import*, so a guard at
+the call site could never have caught it. The web sheet keeps the presentation
+and the prop shape and honestly drops drag-to-dismiss.
+
+**Two traps found on the device, both silent:**
+
+*Numeric detents are POINTS, not fractions.* `resolveDetent` returns a number
+unchanged, so `detents={[0, 0.8]}` opened the sheet **eight tenths of one point**
+tall. It rendered nothing and threw nothing — the menu just closed and the screen
+looked unchanged. Now `useWindowDimensions().height * 0.8`, reproducing the
+`h-4/5` the Gluestack version had.
+
+*A native sheet has no scrim unless you name one.* The Gluestack version had
+`<ModalBackdrop />`; without `scrimColor` the sheet presented at the right height
+and was invisible against the app, because both are `bg-background` and the
+dimming was the only thing separating them.
+
+**Version call, made not escalated — SUPERSEDED 2026-08-23** (the package is
+gone; kept because the reasoning is why we did not bump Reanimated either):
+`react-native-reanimated-dnd@1.1.0`, not 2.0.0. 2.0.0 peers on `react-native-reanimated >= 4.2.0` and Expo SDK 54 pins
+`~4.1.1` (`expo install --check` agrees). Bumping the core animation library —
+which the motion primitives, the icon button, the format bar and the vendored
+swipeable all sit on — to satisfy folder reordering is the wrong way round. Same
+reasoning as pinning `@powersync/web@2.1.0` rather than dragging
+`@powersync/common` up under native's feet.
+
+---
+
 ## Stage 12.5 — Native sheets + drag-to-reorder folders (NEW, added 2026-08-21)
 
 Two adopted libraries, batched into one stage because both are chrome-level swaps over
@@ -1519,44 +1659,87 @@ a sync round-trip, and Skills stays pinned and undraggable.
 
 **Direction (decided):** build web out properly as an **installable, offline-capable PWA** — not a degraded read-only view. Technology choice is open, judged on three criteria in this order: performs well, stays simple, and integrates with the existing Expo/PowerSync/Supabase stack without undue complexity. Don't introduce a parallel architecture to make web work.
 
-**Phase 0 — spike first, no UI (see prompt below).** The at-rest encryption story is genuinely unsolved: `@powersync/web` uses wa-sqlite/WASM, which has no SQLCipher equivalent, so whole-file encryption can't simply be ported from native. This phase's only deliverable is a written answer plus a go/no-go, before any UI time is spent.
+**Phase 0 — spike first, no UI (see prompt below).** The question is no longer
+"can web run at all" — Stage 12g settled that — but **what web is allowed to
+write down**. Web today deliberately persists *nothing*: an in-memory VFS and an
+in-memory key store, so a refresh is a new session with an empty database. That
+was chosen precisely so this spike would not be pre-empted. Phase 0's only
+deliverable is a written answer plus a go/no-go, before any UI time is spent.
 
-**Known breakage waiting for this stage** (confirmed 2026-08-21, `main` @ `b586da5`): web currently **fails to boot** with `Appearance.setColorScheme is not a function`, thrown from `ThemeContext`. Pre-existing since Stage 9, deliberately not patched in Stages 10–12 — web is its own stage by decision, and a one-off shim before the Phase 0 spike would be guessing at an architecture that spike is meant to settle. Expect web to be broken on `main` until this stage runs; that is intended, not drift.
+**What Stage 12g already settled, so the spike does not re-ask it** (main @
+`a5ccd9f`):
+- Web **boots and runs the real app**. The `Appearance.setColorScheme` failure is
+  fixed; so are `expo-secure-store` and `expo-navigation-bar`.
+- `@powersync/web` is installed and working, **pinned to 2.1.0** — the last
+  release whose peer range accepts the `@powersync/common@2.0.0` that the native
+  SDK pins. 2.2.0 would drag the shared core up under native's feet.
+- The platform split already exists and is small:
+  `lib/crypto/secureStorage.ts` / `.web.ts`, `lib/powersync/openDatabase.ts` /
+  `.web.ts`, `lib/powersync/migrateToEncrypted.web.ts`. `lib/crypto/` proper and
+  `VaultContext` are shared **unchanged**.
+- The wa-sqlite worker is pre-bundled and committed in `public/@powersync/`,
+  with `metro.config.js` aliasing `@powersync/web` to its
+  `index.react_native_web.js` build. Running wa-sqlite *in the tab* is a dead
+  end under Metro — `import.meta` in the Emscripten module kills the bundle.
+
+**A correction the spike must start from.** This stage's original brief said web
+"has no SQLCipher equivalent, so whole-file encryption can't simply be ported."
+**That is wrong.** `@powersync/web` accepts an `encryptionKey` and encrypts the
+database file with **ChaCha20 via SQLite3MultipleCiphers** (see its README, and
+`encryptionKey` in `db/adapters/options.d.ts`). Whole-file encryption on web is
+available and supported. So Phase 0's real question is not *whether* the bytes
+can be encrypted — it is **where the key lives in a browser**, which is the part
+that has no Keychain to hide behind.
 
 **Phase 1+ (blocked on Phase 0's outcome):**
-- Fix the `Appearance.setColorScheme` boot failure above as the first Phase 1 task — nothing else on web is testable until it boots.
+- Turn on whatever persistence Phase 0 recommends, and retire the
+  "this session only" badges (`isSessionOnly`, `isSessionOnlyDatabase`) that
+  currently tell the truth about a memory-only build.
 - Feature-parity pass against the finalized native UI from Stages 10–12.
-- PWA installability: manifest, service worker, offline shell, install prompt. (The TWA article you linked is an Android-packaging path — evaluate against a plain PWA during Phase 0's write-up rather than committing now.)
-- Reconcile "move New Note + search into the editor section" against wherever Stage 12 landed them — confirm, don't re-decide.
+- PWA installability: manifest, service worker, offline shell, install prompt.
+- The web editor is **plain text and read-only for formatted notes**
+  (`components/RichEditor.web.tsx`). Decide whether Stage 13 raises it, and if
+  so onto what — the `@tiptap` chain the library ships for web is marked
+  experimental and currently unresolvable in this tree.
+- Reconcile "move New Note + search into the editor section" against wherever
+  Stage 12 landed them — confirm, don't re-decide.
 
-**Prompt — Phase 0 spike (ready to run, no screenshots needed):**
+**Prompt — Phase 0 spike (REWRITTEN 2026-08-25; the pre-12g version is dead —
+it told you to fix a boot failure that no longer exists and not to add a package
+that is already installed):**
 
 ```
-Create a branch `spike/powersync-web-at-rest` off main. This is an INVESTIGATION, not a feature. Do not build UI. Do not modify any existing app code outside a throwaway spike directory. The deliverable is a written recommendation plus working proof, and a clear go/no-go.
+Create a branch `spike/powersync-web-at-rest` off main. This is an INVESTIGATION, not a feature. Do not build UI. Do not modify existing app code outside a throwaway spike directory. The deliverable is a written recommendation plus working proof, and a clear go/no-go.
 
-CONTEXT: The app currently runs on PowerSync with native op-sqlite + SQLCipher, giving whole-file encryption at rest. Note title/body (and, as of Stage 10, folder names) are additionally encrypted client-side with AES-GCM via @noble/ciphers before they ever reach the server — that layer is platform-independent and ports to web unchanged. What does NOT port is the SQLCipher whole-file layer: PowerSync's web client uses @powersync/web with wa-sqlite/WASM, which has no SQLCipher equivalent. See dev-docs/mvp-build-plan.md Stage 6 for the original at-rest reasoning and Stage 6.5 for the device-native unlock model that replaced the PIN.
+CONTEXT — READ THIS BEFORE PLANNING, IT HAS CHANGED:
 
-GOAL: We intend to ship web as an installable, offline-capable PWA with real local persistence. Before committing UI time, answer definitively what at-rest protection is actually achievable in a browser, and whether it's enough.
+Native runs PowerSync on op-sqlite + SQLCipher (whole-file encryption at rest), with note title/body and folder names ADDITIONALLY encrypted client-side with AES-GCM via @noble/ciphers before they reach the server. That field layer is platform-independent and already runs on web unchanged.
+
+Web works. Stage 12g (main @ a5ccd9f) put @powersync/web@2.1.0 in and the real app boots in a browser. It persists NOTHING on purpose: WASQLiteVFS.InMemoryVfs for the database, an in-memory Map for the vault keys. Read lib/powersync/openDatabase.web.ts and lib/crypto/secureStorage.web.ts first — the reasoning is written in them, and the two are deliberately coupled.
+
+CORRECTION TO THE OLD BRIEF: @powersync/web DOES support whole-file encryption — it takes an `encryptionKey` and uses ChaCha20 via SQLite3MultipleCiphers. The earlier claim that there is no SQLCipher equivalent on web is false. Verify this yourself rather than taking it from me, then plan around what you find.
+
+GOAL: decide what web is allowed to write to disk, and what the resulting user-facing guarantee is. The unsolved part is KEY CUSTODY, not cipher availability.
 
 INVESTIGATE AND REPORT ON:
 
-1. What @powersync/web actually persists and where — OPFS, IndexedDB, or both — and what that means for data sitting on disk after the tab closes.
+1. The persistent VFS choices @powersync/web offers (IDBBatchAtomicVFS, OPFSCoopSyncVFS, AccessHandlePoolVFS, OPFSWriteAheadVFS) — where each actually writes, durability, multi-tab behaviour, and which survive a browser clearing "site data". Say which one you would pick and why.
 
-2. Whether any credible whole-file or page-level encryption option exists for wa-sqlite/WASM. Check for SQLite encryption extensions with WASM builds, any PowerSync-supported encryption hooks, and community approaches. Report what you find honestly, including "nothing production-ready" if that's the answer — an accurate no is more useful than a strained yes.
+2. Confirm the encryptionKey path end to end on the VFS you picked: that the file on disk is genuinely unreadable without the key. Not "the API accepts it" — bytes.
 
-3. If whole-file encryption isn't available: what does the threat model actually look like with ONLY the existing client-side AES-GCM field encryption? Be specific about what stays protected (note content, folder names) versus what sits in the clear locally (ids, timestamps, trash state, folder structure, sync metadata, the ui_state and note_sync_base tables). Compare honestly to the native guarantee — this is a downgrade; quantify it rather than glossing it.
+3. KEY CUSTODY, the real question. No Keychain, no Keystore, no expo-secure-store. Evaluate: WebCrypto non-extractable CryptoKey in IndexedDB; WebAuthn PRF extension; passphrase-derived key held only in memory per session; and any combination. Judge each on (a) does the raw key ever sit recoverable on disk, (b) what does the user have to do per session, (c) what happens on a shared or stolen machine. The native app unlocks via OS biometric/passcode — say what the closest honest web equivalent is, and how far short it falls.
 
-4. Key storage in a browser. There is no Keychain/Keystore and no expo-secure-store. Evaluate the realistic options — WebCrypto non-extractable CryptoKey in IndexedDB, WebAuthn PRF extension, passphrase-derived key held only in memory per session — against: does the raw key ever sit recoverable on disk, and what's the UX cost per session? The native app unlocks via OS biometric/passcode; say what the closest honest web equivalent is.
+4. THE THREAT MODEL, stated concretely. Whatever you recommend: what is protected, and against whom? Be specific about the attacker who has the device versus the attacker who has script access to the origin — an XSS reads any key the page can read, which is the case native does not have. Name what sits in the clear locally even with the DB encrypted (ids, timestamps, trash state, folder structure, sync metadata, ui_state, note_sync_base).
 
-5. Whether the existing lib/crypto/ and VaultContext code can be shared across platforms as-is or needs a platform-split, and how large that split is.
+5. Quantify the delta versus native, honestly. This is likely a downgrade; say by how much rather than glossing it. Include what happens to the "session only" story — if persistence lands, the current in-memory design and its badges go away, and that is a user-visible change to what the app promises.
 
-6. PROVE IT: build a minimal standalone spike — @powersync/web running in a browser with a couple of rows written, closed, and reloaded — and demonstrate what is actually readable from the browser's storage inspector before and after applying whichever protection you recommend. Screenshot it. This is the part that turns the write-up from research into evidence.
+6. PROVE IT. Build a minimal spike: @powersync/web on the persistent VFS you chose, write rows, close the tab, reopen, show the data comes back. Then open the browser's storage inspector and screenshot what is actually readable on disk — WITHOUT the encryption key and WITH it. That contrast is the deliverable's evidence.
 
-7. Also evaluate PWA vs. Trusted Web Activity for distribution, briefly. TWA is an Android packaging path around a PWA, so it's a downstream question, not an alternative architecture — say whether it's worth doing at all given the app already ships native Android.
+7. PWA vs Trusted Web Activity for distribution, briefly. TWA is an Android packaging path around a PWA, so it is downstream, not an alternative architecture — say whether it is worth doing at all given the app already ships native Android.
 
-DELIVERABLE: docs/web-at-rest-findings.md — findings, the recommended approach, the honest security delta versus native, and an explicit GO or NO-GO on proceeding to web UI work. If GO, include what the resulting user-facing guarantee is in plain language, since it has to be documented publicly the same way the native E2EE guarantee is. If the answer is "web can't match native at rest," say so plainly and recommend what to ship instead — that's a legitimate outcome of this spike, not a failure.
+DELIVERABLE: docs/web-at-rest-findings.md — findings, recommendation, the honest security delta versus native, and an explicit GO or NO-GO on proceeding to web UI work. If GO, write the resulting user-facing guarantee in plain language, since it has to be documented publicly the same way the native E2EE guarantee is. "Web cannot match native at rest, ship it session-only and lean on export/import" is a legitimate outcome, not a failure — the in-memory design already works and is honest.
 
-Escalate to me before making any decision that would change the app's stated encryption guarantee, add a dependency to the main app, or alter shared crypto code. This spike should leave main untouched.
+Escalate before making any decision that changes the app's stated encryption guarantee, adds a dependency to the main app, or alters shared crypto code. Leave main untouched.
 ```
 
 **📸 SCREENSHOTS:** none required — this stage ports Stages 10–12's screenshots, doesn't need new ones.
@@ -1734,6 +1917,30 @@ One blocking item; the rest is settled and recorded in the Decisions Log below.
 ## Decisions Log
 
 *(iteration-2-specific decisions, same terse format as `dev-docs/mvp-build-plan.md` — decision / reasoning / verification / status. Don't duplicate MVP-era entries.)*
+
+### 2026-08-23 — Drag-to-reorder is hand-built, not a dependency
+- **Decision:** Adam chose option 1 of three. Build folder drag-to-reorder directly on `react-native-gesture-handler` + Reanimated 4 (`components/ReorderableFolderList.tsx` + `lib/notes/reorder.ts`), and drop `react-native-reanimated-dnd` entirely.
+- **Reasoning:** Neither published version of the library works here. `1.1.0` declares `react-native-reanimated >= 3.0.0` but calls `useAnimatedGestureHandler`, removed in Reanimated 4 — so it installs, type-checks and builds, then throws at first render. `2.0.0` needs Reanimated >= 4.2.0; Expo SDK 54 pins `~4.1.1`. Bumping the animation library that the motion primitives, the icon button, the format bar and the vendored swipeable all sit on, in order to satisfy folder reordering, is the wrong way round.
+- **Consequence accepted:** ~230 lines of gesture and animation code the project now owns and maintains. Bounded by what this list is NOT — one level, under a dozen rows, uniform height, edit mode only — so there is no nesting, virtualisation, cross-list drag or auto-scroll to get right. If a second sortable list ever appears, this is the thing to generalise rather than a library to re-evaluate.
+- **Status:** done. 167/167 tests; drag proved end to end in a browser (exact landing slot, both clamps, drop-in-place); edit-mode layout screenshotted on iPhone 17 Pro. **Not proved:** the pan winning against iOS's scroll view on a real finger — untestable here, defended twice.
+
+### 2026-08-23 — A dropped folder renumbers the level; an arrow still swaps
+- **Decision:** `moveTopLevelFolderToIndex` writes a contiguous `sort_order` across every top-level folder in one transaction. `moveTopLevelFolder` (the arrows, and now the VoiceOver actions) keeps its two-row swap.
+- **Reasoning:** A drop lands on an arbitrary slot. Dragging the first folder to the fourth is a rotation, not a swap, and expressing it as a chain of swaps would write the same rows anyway while passing through orders the user never saw.
+- **Consequence accepted:** Two devices dragging concurrently resolve last-writer-wins over the whole level rather than merging, which the swap path avoids. At one user, one level, under a dozen folders, a clobbered reorder costs one more drag; an order nobody chose costs trust in the control. The renumber also repairs the equal-`sort_order` case the swap path has to special-case.
+- **Status:** done.
+
+### 2026-08-23 — The drag handle replaces the arrows; VoiceOver keeps them
+- **Decision:** In edit mode a grip handle takes the place of the up/down arrow pair, and `onMove` is republished as VoiceOver `moveUp`/`moveDown` actions on the row. Children of an expanded folder are not rendered while editing.
+- **Reasoning:** Three controls do not fit a 250pt iPad sidebar column, and iOS puts a grip there rather than arrows. A drag handle is unusable to a screen reader, so the arrows had to survive as *something*. Hiding children is load-bearing rather than cosmetic: the drag maths assumes uniform row height and an expanded parent is as tall as its subtree.
+- **Consequence accepted:** Sighted users lose the tap-to-nudge affordance, and the tree flattens while editing. Both are one conditional to reverse if the flattening reads as data loss rather than as a mode.
+- **Status:** done; verified on iPhone 17 Pro (grips present on the three reorderable rows, absent on Skills and both virtual rows, and the expandable folder's chevron correctly gone).
+
+### 2026-08-23 — The bottom sheet gets a platform seam
+- **Decision:** `components/ModalSheet.tsx` re-exports the native sheet; `ModalSheet.web.tsx` is a plain positioned panel with a click-to-dismiss scrim and the same prop shape.
+- **Reasoning:** `@swmansion/react-native-bottom-sheet` is a Fabric component with no web implementation. Swapping both sheets onto it in items 3 and 4 took web from working (12g) straight back to a red error screen — `codegenNativeComponent is not a function` — and because the throw is at *import*, no guard at the call site could have caught it. Only Metro's platform resolution keeps it out of the web bundle.
+- **Consequence accepted:** Web loses drag-to-dismiss and the detent physics, which are the native sheet's whole point. Re-implementing them in JS would be a second, worse sheet to maintain, and on a desktop browser there is no thumb to drag with — the scrim and the sheet's own close button are the real dismissal routes there.
+- **Status:** done; web boots again and both sheets present correctly.
 
 ### 2026-08-22 — Planning docs live in `dev-docs/`, tracked in git
 - **Decision:** Move `prd.md`, `mvp-build-plan.md`, `iteration-2-build-plan.md` and the design screenshots into `dev-docs/`, and remove them from `.gitignore`. `docs/` stays the user-facing set.

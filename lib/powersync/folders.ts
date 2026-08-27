@@ -2,6 +2,7 @@ import * as Crypto from 'expo-crypto';
 import type { AbstractPowerSyncDatabase } from '@powersync/common';
 import { getPowerSync } from './db';
 import { getCurrentUserId } from '@/lib/auth/currentUser';
+import { moveToIndex } from '@/lib/notes/reorder';
 import { encryptField, tryDecryptField } from '@/lib/crypto/noteCrypto';
 // Re-exported so callers have one import surface for folder concerns, while
 // the strings themselves live somewhere the verify scripts can reach.
@@ -397,6 +398,65 @@ export async function moveTopLevelFolder(id: string, direction: -1 | 1): Promise
       now,
       b.id,
     ]);
+  });
+}
+
+/**
+ * Drop one top-level folder into an arbitrary slot -- what a drag ends in.
+ *
+ * WHY THIS ONE RENUMBERS AND `moveTopLevelFolder` ABOVE DOES NOT. A swap is
+ * two writes and converges cleanly when two devices reorder different pairs,
+ * which is exactly why the arrow buttons use it. A drag cannot be expressed
+ * that way: dragging the first folder to the fourth slot is not a swap with
+ * the fourth, it is a rotation of everything in between, and expressing it as
+ * a chain of swaps would write the same rows anyway while also passing through
+ * intermediate orders the user never saw.
+ *
+ * The cost, stated plainly: this writes every top-level folder, so two devices
+ * dragging at the same time resolve last-writer-wins over the whole level
+ * rather than merging. At one user, one level, and under a dozen folders, a
+ * clobbered reorder costs one more drag; a chain of swaps that lands in an
+ * order nobody chose costs trust in the control.
+ *
+ * The renumber is contiguous from 0, which also repairs the equal-sort_order
+ * case `moveTopLevelFolder` has to special-case, for free.
+ */
+export async function moveTopLevelFolderToIndex(id: string, toIndex: number): Promise<void> {
+  const db = getPowerSync();
+
+  // Skills is pinned -- guarded here as well as hidden in the sidebar, for the
+  // same reason as in moveTopLevelFolder: a UI-only rule is one refactor away
+  // from being no rule at all.
+  const moving = await db.getOptional<{ kind: string }>(
+    'SELECT kind FROM folders WHERE id = ?',
+    [id]
+  );
+  if (moving?.kind === 'skills') return;
+
+  // Same ordering the sidebar renders, and with Skills excluded for the same
+  // reason -- the indices the drag produced are indices into THIS list.
+  const siblings = await db.getAll<{ id: string }>(
+    `SELECT id FROM folders WHERE parent_id IS NULL AND kind != 'skills'
+     ORDER BY sort_order ASC, created_at ASC`
+  );
+
+  const from = siblings.findIndex((s) => s.id === id);
+  if (from < 0) return;
+
+  const to = Math.max(0, Math.min(toIndex, siblings.length - 1));
+  if (from === to) return;
+
+  const next = moveToIndex(siblings, from, to);
+  const now = new Date().toISOString();
+
+  await db.writeTransaction(async (tx) => {
+    for (let i = 0; i < next.length; i++) {
+      await tx.execute('UPDATE folders SET sort_order = ?, updated_at = ? WHERE id = ?', [
+        i,
+        now,
+        next[i].id,
+      ]);
+    }
   });
 }
 
