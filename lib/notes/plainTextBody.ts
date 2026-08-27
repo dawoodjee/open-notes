@@ -1,4 +1,22 @@
 /**
+ * CURRENTLY UNUSED BY THE APP, and kept deliberately.
+ *
+ * These existed for the plain-text web editor: web could not load the real
+ * editor, so a note was projected to plain text, and `isPlainTextSafe` decided
+ * whether that projection would lose formatting — because merely OPENING a
+ * bold-and-bullets note would autosave the flattened version over it.
+ *
+ * Stage 13f removed that whole situation. The web editor is now the same rich
+ * editor as native (the blocker was an npm hoisting artefact, fixed in
+ * metro.config.js), so nothing projects a note to plain text any more and there
+ * is no formatting to lose.
+ *
+ * Kept rather than deleted because Stage 15 (Export / Import) is the obvious
+ * next consumer of an HTML-to-plain-text projection, and it is tested. If that
+ * stage lands without needing it, delete it then.
+ */
+
+/**
  * Plain text in, the app's stored HTML out, and back again.
  *
  * ── WHY THIS EXISTS ───────────────────────────────────────────────────────

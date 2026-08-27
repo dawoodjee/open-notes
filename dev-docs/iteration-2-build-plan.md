@@ -1695,6 +1695,54 @@ available and supported. So Phase 0's real question is not *whether* the bytes
 can be encrypted — it is **where the key lives in a browser**, which is the part
 that has no Keychain to hide behind.
 
+## Stage 13f — THE WEB EDITOR IS THE REAL EDITOR (branch `stage-13f-web-editor`)
+
+`components/RichEditor.web.tsx` is **deleted**. Web now runs the same
+`RichEditor.tsx` as native, on the same `react-native-enriched-html` — whose web
+build turns out to implement the identical imperative API (`focus`, `blur`,
+`setValue`, `setSelection`, `getHTML`, and every `toggle*`). The override existed
+only because the import used to break the bundle, which 13e fixed.
+
+### Verified in a browser
+
+- The editor loads: ProseMirror `contenteditable`, no "Plain text on web" badge.
+- **Text styles and Checklist are now ENABLED**; Table and Attach stay disabled,
+  which is correct — those are the genuinely unsupported ones.
+- Typing persists as real HTML: `<h1>Shopping list</h1>` came back after a
+  reload, with Stage 12d's first-line-is-a-heading rule applied.
+- Checklist produces a real `<ul data-type="checkboxList">` with a live checkbox,
+  and it survives a reload — formatted HTML round-tripping through the encrypted
+  OPFS database.
+- Native re-checked on iPhone 17 Pro: boots, renders its heading and bullet.
+
+### The crash this uncovered, which is the finding worth keeping
+
+Deleting the override made the app die on the **first keystroke** with
+`Cannot read properties of null (reading 'commands')` from tiptap's `Editor`.
+
+The cause is a prop that means two different things on the two platforms. The
+web build creates its editor with `useEditor({...}, [tiptapContent, extensions])`
+— so **changing `defaultValue` destroys and recreates the whole editor.** On
+native, `defaultValue` is what it sounds like: taken at mount, inert afterwards.
+
+That turned every keystroke into a teardown: typing saves → the save round-trips
+through SQLite and the watch → `initialContent` comes back changed →
+`defaultValue` changes → tiptap rebuilds → `ref.current` points at a destroyed
+instance → the echo ledger's next `setValue` throws.
+
+The fix is to freeze the seed at mount, which is what the prop already means. It
+is safe precisely because `NoteEditorPane` mounts the editor with
+`key={selectedNote.id}`, so a different note is a different mount; within a note,
+genuine remote edits arrive through `applyRemote` → `setValue`, the path built
+for exactly that. Native is unaffected — it ignored later changes to that prop
+anyway.
+
+`lib/notes/plainTextBody.ts` is now unused by the app. Kept and annotated rather
+than deleted: Stage 15's export is the obvious next consumer of an
+HTML-to-plain-text projection, and it is already tested.
+
+---
+
 ## Stage 13e — WEB PARITY AUDIT (branch `stage-13e-web-parity`)
 
 Web is much closer to native than this plan assumed. What was actually

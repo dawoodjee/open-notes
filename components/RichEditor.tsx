@@ -270,6 +270,36 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
 
   const migrated = useMemo(() => toEnrichedHtml(initialContent), [initialContent]);
 
+  /**
+   * The seed document, FROZEN AT MOUNT. Do not pass `migrated` here directly.
+   *
+   * ── WHY, AND IT IS A WEB-ONLY CRASH WITH A NATIVE-LOOKING CAUSE ───────────
+   *
+   * `defaultValue` reads like a default, and on native it behaves like one --
+   * the native view takes it at mount and later changes are inert. The WEB
+   * build is a tiptap editor created with
+   * `useEditor({...}, [tiptapContent, extensions])`, so a change to this prop
+   * DESTROYS AND RECREATES the whole editor.
+   *
+   * That turns every keystroke into a teardown. Typing saves, the save
+   * round-trips through SQLite and the watch, `initialContent` comes back
+   * changed, this prop changes, tiptap rebuilds -- and `ref.current` is left
+   * pointing at a destroyed instance whose `commandManager` is null. The next
+   * `setValue` from the echo ledger throws
+   * `Cannot read properties of null (reading 'commands')` and takes the app
+   * down. Observed on the first keystroke, every time.
+   *
+   * Freezing is not a workaround, it is what the prop already means. The parent
+   * mounts this component with `key={selectedNote.id}` (see NoteEditorPane), so
+   * a different note is a different mount and gets a fresh seed; within one
+   * note, genuine remote edits arrive through `applyRemote` -> `setValue`,
+   * which is the path built for exactly that and which does not tear anything
+   * down.
+   *
+   * Native is unaffected: it ignored later changes to this prop anyway.
+   */
+  const seedRef = useRef(migrated);
+
   const onChangeRef = useRef(onChange);
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -511,7 +541,7 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
       <View style={{ flex: 1 }}>
         <EnrichedTextInput
           ref={ref}
-          defaultValue={migrated}
+          defaultValue={seedRef.current}
           autoFocus={autoFocus}
           onChangeHtml={handleChangeHtml}
           onChangeState={handleChangeState}
