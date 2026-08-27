@@ -41,11 +41,50 @@ export { settingRowId };
  * lock ON elsewhere does not retroactively lock an already-open session.
  */
 
-/** Namespaced and versioned in the key itself, so a setting whose SHAPE changes
- *  becomes a new row rather than a value an older client cannot parse. */
+/**
+ * Namespaced and versioned in the key itself, so a setting whose SHAPE changes
+ * becomes a new row rather than a value an older client cannot parse.
+ *
+ * ALL LOWERCASE, and that is not a style preference -- the migration constrains
+ * keys to `^[a-z0-9]+(\.[a-z0-9]+)*$`. A camelCase key like `bulletStyle.v1`
+ * type-checks, writes to the mirror happily, and is then REJECTED by Postgres on
+ * upload, where a constraint violation is not classified as structural and so
+ * retries forever, jamming every operation queued behind it. `isValidSettingKey`
+ * exists so that trap is caught by a test rather than by a stuck sync queue.
+ */
 export const LOCK_SETTINGS_KEY = 'lock.v1';
+export const APPEARANCE_KEY = 'appearance.v1';
+export const APP_THEME_KEY = 'theme.v1';
+export const BULLET_STYLE_KEY = 'bulletstyle.v1';
+
+/** Every key this app syncs. Used to push local choices up at first sign-in. */
+export const ALL_SETTING_KEYS = [
+  LOCK_SETTINGS_KEY,
+  APPEARANCE_KEY,
+  APP_THEME_KEY,
+  BULLET_STYLE_KEY,
+];
 
 const MIRROR_PREFIX = 'notes.settings.';
+
+/**
+ * Subscribers, so a setting arriving from another device can reach whichever
+ * provider owns it.
+ *
+ * This exists because the providers are not nested the way the data flows.
+ * `ThemeProvider` sits OUTSIDE `VaultProvider` (see app/_layout.tsx -- the
+ * appearance has to be settled before anything paints, including the boot
+ * spinner), but only the vault side has a database to reconcile from. So the
+ * reconcile publishes, and whoever cares subscribes. A context could not carry
+ * this in the direction it needs to go.
+ */
+type SettingsListener = (changedKeys: string[]) => void;
+const listeners = new Set<SettingsListener>();
+
+export function subscribeToSettings(listener: SettingsListener): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
 
 /**
  * Read a setting, mirror first.
@@ -139,6 +178,17 @@ export async function reconcileSettings(): Promise<string[]> {
     if (current === row.value) continue;
     await SecureStore.setItemAsync(mirrorKey, row.value);
     changed.push(row.key);
+  }
+
+  if (changed.length) {
+    for (const listener of listeners) {
+      try {
+        listener(changed);
+      } catch (err) {
+        // One bad subscriber must not stop the others hearing about a change.
+        console.warn('Settings listener failed:', err);
+      }
+    }
   }
   return changed;
 }

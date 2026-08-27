@@ -46,3 +46,17 @@ export function settingRowId(userId: string, key: string): string {
   const h = v.join('');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
 }
+
+/**
+ * Does this key satisfy the column constraint the migration declares?
+ *
+ * Mirrors `user_settings_key_shape` exactly. Duplicated here on purpose: the
+ * database is the enforcement, but by the time IT rejects a key the row is
+ * already in the local upload queue, where a constraint violation is not
+ * classified as structural and therefore retries forever -- jamming every
+ * operation behind it. A test over this function turns a stuck sync queue into
+ * a failing build.
+ */
+export function isValidSettingKey(key: string): boolean {
+  return /^[a-z0-9]+(\.[a-z0-9]+)*$/.test(key) && key.length >= 1 && key.length <= 64;
+}

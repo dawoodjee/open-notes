@@ -1704,6 +1704,48 @@ available and supported. So Phase 0's real question is not *whether* the bytes
 can be encrypted — it is **where the key lives in a browser**, which is the part
 that has no Keychain to hide behind.
 
+## Stage 13c — LIVE CHECKLIST (branch `stage-13b-web-lock`, continues 13b)
+
+- [x] **1. Appearance, app theme and bullet style are account settings.**
+      `lib/settings/appearanceSettings.ts`; `ThemeContext` reads and writes
+      through it instead of three raw `secureStorage` keys.
+- [x] **2. Legacy fallback.** The pre-13c keys (`notes.appearance.v1`,
+      `notes.theme.v1`, `notes.bulletStyle.v1`, bare strings) are read when the
+      synced mirror is empty — which is every existing device on the day this
+      ships. Without it, everyone silently reverts to system/flat/dash.
+- [x] **3. A cross-provider subscription.** `ThemeProvider` sits OUTSIDE
+      `VaultProvider` (the appearance must settle before anything paints), yet
+      only the vault side has a database to reconcile from. So the reconcile
+      publishes and the theme subscribes; a context cannot carry this in the
+      direction the data flows.
+- [x] **4. Local choices are adopted at first sign-in.** `adoptLocalSettings`
+      runs *before* `reconcileSettings`, pushing up only keys the account does
+      not already have — an existing row is a choice from another device and
+      outranks whatever this one did while signed out.
+- [x] **5. Checkpoint.** `tsc` clean, **192/192**, lint at the 8-warning
+      baseline. On web: switching to Light applies, writes
+      `notes.settings.appearance.v1`, and survives a hard reload. Native boots
+      and decrypts throughout.
+
+**The camelCase trap, caught by a test rather than a stuck queue.** The obvious
+key for the bullet style is `bulletStyle.v1`. The migration constrains keys to
+`^[a-z0-9]+(\.[a-z0-9]+)*$`, so that key type-checks, writes to the local mirror
+happily, and is then **rejected by Postgres on upload** — where a constraint
+violation is not classified as structural and therefore retries forever, jamming
+every operation queued behind it. It ships as `bulletstyle.v1`, and
+`isValidSettingKey` now fails the build instead of the sync.
+
+**A verification that proved nothing, and what replaced it.** The legacy fallback
+was checked by launching the app on an iPhone running the previous build: it came
+up dark, the device was dark, and that looked like proof. Flipping the simulator
+to light flipped the app too — so that device's stored preference had been
+`'system'` all along, and `'system'`, `'nothing stored'` and `'fell back
+correctly'` are indistinguishable on screen. The observation had **no power to
+detect the bug it was meant to catch.** The precedence moved into a pure
+`resolveSetting()` with six tests, including that exact pair.
+
+---
+
 ## Stage 13b — LIVE CHECKLIST (branch `stage-13b-web-lock`)
 
 - [x] **1. `user_settings`, applied to DEV.** Key-value, one row per setting, with

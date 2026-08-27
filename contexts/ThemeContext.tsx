@@ -1,6 +1,19 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { Appearance, ColorSchemeName, Platform, useColorScheme } from 'react-native';
-import * as SecureStore from '@/lib/crypto/secureStorage';
+import {
+  getAppTheme,
+  getAppearance,
+  getBulletStyle,
+  setAppTheme as setAppThemeSetting,
+  setAppearance as setAppearanceSetting,
+  setBulletStyle as setBulletStyleSetting,
+} from '@/lib/settings/appearanceSettings';
+import {
+  APPEARANCE_KEY,
+  APP_THEME_KEY as APP_THEME_SETTING_KEY,
+  BULLET_STYLE_KEY,
+  subscribeToSettings,
+} from '@/lib/settings/syncedSettings';
 import * as SystemUI from 'expo-system-ui';
 import * as NavigationBar from 'expo-navigation-bar';
 import { Layers, Sparkles, Square, Sunrise } from 'lucide-react-native';
@@ -106,31 +119,31 @@ export const APP_THEMES: ThemeDescriptor[] = [
 ];
 
 /**
- * SecureStore, NOT the ui_state table, and not for secrecy.
+ * WHERE THESE THREE PREFERENCES NOW LIVE, and why the constraint that put them
+ * here in the first place still holds.
  *
- * The theme has to be readable BEFORE the encrypted database opens: the boot
+ * They used to be three SecureStore keys read directly in this file. Stage 13c
+ * moved them to `lib/settings/appearanceSettings.ts` so they sync across
+ * devices, and the keys themselves moved with them.
+ *
+ * What did NOT change is the reason they were never in `ui_state`: the
+ * appearance has to be readable BEFORE the encrypted database opens. The boot
  * spinner, the lock screen and the boot-failure screen all render while
- * PowerSync doesn't exist yet. Reading it from ui_state would mean every one
- * of those paints in the wrong colours first. This is the same constraint that
- * already made lock settings mirror into the SecureStore vault blob.
- */
-const THEME_KEY = 'notes.appearance.v1';
-
-/**
- * Beside the theme, and for a weaker reason than the theme's.
+ * PowerSync does not exist yet, and reading from the database would paint every
+ * one of them in the wrong colours first. That is why the synced settings keep
+ * a mirror -- the table is the source of truth, and the mirror is what boot
+ * reads. Same shape as the lock settings, and for the same reason.
  *
- * This one has no need to beat the database open -- nothing paints a bullet
- * before the editor exists. It lives here because RichEditor already calls
- * useTheme() and SettingsDialog already threads this context's values through
- * the modal hoist, so putting it anywhere else would mean a second store and a
- * second prop thread to carry one string.
+ * The bullet style has no such urgency -- nothing paints a bullet before the
+ * editor exists -- but it travels with the other two because `RichEditor`
+ * already calls `useTheme()` and `SettingsDialog` already threads this
+ * context's values through the modal hoist. A second store to carry one string
+ * would cost more than it saves.
+ *
+ * Appearance and theme stay SEPARATE settings rather than one combined value:
+ * dark mode and theme are independent choices, and folding them together would
+ * need a migration the first time either list changes.
  */
-const BULLET_KEY = 'notes.bulletStyle.v1';
-
-/** Separate key rather than folded into the appearance one: dark mode and
- *  theme are independent choices, and a combined value would need a migration
- *  the first time either list changes. */
-const APP_THEME_KEY = 'notes.theme.v1';
 
 /**
  * The one place a literal background colour is allowed.
@@ -217,31 +230,25 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     void (async () => {
+      // All three now come from lib/settings, which reads the synced mirror and
+      // falls back to the pre-13c SecureStore key. The validation that used to
+      // live here moved with them -- see appearanceSettings.ts.
       try {
-        const stored = await SecureStore.getItemAsync(THEME_KEY);
-        if (stored === 'light' || stored === 'dark' || stored === 'system') {
-          setPreferenceState(stored);
-        }
+        setPreferenceState(await getAppearance());
       } catch {
         // A missing or unreadable preference is not worth failing a launch
         // over -- 'system' is a perfectly good answer.
       }
       try {
-        const stored = await SecureStore.getItemAsync(BULLET_KEY);
-        if (stored === 'dash' || stored === 'dot') {
-          setBulletStyleState(stored);
-        }
+        setBulletStyleState(await getBulletStyle());
       } catch {
         // Same reasoning: 'dash' is a perfectly good answer.
       }
       try {
-        const stored = await SecureStore.getItemAsync(APP_THEME_KEY);
-        // Checked against the catalogue's AVAILABLE entries, not just the
-        // union. A build that drops a theme, or a device that stored one
-        // before it shipped, must not leave the app pointing at a theme this
-        // binary cannot paint -- it would render nothing and look like a bug.
-        const known = APP_THEMES.find((t) => t.value === stored && t.available);
-        if (known) setThemeState(known.value);
+        const known = await getAppTheme((v) =>
+          APP_THEMES.some((t) => t.value === v && t.available)
+        );
+        if (known) setThemeState(known as AppTheme);
       } catch {
         // 'flat' is a perfectly good answer.
       }
@@ -312,6 +319,30 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   // inert there. What is left to control is whether the icons are drawn light
   // or dark -- and note the value is the opposite of the scheme's name, because
   // it describes the BUTTONS, not the background they sit on.
+  /**
+   * A preference changed on another device.
+   *
+   * Subscription rather than a context read, because the providers are not
+   * nested the way this data flows: ThemeProvider sits OUTSIDE VaultProvider
+   * (the appearance must be settled before anything paints, including the boot
+   * spinner), yet only the vault side has a database to reconcile from. So the
+   * reconcile publishes and this listens. See subscribeToSettings.
+   */
+  useEffect(() => {
+    return subscribeToSettings((changed) => {
+      void (async () => {
+        if (changed.includes(APPEARANCE_KEY)) setPreferenceState(await getAppearance());
+        if (changed.includes(BULLET_STYLE_KEY)) setBulletStyleState(await getBulletStyle());
+        if (changed.includes(APP_THEME_SETTING_KEY)) {
+          const known = await getAppTheme((v) =>
+            APP_THEMES.some((t) => t.value === v && t.available)
+          );
+          if (known) setThemeState(known as AppTheme);
+        }
+      })();
+    });
+  }, []);
+
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     void NavigationBar.setButtonStyleAsync(scheme === 'dark' ? 'light' : 'dark');
@@ -320,7 +351,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const setPreference = useCallback(async (next: ThemePreference) => {
     setPreferenceState(next);
     try {
-      await SecureStore.setItemAsync(THEME_KEY, next);
+      await setAppearanceSetting(next);
     } catch {
       // The choice still applies for this launch; only persistence failed.
     }
@@ -332,7 +363,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     if (!APP_THEMES.some((t) => t.value === next && t.available)) return;
     setThemeState(next);
     try {
-      await SecureStore.setItemAsync(APP_THEME_KEY, next);
+      await setAppThemeSetting(next);
     } catch {
       // The choice still applies for this launch; only persistence failed.
     }
@@ -341,7 +372,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const setBulletStyle = useCallback(async (next: BulletStyle) => {
     setBulletStyleState(next);
     try {
-      await SecureStore.setItemAsync(BULLET_KEY, next);
+      await setBulletStyleSetting(next);
     } catch {
       // The choice still applies for this launch; only persistence failed.
     }

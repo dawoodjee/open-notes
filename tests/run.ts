@@ -18,6 +18,7 @@ import './findMatches.test';
 import './reorder.test';
 import './syncedSettings.test';
 import './gateKey.test';
+import './resolveSetting.test';
 import { report } from './harness';
 
 report();

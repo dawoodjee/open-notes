@@ -1,5 +1,5 @@
 import { describe, it, expect } from './harness';
-import { settingRowId } from '../lib/settings/settingRowId';
+import { isValidSettingKey, settingRowId } from '../lib/settings/settingRowId';
 
 const USER_A = '7f7dfe9f-78d4-47f2-bfb2-58ac6225a4d3';
 const USER_B = '11111111-2222-3333-4444-555555555555';
@@ -30,5 +30,34 @@ describe('settingRowId', () => {
     // concatenation bug, which would let one setting overwrite another.
     const same = settingRowId('a:b', 'c') === settingRowId('a', 'b:c');
     expect(same).toBe(false);
+  });
+});
+
+describe('isValidSettingKey', () => {
+  // These are the keys the app actually ships. Listed literally rather than
+  // imported, because syncedSettings.ts reaches react-native through
+  // secureStorage and the harness runs under plain Node -- see settingRowId.ts.
+  const SHIPPED = ['lock.v1', 'appearance.v1', 'theme.v1', 'bulletstyle.v1'];
+
+  it('accepts every key this app ships', () => {
+    expect(SHIPPED.every(isValidSettingKey)).toBe(true);
+  });
+
+  it('REJECTS camelCase, which is the trap this guard exists for', () => {
+    // `bulletStyle.v1` is the obvious name, type-checks, and writes to the
+    // local mirror happily -- then Postgres rejects it on upload, where a
+    // constraint violation is not classified as structural and so retries
+    // forever, jamming every operation queued behind it.
+    expect(isValidSettingKey('bulletStyle.v1')).toBe(false);
+  });
+
+  it('rejects the other shapes the column constraint forbids', () => {
+    const bad = ['', 'Bad Key', 'has space.v1', '.leading', 'trailing.', 'a..b', 'under_score.v1'];
+    expect(bad.some(isValidSettingKey)).toBe(false);
+  });
+
+  it('rejects a key longer than the column allows', () => {
+    expect(isValidSettingKey('a'.repeat(65))).toBe(false);
+    expect(isValidSettingKey('a'.repeat(64))).toBe(true);
   });
 });

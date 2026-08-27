@@ -15,7 +15,12 @@ import {
   setLockSettings,
   type LockSettings,
 } from '@/lib/settings/lockSettings';
-import { LOCK_SETTINGS_KEY, reconcileSettings } from '@/lib/settings/syncedSettings';
+import {
+  ALL_SETTING_KEYS,
+  LOCK_SETTINGS_KEY,
+  adoptLocalSettings,
+  reconcileSettings,
+} from '@/lib/settings/syncedSettings';
 import { onLock } from '@/lib/auth/lockBehaviour';
 import { isDeviceKeyGated } from '@/lib/crypto/deviceKeyStore';
 import { withTimeout } from '@/lib/auth/withTimeout';
@@ -224,8 +229,17 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
          * The lock is re-read because it is the one setting whose remote value
          * should take effect without waiting: a lock switched on elsewhere
          * ought to arm here as soon as we know about it.
+         *
+         * ADOPT BEFORE RECONCILE, and the order is not interchangeable.
+         * Preferences chosen before there was an account exist only in the
+         * mirror. Reconciling first would find an empty table, change nothing,
+         * and leave those choices to be overwritten the moment any device wrote
+         * a real row -- so they are pushed up first, and only for keys the
+         * account does not already have. An existing row is a choice made on
+         * another device and outranks whatever this one did while signed out.
          */
-        void reconcileSettings()
+        void adoptLocalSettings(ALL_SETTING_KEYS)
+          .then(() => reconcileSettings())
           .then(async (changed) => {
             if (cancelled || !changed.includes(LOCK_SETTINGS_KEY)) return;
             setLockSettingsState(await getLockSettings());
