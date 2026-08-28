@@ -1870,6 +1870,68 @@ head-tag invariants including the two-viewport trap.
 
 ---
 
+## iPad orientation — the Stage 11 claim, finally settled (2026-08-28)
+
+The folder pane's landscape/portrait rule has been asserted since Stage 11 and
+never confirmed, because `simctl` cannot rotate a simulator. Settled two ways.
+
+**Extracted to `lib/layout/folderPane.ts` and tested.** The rule was three
+inline expressions in `NotesLayout`, and it never needed a device at all — it is
+a pure function of window and platform. 14 tests now cover iPad portrait and
+landscape, both phone orientations, Split View at 320/507/880/1100, the 768
+boundary, and an exactly square window. `NotesLayout` consumes it, so the tests
+govern the app rather than describing a copy of it.
+
+**iPad PORTRAIT verified on the device**, for the first time: the Folders panel
+floats over the editor with the note still visible behind it, matching
+`ipad-portrait-folder-view.jpeg`. Rotation came from a shutdown/boot cycle,
+which resets a simulator to portrait — no permission required, no wipe.
+
+**iPad LANDSCAPE is still not verified on a device.** It is the same branch of
+the same function as desktop, which is verified in the browser at 1280×860, and
+its unit tests pass — but the rendered result on an iPad has not been seen.
+Rotating needs Accessibility permission for System Events (`-1728`), which is
+*separate* from the Automation grant. Writing
+`SimulatorWindowOrientation` into `com.apple.iphonesimulator.plist` does not
+work: the Simulator rewrites it on quit.
+
+### Two things the extraction exposed
+
+**The iPhone orientation lock is load-bearing.** A landscape iPhone 17 Pro is
+874pt wide — over the 768 breakpoint — so this rule would hand a 402pt-TALL
+phone the full three-pane tablet layout. That never happens only because
+`ios/notes/Info.plist` allows just Portrait and PortraitUpsideDown on iPhone.
+A test now asserts the 874×402 classification *with that reasoning attached*, so
+enabling landscape on iPhone fails there instead of shipping a three-pane phone.
+
+**An Android tablet in portrait disagrees with an iPad of identical size.** The
+condition is `platform !== 'ios' || isLandscape`, so a portrait Android tablet
+gets `persistent` where an iPad gets `overlay` — same window, same shape,
+different answer. Pinned in a test rather than quietly changed, because which
+one is right is Adam's call. **Open question for him.**
+
+### A real bug found while doing it
+
+Every iPad screenshot for days had a small red rectangle in one corner. It was
+LogBox, and I had been treating it as noise. Tapping any icon button threw:
+
+```
+TurboModuleRegistry.getEnforcing(...): 'RNPulsar' could not be found.
+```
+
+The iPad runs a binary from before the Stage 12.5 native rebuild, so Pulsar is
+genuinely absent — the case `lib/theme/haptics.ts` was written to survive. **The
+try/catch did not survive it.** The `catch` does receive the throw, but React
+Native's dev error handler has already reported it as FATAL, so the red screen
+appears regardless; `LogBox.ignoreAllLogs(true)` hides warnings, not fatals.
+
+Fixed by asking before importing: `TurboModuleRegistry.get('RNPulsar')` returns
+null instead of throwing, so on a binary without the module the import never
+runs and there is nothing to report. That is what the wrapper always claimed to
+do. Verified on the iPad — icon buttons now press silently, no red screen.
+
+---
+
 ## Stage 13c — POST-SHIP FIXES (2026-08-28): three bugs between a written row and a synced one
 
 Settings shipped in 13a–13c, type-checked, tested, and did not sync. Adam found

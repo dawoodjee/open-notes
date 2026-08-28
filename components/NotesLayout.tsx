@@ -66,6 +66,7 @@ import { isBlankNote, noteToPlainText } from '@/types/note';
 import { BootSpinner } from '@/components/BootSpinner';
 import { BACKGROUND, useTheme } from '@/contexts/ThemeContext';
 import { paneChrome } from '@/lib/layout/paneChrome';
+import { folderPanePresentation } from '@/lib/layout/folderPane';
 // The same constant the editor's chrome decision uses. Two literals meaning
 // almost the same thing would drift the first time one was tuned.
 import { WIDE_LAYOUT_MIN_WIDTH } from '@/lib/layout/editorChrome';
@@ -107,7 +108,6 @@ export default function NotesLayout() {
   // 768 is the `md:` breakpoint the rest of the app already uses. Above it,
   // both the folder pane and the list are on screen together.
   const isWideLayout = windowWidth >= WIDE_LAYOUT_MIN_WIDTH;
-  const isLandscape = windowWidth > windowHeight;
 
   /**
    * TWO QUESTIONS, NOT ONE. These used to be a single flag, and that was the
@@ -143,9 +143,22 @@ export default function NotesLayout() {
     foldersVisible: !isFolderSidebarCollapsed,
     listVisible: !isSidebarTucked,
   });
-  const foldersArePersistent = isWideLayout && (Platform.OS !== 'ios' || isLandscape);
+  /**
+   * Decided by lib/layout/folderPane.ts rather than inline, so the iPad
+   * landscape/portrait rule is stated in one place and asserted in tests.
+   * It had been an inline expression and the project's longest-standing
+   * unverified claim -- simctl cannot rotate a simulator, so it was never
+   * confirmed on a device. It never needed one: it is a pure function of the
+   * window and the platform.
+   */
+  const folderPane = folderPanePresentation({
+    width: windowWidth,
+    height: windowHeight,
+    platform: Platform.OS,
+  });
+  const foldersArePersistent = folderPane === 'persistent';
   /** Wide but not persistent: the floating-panel case (iPad portrait). */
-  const foldersOverlay = isWideLayout && !foldersArePersistent;
+  const foldersOverlay = folderPane === 'overlay';
 
   // Desktop Resizable Panel Logic
   const [sidebarWidth, setSidebarWidth] = useState<number>(320);

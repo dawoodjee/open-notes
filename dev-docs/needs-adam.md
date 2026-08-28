@@ -8,7 +8,44 @@ Updated 2026-08-27, against `main` @ the Stage 13e merge.
 
 ---
 
-## 1. Exercise the passkey on your Mac  ·  *the only item left*
+## 1. Grant Accessibility to Claude Code  ·  *unblocks the last iPad check*
+
+**System Settings → Privacy & Security → Accessibility** → enable the **claude**
+entry (the same one you enabled under Automation).
+
+**Why me:** an OS permission dialog. This is a THIRD, separate grant — Automation
+(`-1743`) is done; UI scripting needs Accessibility, which fails with a different
+code:
+
+```
+execution error: osascript is not allowed assistive access. (-1728)
+```
+
+**What it unblocks:** rotating the iPad simulator, the only way to see the
+landscape folder column rendered. Portrait is now verified (a shutdown/boot
+resets a simulator to portrait, which needed no permission); landscape is the
+one case left, and writing the orientation into the Simulator's plist does not
+work because it rewrites it on quit.
+
+Low priority — landscape is the same code branch as desktop, which is verified,
+and all 14 unit tests pass. It is the last unrendered case, not a suspected bug.
+
+---
+
+## 2. Decide: should an Android tablet in portrait match the iPad?  ·  *a real question*
+
+Today `folderPanePresentation` is `platform !== 'ios' || isLandscape`, so a
+portrait Android tablet gets the pushed-aside **column** while an iPad of
+identical dimensions gets the floating **overlay**. Same window, same shape,
+different answer.
+
+It looks like an accident of writing the condition against iOS rather than
+against the shape of the window, but changing it changes visible behaviour on
+Android, so it is yours. Pinned in a test either way. Two lines to switch.
+
+---
+
+## 3. Exercise the passkey on your Mac
 
 Settings → Security → Require unlock → **Use a passkey**, then lock and unlock.
 

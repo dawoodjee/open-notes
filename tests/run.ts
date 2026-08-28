@@ -19,6 +19,7 @@ import './reorder.test';
 import './syncedSettings.test';
 import './gateKey.test';
 import './resolveSetting.test';
+import './folderPane.test';
 import './headTags.test';
 import { report } from './harness';
 
