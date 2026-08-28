@@ -84,18 +84,34 @@ describe('folderPanePresentation — boundaries', () => {
   });
 });
 
-describe('the iOS/Android asymmetry, pinned rather than fixed', () => {
-  it('an Android tablet in portrait disagrees with an iPad of the same size', () => {
-    // Same window, same shape, different answer -- because the condition is
-    // written against iOS rather than against the shape of the window. This
-    // test does not endorse it; it makes it visible so the choice is
-    // deliberate. Flagged for Adam.
-    expect(presentationDiffersByPlatform(IPAD_PORTRAIT.width, IPAD_PORTRAIT.height)).toBe(true);
-    expect(folderPanePresentation({ ...IPAD_PORTRAIT, platform: 'android' })).toBe('persistent');
+describe('uniform across platforms — Adam, 2026-08-28', () => {
+  it('an Android tablet matches an iPad of the same size, in both orientations', () => {
+    // The rule used to read `platform !== 'ios' || isLandscape`, so a portrait
+    // Android tablet got the column while an iPad of identical dimensions got
+    // the overlay. Same window, same shape, different answer. Now it answers on
+    // shape alone.
+    expect(presentationDiffersByPlatform(IPAD_PORTRAIT.width, IPAD_PORTRAIT.height)).toBe(false);
+    expect(presentationDiffersByPlatform(IPAD_LANDSCAPE.width, IPAD_LANDSCAPE.height)).toBe(false);
+    expect(folderPanePresentation({ ...IPAD_PORTRAIT, platform: 'android' })).toBe('overlay');
   });
 
-  it('they agree in landscape and on phones', () => {
-    expect(presentationDiffersByPlatform(IPAD_LANDSCAPE.width, IPAD_LANDSCAPE.height)).toBe(false);
-    expect(presentationDiffersByPlatform(IPHONE_PORTRAIT.width, IPHONE_PORTRAIT.height)).toBe(false);
+  it('no window anywhere is classified by platform', () => {
+    // The property itself, asserted over a spread of shapes rather than the two
+    // that happened to be interesting -- so re-adding a platform branch fails
+    // here regardless of which platform it special-cases.
+    const windows = [
+      [320, 1032], [507, 1032], [768, 400], [880, 1032],
+      [1032, 1376], [1100, 1032], [1280, 860], [1000, 1000], [402, 874],
+    ];
+    const disagreements = windows.filter(([w, h]) => presentationDiffersByPlatform(w, h));
+    expect(disagreements).toEqual([]);
+  });
+
+  it('the accepted cost: a taller-than-wide desktop window now floats', () => {
+    // Dragging a browser window narrow on a big display used to keep the
+    // column and now gets the overlay. That follows from the same reasoning
+    // that makes iPad portrait an overlay, and it is the price of uniformity.
+    expect(folderPanePresentation({ width: 900, height: 1000, platform: 'web' })).toBe('overlay');
+    expect(folderPanePresentation({ width: 1280, height: 860, platform: 'web' })).toBe('persistent');
   });
 });

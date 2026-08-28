@@ -30,43 +30,58 @@ import { WIDE_LAYOUT_MIN_WIDTH } from './editorChrome';
  *   'persistent'  wide: a real column that pushes the content aside. Desktop,
  *                 and a landscape iPad.
  *
- * ── THE ASYMMETRY THIS EXPOSES, WHICH IS WORTH ARGUING ABOUT ──────────────
+ * ── IT ANSWERS ON SHAPE, NOT ON PLATFORM (Adam, 2026-08-28) ───────────────
  *
- * `platform !== 'ios'` means an ANDROID TABLET IN PORTRAIT gets `persistent`,
- * while an iPad of identical dimensions gets `overlay`. Same form factor, same
- * window, different answer. That is preserved here exactly as it shipped
- * rather than quietly fixed -- see the note on `folderPanePresentation` -- but
- * it looks like an accident of writing the condition against iOS instead of
- * against shape, and `presentationDiffersByPlatform()` exists so the test can
- * pin the current behaviour and make the disagreement visible.
+ * This used to read `platform !== 'ios' || isLandscape`, which meant an ANDROID
+ * TABLET IN PORTRAIT got `persistent` while an iPad of identical dimensions got
+ * `overlay` -- same window, same shape, different answer. That was an accident
+ * of writing the condition against iOS rather than against the window, and Adam
+ * called it: make it uniform.
+ *
+ * So the platform is gone from the decision entirely. Two windows of the same
+ * size now always get the same layout, which is the property that makes this
+ * rule explainable in one sentence.
+ *
+ * THE CONSEQUENCE, ACCEPTED: a desktop browser window that is TALLER than it is
+ * wide -- drag a window narrow on a big display, say 900x1000 -- now gets the
+ * floating overlay where it used to get the column. That follows from the same
+ * reasoning that makes iPad portrait an overlay (a tall, narrow window has no
+ * width to spare for a permanent column), and it is the price of uniformity.
+ * `platform` stays in the input type because callers already pass it and it
+ * documents what the rule deliberately ignores.
  */
 export type FolderPanePresentation = 'navigation' | 'overlay' | 'persistent';
 
 export interface FolderPaneInput {
   width: number;
   height: number;
-  /** `Platform.OS`. Only 'ios' is treated specially -- see above. */
-  platform: string;
+  /**
+   * `Platform.OS`. DELIBERATELY UNUSED since 2026-08-28 — kept in the type
+   * because every caller already passes it, and because its presence is what
+   * makes "this rule ignores the platform" a visible decision rather than an
+   * omission somebody re-adds by accident.
+   */
+  platform?: string;
 }
 
 export function folderPanePresentation({
   width,
   height,
-  platform,
 }: FolderPaneInput): FolderPanePresentation {
   // Below the md: breakpoint the folder pane and the list cannot both fit, so
   // the pane becomes a destination rather than a column.
   if (width < WIDE_LAYOUT_MIN_WIDTH) return 'navigation';
 
-  // Landscape is derived from the WINDOW, not the device, so Split View is
-  // classified by the shape the user is actually looking at.
+  // Derived from the WINDOW, not the device, so Split View and a resized
+  // desktop window are both classified by the shape the user is looking at.
   const isLandscape = width > height;
-  return platform !== 'ios' || isLandscape ? 'persistent' : 'overlay';
+  return isLandscape ? 'persistent' : 'overlay';
 }
 
 /**
- * Do two platforms disagree about the same window? Exists for the test, which
- * documents the iOS/Android asymmetry rather than letting it be rediscovered.
+ * Do two platforms disagree about the same window? Now always false, and the
+ * test asserts that — it is the property Adam asked for, so it is worth being
+ * unable to break silently.
  */
 export function presentationDiffersByPlatform(width: number, height: number): boolean {
   return (
