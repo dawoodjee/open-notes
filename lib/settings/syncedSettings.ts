@@ -1,9 +1,27 @@
 import * as SecureStore from '@/lib/crypto/secureStorage';
 import { isValidSettingKey, settingRowId } from './settingRowId';
+// Keys and the legacy map live in a pure module so they can be tested -- see
+// settingKeys.ts. Re-exported here so existing importers do not have to move.
+import {
+  ALL_SETTING_KEYS,
+  APPEARANCE_KEY,
+  APP_THEME_KEY,
+  BULLET_STYLE_KEY,
+  LEGACY_KEY,
+  LOCK_SETTINGS_KEY,
+} from './settingKeys';
 import { getCurrentUserId } from '@/lib/auth/currentUser';
 import { getPowerSync, isPowerSyncReady } from '@/lib/powersync/db';
 
 export { isValidSettingKey, settingRowId };
+export {
+  ALL_SETTING_KEYS,
+  APPEARANCE_KEY,
+  APP_THEME_KEY,
+  BULLET_STYLE_KEY,
+  LEGACY_KEY,
+  LOCK_SETTINGS_KEY,
+};
 
 /**
  * Settings that follow the user across devices, and the mirror that makes them
@@ -41,30 +59,10 @@ export { isValidSettingKey, settingRowId };
  * lock ON elsewhere does not retroactively lock an already-open session.
  */
 
-/**
- * Namespaced and versioned in the key itself, so a setting whose SHAPE changes
- * becomes a new row rather than a value an older client cannot parse.
- *
- * ALL LOWERCASE, and that is not a style preference -- the migration constrains
- * keys to `^[a-z0-9]+(\.[a-z0-9]+)*$`. A camelCase key like `bulletStyle.v1`
- * type-checks, writes to the mirror happily, and is then REJECTED by Postgres on
- * upload, where a constraint violation is not classified as structural and so
- * retries forever, jamming every operation queued behind it. `isValidSettingKey`
- * exists so that trap is caught by a test rather than by a stuck sync queue.
- */
-export const LOCK_SETTINGS_KEY = 'lock.v1';
-export const APPEARANCE_KEY = 'appearance.v1';
-export const APP_THEME_KEY = 'theme.v1';
-export const BULLET_STYLE_KEY = 'bulletstyle.v1';
-
-/** Every key this app syncs. Used to push local choices up at first sign-in. */
-export const ALL_SETTING_KEYS = [
-  LOCK_SETTINGS_KEY,
-  APPEARANCE_KEY,
-  APP_THEME_KEY,
-  BULLET_STYLE_KEY,
-];
-
+/** Namespace for the SecureStore mirror, so a setting key cannot collide with
+ *  the vault's own keys. `appearance.v1` mirrors to `notes.settings.appearance.v1`
+ *  -- deliberately NOT the pre-13c `notes.appearance.v1`, which is why the
+ *  legacy fallback in settingKeys.ts exists at all. */
 const MIRROR_PREFIX = 'notes.settings.';
 
 /**
@@ -233,8 +231,33 @@ export async function adoptLocalSettings(keys: string[]): Promise<void> {
 
   const db = getPowerSync();
   for (const key of keys) {
-    const mirrored = await SecureStore.getItemAsync(MIRROR_PREFIX + key);
-    if (mirrored === null) continue;
+    let mirrored = await SecureStore.getItemAsync(MIRROR_PREFIX + key);
+
+    /**
+     * FALL BACK TO THE PRE-13c KEY, which is the case that actually matters.
+     *
+     * Adoption originally read only the mirror, and that made it useless for
+     * exactly the devices it existed for. A preference set before 13c lives in
+     * the legacy key; the mirror is empty; adoption skipped it and NOTHING was
+     * ever uploaded. The device itself looked fine -- `resolveSetting` reads the
+     * legacy value -- so the symptom was a phone showing dark, a tablet showing
+     * light, and a settings table that stayed empty forever, or until the user
+     * happened to change the setting by hand.
+     *
+     * Found on Adam's two simulators after the sync stream went live: notes
+     * synced, appearance did not.
+     *
+     * The mirror is written as we go, so the device stops depending on the
+     * legacy key from here on and the next reconcile has something to compare.
+     */
+    if (mirrored === null) {
+      const legacyKey = LEGACY_KEY[key];
+      if (!legacyKey) continue;
+      const legacy = await SecureStore.getItemAsync(legacyKey);
+      if (legacy === null) continue;
+      mirrored = JSON.stringify(legacy);
+      await SecureStore.setItemAsync(MIRROR_PREFIX + key, mirrored);
+    }
 
     const existing = await db.getOptional<{ id: string }>(
       'SELECT id FROM user_settings WHERE id = ?',
@@ -247,4 +270,47 @@ export async function adoptLocalSettings(keys: string[]): Promise<void> {
       [settingRowId(userId, key), userId, key, mirrored, new Date().toISOString()]
     );
   }
+}
+
+/**
+ * Reconcile whenever the settings table changes, not just once at boot.
+ *
+ * ── WHY A ONE-SHOT RECONCILE WAS NOT ENOUGH ──────────────────────────────
+ *
+ * The boot path adopts local choices and reconciles once, which is correct for
+ * what is already on the device and useless for what arrives a second later.
+ * PowerSync connects, the initial sync delivers the account's settings rows
+ * AFTER that reconcile has run, and nothing looks at them again -- so a
+ * preference set on another device never reaches the mirror, and the next
+ * launch loses the same race identically.
+ *
+ * The symptom is a pair of devices that each look internally consistent and
+ * permanently disagree: Adam's phone on dark, his tablet on light, with the
+ * row sitting correctly in Postgres the whole time.
+ *
+ * Notes and folders never hit this because they are rendered from live watch
+ * queries. Settings are read once into a mirror, so they need the watch
+ * spelled out.
+ */
+export function watchSettings(onChanged: (changedKeys: string[]) => void): () => void {
+  if (!isPowerSyncReady()) return () => {};
+
+  const controller = new AbortController();
+  getPowerSync().watch(
+    'SELECT id, key, value FROM user_settings',
+    [],
+    {
+      onResult: () => {
+        void reconcileSettings()
+          .then((changed) => {
+            if (changed.length) onChanged(changed);
+          })
+          .catch((err) => console.warn('Settings watch reconcile failed:', err));
+      },
+      onError: (err) => console.warn('Settings watch error:', err),
+    },
+    { signal: controller.signal }
+  );
+
+  return () => controller.abort();
 }

@@ -14,6 +14,7 @@ import * as Crypto from 'expo-crypto';
 
 const NOTES_TABLE = 'notes';
 const FOLDERS_TABLE = 'folders';
+const SETTINGS_TABLE = 'user_settings';
 const SYNC_ISSUE_MAX_AGE_MS = 60 * 24 * 60 * 60 * 1000; // 2 months
 
 // Row shape notes actually has server-side -- see
@@ -62,6 +63,17 @@ function pickFoldersColumns(data: Record<string, any> | undefined) {
   if ('include_in_notes' in out) out.include_in_notes = Boolean(out.include_in_notes);
   if ('group_by_date' in out) out.group_by_date = Boolean(out.group_by_date);
   if ('is_enabled' in out) out.is_enabled = Boolean(out.is_enabled);
+  return out;
+}
+
+const SETTINGS_COLUMNS = ['user_id', 'key', 'value', 'updated_at'] as const;
+
+function pickSettingsColumns(data: Record<string, any> | undefined) {
+  const out: Record<string, any> = {};
+  if (!data) return out;
+  for (const col of SETTINGS_COLUMNS) {
+    if (col in data) out[col] = data[col];
+  }
   return out;
 }
 
@@ -189,6 +201,8 @@ async function uploadEntry(database: AbstractPowerSyncDatabase, entry: CrudEntry
       return uploadNoteEntry(database, entry);
     case FOLDERS_TABLE:
       return uploadFolderEntry(database, entry);
+    case SETTINGS_TABLE:
+      return uploadSettingsEntry(database, entry);
     default:
       if (__DEV__) {
         console.warn(
@@ -230,6 +244,54 @@ async function uploadFolderEntry(database: AbstractPowerSyncDatabase, entry: Cru
       if (!row) break;
 
       const { error } = await table.upsert({ id: entry.id, ...pickFoldersColumns(row) });
+      if (error) throw error;
+      break;
+    }
+    case UpdateType.DELETE: {
+      const { error } = await table.delete().eq('id', entry.id);
+      if (error) throw error;
+      break;
+    }
+  }
+}
+
+/**
+ * Settings upload like folders: last write wins, no merge.
+ *
+ * ── THIS HANDLER WAS MISSING, AND THE SYMPTOM WAS SILENCE ─────────────────
+ *
+ * Stage 13a added the `user_settings` table, the sync stream and the read/write
+ * layer, and never added a case to `uploadEntry`. Every settings op therefore
+ * hit the `default:` branch and was SKIPPED -- written locally, surfaced in the
+ * UI, and never uploaded. Both devices looked internally consistent and simply
+ * disagreed with each other forever.
+ *
+ * Found on Adam's simulators once the sync stream went live: notes synced
+ * between phone and tablet, appearance did not, even after an explicit change
+ * on one device. The `default:` branch does log a dev warning -- the guard did
+ * its job -- but a warning in a Metro log is not a failure anybody sees.
+ *
+ * A merge would be wrong here for the same reason it is wrong for folders: a
+ * setting is one value, and the later write genuinely is the answer. Splicing
+ * two appearance choices would produce a third nobody picked.
+ *
+ * Current local state rather than `entry.opData`, for the reason spelled out
+ * on the notes path: an op queued before sign-in carries no user_id and would
+ * fail RLS forever while blocking everything behind it.
+ */
+async function uploadSettingsEntry(database: AbstractPowerSyncDatabase, entry: CrudEntry) {
+  const table = supabase.from(SETTINGS_TABLE);
+
+  switch (entry.op) {
+    case UpdateType.PUT:
+    case UpdateType.PATCH: {
+      const row = await database.getOptional<Record<string, any>>(
+        'SELECT * FROM user_settings WHERE id = ?',
+        [entry.id]
+      );
+      if (!row) break;
+
+      const { error } = await table.upsert({ id: entry.id, ...pickSettingsColumns(row) });
       if (error) throw error;
       break;
     }

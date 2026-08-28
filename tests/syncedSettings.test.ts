@@ -1,5 +1,13 @@
 import { describe, it, expect } from './harness';
 import { isValidSettingKey, settingRowId } from '../lib/settings/settingRowId';
+import {
+  ALL_SETTING_KEYS,
+  APPEARANCE_KEY,
+  APP_THEME_KEY,
+  BULLET_STYLE_KEY,
+  LEGACY_KEY,
+  LOCK_SETTINGS_KEY,
+} from '../lib/settings/settingKeys';
 
 const USER_A = '7f7dfe9f-78d4-47f2-bfb2-58ac6225a4d3';
 const USER_B = '11111111-2222-3333-4444-555555555555';
@@ -34,13 +42,8 @@ describe('settingRowId', () => {
 });
 
 describe('isValidSettingKey', () => {
-  // These are the keys the app actually ships. Listed literally rather than
-  // imported, because syncedSettings.ts reaches react-native through
-  // secureStorage and the harness runs under plain Node -- see settingRowId.ts.
-  const SHIPPED = ['lock.v1', 'appearance.v1', 'theme.v1', 'bulletstyle.v1'];
-
   it('accepts every key this app ships', () => {
-    expect(SHIPPED.every(isValidSettingKey)).toBe(true);
+    expect(ALL_SETTING_KEYS.every(isValidSettingKey)).toBe(true);
   });
 
   it('REJECTS camelCase, which is the trap this guard exists for', () => {
@@ -59,5 +62,33 @@ describe('isValidSettingKey', () => {
   it('rejects a key longer than the column allows', () => {
     expect(isValidSettingKey('a'.repeat(65))).toBe(false);
     expect(isValidSettingKey('a'.repeat(64))).toBe(true);
+  });
+});
+
+describe('LEGACY_KEY — the pre-13c fallback adoption depends on', () => {
+  it('covers every setting that existed before 13c', () => {
+    // The bug this catches: adoption reads the MIRROR, and a preference set
+    // before 13c is only in the legacy key. A missing entry here means that
+    // setting reads correctly on its own device and NEVER syncs -- silently,
+    // forever, until the user happens to change it. Observed as a phone showing
+    // dark next to a tablet showing light, with an empty settings table.
+    expect([APPEARANCE_KEY, APP_THEME_KEY, BULLET_STYLE_KEY].map((k) => LEGACY_KEY[k])).toEqual([
+      'notes.appearance.v1',
+      'notes.theme.v1',
+      'notes.bulletStyle.v1',
+    ]);
+  });
+
+  it('has no entry for the lock, which never had a standalone key', () => {
+    // The lock lived inside the vault blob, so there is nothing to adopt from.
+    // An invented entry would send adoption looking for a key that never existed.
+    expect(LEGACY_KEY[LOCK_SETTINGS_KEY] ?? 'none').toBe('none');
+  });
+
+  it('maps only to legacy names, never to a mirror name', () => {
+    // `notes.settings.*` is the MIRROR namespace. A legacy entry pointing there
+    // would make adoption read the very key it is meant to be falling back from.
+    const wrong = Object.values(LEGACY_KEY).filter((v) => v.startsWith('notes.settings.'));
+    expect(wrong).toEqual([]);
   });
 });

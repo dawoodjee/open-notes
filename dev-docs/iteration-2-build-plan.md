@@ -1870,6 +1870,48 @@ head-tag invariants including the two-viewport trap.
 
 ---
 
+## Stage 13c — POST-SHIP FIXES (2026-08-28): three bugs between a written row and a synced one
+
+Settings shipped in 13a–13c, type-checked, tested, and did not sync. Adam found
+it on two simulators: notes moved between phone and tablet, appearance never
+did. It was three independent faults stacked, each individually silent.
+
+**1. The upload handler was never written.** `uploadEntry` in
+`lib/powersync/connector.ts` switches on the table name and had cases for
+`notes` and `folders` only. Every `user_settings` op hit `default:`, logged a
+dev warning, and was SKIPPED — and because the skip returned cleanly, PowerSync
+treated the op as delivered and cleared it from the queue. Rows were written
+locally, shown in the UI, and silently discarded on the way out. The guard I
+wrote in Stage 11 predicted this exactly ("a new synced table added later gets a
+loud dev warning here"); the warning fired for weeks in a Metro log nobody reads.
+
+**2. Adoption only looked at the mirror.** `adoptLocalSettings` read
+`notes.settings.<key>` and skipped anything absent — which is every preference
+set BEFORE 13c, since those live in the legacy key. So the devices that most
+needed adopting were exactly the ones it ignored. Fixed to fall back to
+`LEGACY_KEY`, and to write the mirror as it goes.
+
+**3. Reconcile ran once, at boot.** The initial sync delivers the account's rows
+*after* that reconcile has already run, so nothing ever looked at them; the next
+launch lost the same race identically. Notes and folders never hit this because
+they render from live watch queries — settings are read once into a mirror, so
+the watch had to be spelled out. Added `watchSettings()`.
+
+A fourth, found in the fix: importing `LEGACY_KEY` through `syncedSettings`'
+re-export left it `undefined` at module-init time (`TypeError: Cannot convert
+undefined value to object`). Now imported straight from the pure module.
+
+**Verified end to end, and the disambiguation matters.** iPhone set to Dark;
+iPad's *system* appearance set to **Light**; the iPad app renders **dark**. A
+device following its own system and a device honouring a synced preference look
+identical until you make them disagree — the same trap that made the earlier
+legacy-fallback check worthless.
+
+Also new: `lib/settings/settingKeys.ts` — keys and the legacy map in a pure
+module, so `LEGACY_KEY` is covered by tests rather than by hope. 202/202.
+
+---
+
 ## Stage 13c — LIVE CHECKLIST (branch `stage-13b-web-lock`, continues 13b)
 
 - [x] **1. Appearance, app theme and bullet style are account settings.**

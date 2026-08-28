@@ -7,6 +7,17 @@ import {
   writeSetting,
 } from './syncedSettings';
 import { resolveSetting } from './resolveSetting';
+/**
+ * Straight from the pure module, NOT via syncedSettings' re-export.
+ *
+ * The re-export reads identically and broke at runtime: these three constants
+ * are evaluated at MODULE SCOPE, and with the indirection `LEGACY_KEY` was
+ * still undefined when this module initialised, so the app threw
+ * `TypeError: Cannot convert undefined value to object` before any of it ran.
+ * Importing the owning module directly removes the initialisation-order
+ * question entirely.
+ */
+import { LEGACY_KEY } from './settingKeys';
 
 /**
  * Appearance, app theme and bullet style, as account settings rather than
@@ -35,9 +46,11 @@ import { resolveSetting } from './resolveSetting';
  * upload, where the failure jams the sync queue rather than surfacing.
  */
 
-const LEGACY_APPEARANCE = 'notes.appearance.v1';
-const LEGACY_APP_THEME = 'notes.theme.v1';
-const LEGACY_BULLET_STYLE = 'notes.bulletStyle.v1';
+// One source of truth, in syncedSettings.ts -- adoption needs the same map,
+// and two lists would drift silently. See the note there.
+const LEGACY_APPEARANCE = LEGACY_KEY[APPEARANCE_KEY];
+const LEGACY_APP_THEME = LEGACY_KEY[APP_THEME_KEY];
+const LEGACY_BULLET_STYLE = LEGACY_KEY[BULLET_STYLE_KEY];
 
 /**
  * Mirror first, then the pre-13c key, then the default.
