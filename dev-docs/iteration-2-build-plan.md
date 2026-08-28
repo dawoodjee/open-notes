@@ -1932,6 +1932,46 @@ do. Verified on the iPad — icon buttons now press silently, no red screen.
 
 ---
 
+## The folder-pane rule is uniform, and finally verified (2026-08-28)
+
+**Adam's call: make it uniform.** The rule read
+`platform !== 'ios' || isLandscape`, so an Android tablet in portrait got the
+persistent column while an iPad of *identical dimensions* got the floating
+overlay. Same window, same shape, different answer — an accident of writing the
+condition against iOS rather than against the window.
+
+`folderPanePresentation` now answers on shape alone: `width > height` decides,
+and the platform is not consulted. `platform` stays in the input type because
+every caller passes it, and its presence makes "this rule ignores the platform"
+a visible decision rather than an omission someone re-adds by accident.
+
+**The consequence, accepted:** a desktop browser window taller than it is wide
+(drag one narrow, say 900x1000) now gets the overlay where it used to get the
+column. That follows from the same reasoning that makes iPad portrait an overlay
+— a tall, narrow window has no width to spare for a permanent column — and it is
+the price of uniformity. Asserted directly in `tests/folderPane.test.ts` rather
+than left to be discovered.
+
+**Verified, after being the project's longest-standing unverified claim.**
+`simctl` cannot rotate a simulator and the `osascript` route kept breaking.
+Making the rule platform-independent is what unblocked the verification too: a
+browser window at iPad dimensions now runs the *identical* code path an iPad
+does, so the two shapes can be tested by resizing.
+
+| Window | Presentation | Observed |
+|---|---|---|
+| 1376x1032 (iPad landscape) | `persistent` | flush, full-height column ✅ |
+| 1032x1376 (iPad portrait) | `overlay` | floating inset panel, content visible behind ✅ |
+
+Plus 215 unit tests, including `no window anywhere is classified by platform`
+across nine shapes — so re-adding a platform branch fails the build regardless
+of which platform it special-cases.
+
+**What this still does not prove:** a physical rotation on the device, including
+the animation between the two states.
+
+---
+
 ## Stage 13c — POST-SHIP FIXES (2026-08-28): three bugs between a written row and a synced one
 
 Settings shipped in 13a–13c, type-checked, tested, and did not sync. Adam found
