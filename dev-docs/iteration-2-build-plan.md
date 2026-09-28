@@ -2391,6 +2391,125 @@ Report the result of an import to the user: counts of created, duplicated, skipp
 
 ---
 
+## Stage 15b — Account deletion  ·  PLAN, awaiting Adam's review (2026-09-28)
+
+Branch `stage-15b-account-deletion`. Built against the five decisions in the
+Decisions Log ("Account deletion (15b)…"). Nothing below is implemented yet.
+
+### What the research found, and what it changes
+
+1. **Every table holding a user's data already cascades from the auth user** —
+   notes, folders, user_settings, profiles, user_keys all say
+   `references auth.users (id) on delete cascade`. Deleting the one auth row
+   erases everything server-side. No per-table deletion code is needed.
+2. **The app's sign-out erases the device.** `lib/auth/logout.ts` runs
+   `disconnectAndClear()` before signing out. The decided grace-period behaviour
+   ("stop syncing but keep the encrypted local copy") therefore CANNOT be a
+   sign-out. It needs a new **suspended** state — see "Needs your OK" (A).
+3. **The self-host stack has no Edge Function runtime** — `selfhost/docker-compose.yml`
+   runs db, auth, rest, kong, powersync and friends, but no `functions` service.
+   The CLI dev stack has one (`[edge_runtime] enabled = true`). See (B).
+4. **The privileged step goes through GoTrue's admin API, not SQL.**
+   `docs/two-stacks.md` warns that `postgres` is not the superuser and
+   `auth.users` belongs to `supabase_auth_admin`, so a SQL `delete from auth.users`
+   is exactly the kind of thing that works on one stack and not another.
+   `auth.admin.deleteUser()` from the Edge Function is the supported route —
+   which is a real point in favour of the Edge Function choice.
+
+### New pieces, taught briefly
+
+- **Edge Function** — a small TypeScript program (Deno, not Node) that Supabase
+  runs on its own servers at `/functions/v1/<name>`. It is the only place the
+  **service role** — Supabase's key that bypasses RLS — is available, because
+  Supabase injects it into the function's environment. The app never holds it.
+- **pg_cron** — Postgres's built-in scheduler: "run this SQL every day at 03:00".
+- **pg_net** — lets that SQL make an HTTP request, which is how a daily cron job
+  calls the Edge Function to purge expired accounts.
+- **Vault** — Supabase's encrypted secret store inside Postgres. The cron job
+  reads the function URL and a purge secret from it, so neither is ever written
+  into a committed migration.
+
+### The design
+
+**Server (both stacks)**
+- Migration: `public.account_deletions (user_id pk → auth.users on delete cascade,
+  requested_at, purge_after)`. RLS: a user may **read** their own row; nobody
+  may write it from the client — only the Edge Function (service role) does.
+  Added to the PowerSync publication so devices learn of it by sync.
+- Edge Function `account-deletion`:
+  - `request` / `cancel` / `status` — called with the user's own sign-in token;
+    the function verifies it and acts on **that user only**.
+  - `purge` — called only by the cron job, authenticated by a `CRON_SECRET`
+    header; deletes each expired user via `auth.admin.deleteUser()`, and the
+    cascade does the rest.
+- pg_cron: a daily job calls `purge` through pg_net, reading the URL and secret
+  from Vault. On a stack where those Vault secrets are absent it does nothing,
+  so a fresh stack is safe by default.
+- Sync config, by hand in both formats: dev `sync-rules.yaml`, live
+  `sync-streams.yaml`.
+
+**App**
+- **Settings → Data → Delete account** (Data is "user data management", and
+  Apple requires deletion to be easy to find). Signed-in only. The page says
+  plainly: what is deleted, the 30 days, that every device locks, how to cancel,
+  and offers **Export first**. Confirm by typing `DELETE` (decided).
+- **Suspended state**, entered the moment a device sees its own
+  `account_deletions` row — the requesting device at once, the others at their
+  next sync or open: sync disconnects, the local database is **kept**, and the
+  whole app is replaced by one screen — *"Your account is scheduled for deletion
+  on <date>"* — with **Cancel deletion**. Signing in on a fresh device during
+  the window lands on the same screen.
+- **After the purge**, a suspended device finds the account gone (its token
+  refresh fails: the user no longer exists) and erases itself — the existing
+  `logout()` path — then shows *"Your account has been deleted."*
+
+**Self-host (B)** — add Supabase's `edge-runtime` container and its Kong route to
+`selfhost/docker-compose.yml`, and document the Vault/cron setup in `docs/`.
+
+### Verification (dev stack; nothing touches live)
+
+A throwaway account created on the local stack, plus a second account as a
+bystander.
+- Request → the row appears; the device suspends; sync stops; the local notes
+  are still on disk.
+- Cancel → the row is gone; sync resumes; nothing lost.
+- Request, then move `purge_after` into the past and fire the cron job's SQL →
+  the auth user is gone and **every one of that user's rows in all five tables
+  counts zero**; the **bystander's rows are untouched**; the suspended device
+  erases itself on next open.
+- A request carrying user A's token cannot touch user B.
+- `purge` without the secret is refused.
+- The cron job is really scheduled (`cron.job`) and really calls the function.
+- `tsc`, `npm test`, `expo lint` at the baseline.
+
+### Needs your OK before I build
+
+**(A) Lock out with the session kept, not sign out.** Since sign-out erases the
+device, a suspended device keeps its session, stops syncing, and shows only the
+suspended screen with a **Cancel deletion** button. Every property you chose
+holds — locked out, no syncing, encrypted copy kept, cancel without the recovery
+phrase, erased at day 30 — but cancelling is **one tap** on a suspended device
+rather than "sign back in". (A fresh device still signs in, then taps Cancel.)
+*Tradeoff:* someone holding a suspended device can cancel the deletion. That is
+the safe direction — it preserves data — so I recommend it.
+
+**(B) Self-host gets an Edge Function runtime.** Otherwise account deletion
+simply does not exist for self-hosters. Recommended — the docs promise the
+self-hosted app is the same app.
+
+### Needs your hands — LIVE ONLY, after the dev stack is verified
+
+Front-loaded now so it is not discovered mid-run. None of it is needed to build
+and verify on dev.
+1. `supabase db push` (the migration).
+2. `supabase functions deploy account-deletion --project-ref svbrvtnldkjwtnppsugi`
+3. Set the function secret: `supabase secrets set CRON_SECRET=<a long random value>`
+4. Put the function URL and that same secret into Vault — one SQL snippet I will
+   write for you to paste into the dashboard's SQL editor.
+5. PowerSync dashboard → Sync Streams → add `account_deletions` → **Deploy**.
+
+---
+
 ## Stage 16 — Env file / sign-up toggle
 
 **Settled:** enforcement is **Supabase-side**, not merely a hidden client control — a client-only toggle is trivially bypassable against a live project.
