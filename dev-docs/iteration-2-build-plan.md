@@ -2246,42 +2246,65 @@ Escalate before making any decision that changes the app's stated encryption gua
 
 ---
 
-## Stage 14 — Website (marketing)
+## Stage 15 — LIVE CHECKLIST (started 2026-09-28, branch `stage-15-export-import`)
 
-**Settled:** separate repo, built on **Frappe**, static HTML compiled into the `www` directory. **Single page**, no docs site — the repo's existing self-hosting docs stay where they are.
+**What the editor actually stores** — measured through its own API on
+2026-09-28, not assumed. Every supported construct, with the two non-standard
+ones that a converter written from the HTML spec would have got wrong:
 
-**Design inspiration (in place of screenshots for this stage):**
-- Primary: minimal single-page sites in the style of [easlo.co/apps/experiments](https://www.easlo.co/apps/experiments) — spare, content-forward, generous whitespace.
-- The `apple-design-system` skill, same as every other iteration-2 stage.
+| Construct | Stored as |
+|---|---|
+| paragraph / heading | `<p>`, `<h1>`…`<h6>` |
+| bold / italic / underline / strike | `<b>` `<i>` `<u>` `<s>` |
+| inline code / link / image | `<code>`, `<a href>`, `<p><img src …/></p>` |
+| bullet / numbered list | `<ul><li>`, `<ol><li>` — flat, one level |
+| **checklist** | **`<ul data-type="checkbox"><li checked>`** |
+| blockquote | `<blockquote><p>…</p></blockquote>` |
+| **code block** | **`<codeblock><p>line</p><p>line</p></codeblock>`** |
+| empty line | a top-level `<br>` |
 
-**Links** (footer or a dedicated links section — Claude Code's call):
-- App Store — **disabled**, shows "Coming soon" on hover (not published there yet).
-- GitHub — the app repo.
-- Android — links straight to the **latest downloadable Expo EAS build**, not a Play Store listing (not published there either).
-- Reach out — `mailto:adam.dawoodjee+notes@gmail.com`.
+Three findings that shape the code:
+- **Markdown punctuation typed as text is stored literally** (`*star*`, `_x_`, a
+  leading `#`). Unescaped on export, a re-import would silently turn it into
+  italics or a heading — so export escapes it.
+- **The editor strips leading whitespace from code-block lines.** Indentation is
+  lost at edit time, before export ever runs; export cannot restore it.
+- Legacy pre-11.5 bodies may still hold `<strong>`/`<em>`/`<pre><code>`, so the
+  converter accepts both dialects.
 
-Fully independent of app internals; can run in parallel with any app stage on its own repo and session.
+- [x] **1. Dependencies** — `fflate`, `marked`, `expo-file-system`, `expo-sharing`,
+      `expo-document-picker`. iOS prebuild + pod install + build: exit 0 on the
+      iPhone 17 simulator.
+- [x] **2. HTML → Markdown** — `lib/dataio/htmlToMarkdown.ts` + `htmlTree.ts`. 27 tests, mutation-checked (removing the `*` escape fails the suite).
+- [x] **3. Markdown → editor HTML** — `lib/dataio/markdownToHtml.ts`. **`marked` does not sanitise** (measured: a `javascript:` link and `<img onerror>` pass straight through), so the normaliser is an allowlist of tags, attributes and URL schemes. Every stored construct round-trips; the one inexact case — `<b><i>` returns as `<i><b>`, identical on screen — is why collisions compare Markdown, not HTML.
+- [x] **4. Archive layout** — `lib/dataio/archiveLayout.ts` + `collisions.ts`, 30 tests. Filenames survive `/`, Windows-illegal characters, trailing dots, `CON`, 100-code-point caps and case-insensitive duplicates. Unwrapping is top-only and stops at our marker (mutation-checked). "Identical" is compared as Markdown.
+- [x] **5. Database seams** — `listAllNotes()` (trash included; undecryptable notes returned so export can report them) and `insertNoteInDB()` (one write, body included). `createNoteInDB` now routes through it, so the owner stamp and the Skills visibility default exist in one place. Jobs in `exportNotes.ts` / `importNotes.ts`, progress in `dataJobs.ts`.
+- [x] **6. Platform file I/O** — `fileIO.ts` (share sheet, document picker; the decrypted temp file is deleted as soon as the sheet returns) and `fileIO.web.ts` (Blob download, file input). Zip sizes are checked from the directory BEFORE inflating (10 MB per entry, 500 MB total), and each entry is inflated alone so a corrupt one fails alone.
+- [x] **7. Settings → Data**, with Export and Import pages — `components/DataView.tsx`, `DataJobStatus.tsx`. Both toggles are `SettingsSegmented` in a `SettingsRow`, exactly how Lock Time is drawn. Export states plainly that **the zip is not encrypted** — the one place this app hands out plaintext on purpose.
+- [x] **8. Verification** — web and native. Every web item ran through the real UI, with fetch/XHR/WebSocket hooked:
 
-**📸 SCREENSHOTS** — none. Build from the design inspiration above instead of a static mock.
+      | Check | Result |
+      |---|---|
+      | Export → wipe → import → export, then `diff -r` the two zips | **identical** (marker excluded — it carries a timestamp) |
+      | Opened with the system `unzip`, not fflate | exit 0; Markdown readable, escaping correct |
+      | Re-import the same zip | created 0, **skipped 8** |
+      | Edit one note, re-import | **duplicated 1**, skipped 7 |
+      | Overwrite on | **overwritten 1**; the identical twin still skipped |
+      | "Imported" placement, twice | one `Imported` folder; second run skipped all |
+      | Foreign zip with a `MyExport/` wrapper | wrapper gone; `Sub` kept; filename became the heading |
+      | Hostile Markdown (`javascript:` link, `onerror`) | stored as `<p>click me</p>` |
+      | Import killed at 74/300 by a page reload | existing 4/4 intact, 93 landed, **0 half-written, 0 duplicated**; re-run created 207, skipped 93 |
+      | Network requests during any export or import | **none** |
 
-**Prompt:**
+      Two findings from this. **(a)** Trashed notes first came back unfiled, and diffing the two exports was what showed it; they now return to their original folder when that folder already exists (never created for the trash). **(b)** The web editor re-saves any note it opens in its own whitespace form, bumping `updated_at` — pre-existing, not Stage 15, spun off as its own task.
 
-```
-This runs in a NEW, SEPARATE repository, not the open-notes app repo. Create it, and tell me the name you're using before you start committing.
+      **Native, iPhone 17 simulator (signed out, local data only):** Settings → Data → Export produced the real iOS share sheet (`ZIP Archive · 736 bytes`); saved to Files, the file opens with the system `unzip`. The app's decrypted temp copy is **gone** afterwards — on Save *and* on Cancel. Picked back through the iOS document picker: nothing created, every file accounted for.
 
-Build a single-page marketing site for open-notes on the Frappe framework, output as static HTML into the app's www directory. One page. No documentation site — the app repo already has self-hosting docs and a roadmap; link to them on GitHub rather than duplicating them here.
+      **Two more of my bugs, found by that native run.** The trash loop did nothing at all with an empty file — three files in, two reported — and the report said "already here with the same title and content" about a note that was actually skipped for being empty. Now every skip is counted with its reason.
 
-CONTEXT ON WHAT THE PRODUCT IS — get this right, it's the whole pitch:
-open-notes is a local-first, cross-platform, end-to-end encrypted notes app. It works fully offline with no account; signing in is how you turn on SYNC, never a precondition for using the app. Note content, titles, and folder names are encrypted on-device — the server, including a self-hosted one, only ever holds ciphertext and cannot read them. It's open source and self-hostable. Notes belong to the person who wrote them: there's a per-note "Visible to Apps" toggle and an on-device broker that is the only path to decrypted content, so other apps and AI get access on the user's explicit terms rather than by default. On-device AI works within that model because the key is already local; anything server-side would require a separate, explicit, off-by-default opt-in. Don't overstate — the repo is at v0.1, mobile-only shipping today, with web on the roadmap.
+      **And one guard added:** the three native modules are loaded lazily, not imported at the top. Settings loads at startup, so a static import would crash any binary built before this stage — your Android build included, which has not been rebuilt — at launch. Same trap as `RNPulsar` in Stage 12, same fix. **Android needs `npx expo run:android` before Export/Import works there**; until then it degrades to "file access isn't in this version" instead of crashing.
 
-DESIGN INSPIRATION: primary reference is minimal single-page sites in the style of https://www.easlo.co/apps/experiments — spare, content-forward, generous whitespace. Read the apple-design-system skill and follow it too: clean, minimal, confident typography, generous whitespace, restrained motion. Dark mode. No stock-photo filler, no fake testimonials, no invented metrics or user counts.
-
-Sections, in this order: a hero with the one-sentence pitch and a GitHub link; what makes it different (local-first, E2EE including folder names, no account required, open source and self-hostable); the ownership/AI-boundary principle stated plainly since it's the point of the project; honest platform status (iOS and Android today, web on the roadmap); and a links section with exactly these four: App Store (DISABLED, "Coming soon" on hover — not published yet), GitHub (the app repo), Android (link directly to the latest downloadable Expo EAS build artifact, not a Play Store listing — not published there either), and a "reach out" mailto link to adam.dawoodjee+notes@gmail.com.
-
-Before writing copy, ask me for: the repo name to use, the domain if one exists, the current Expo EAS build link to point the Android link at, and confirmation of anything above you're unsure is still accurate — the app is at v0.1 and I'd rather you check than publish a claim that's drifted.
-
-Deliver the static build in www/, confirm it renders correctly at mobile, tablet, and desktop widths, and screenshot all three.
-```
+      **Known limits, stated:** folder settings (Include in Notes, Group by Date) do not round-trip — a zip has nowhere to carry them, and imported folders get the prompt's default (Include ON). Code-block indentation is lost at edit time, before export runs.
 
 ---
 
@@ -2394,6 +2417,52 @@ VERIFY: against the local dev stack, disable sign-ups and prove (a) a new sign-u
 
 ---
 
+## Stage 14 — Website (marketing)  ·  *runs LAST — reordered 2026-09-28*
+
+> **Order changed, number kept.** Adam moved the website to the end of the
+> iteration (2026-09-28): execution order is now **15 → 16 → 14**. The number
+> stays 14 because stage numbers are used as *names* elsewhere in this file —
+> Decisions Log entries say "lands in Stage 15" and "Stage 14 in the new website
+> repo" — and renumbering would quietly falsify those historical entries.
+
+
+**Settled:** separate repo, built on **Frappe**, static HTML compiled into the `www` directory. **Single page**, no docs site — the repo's existing self-hosting docs stay where they are.
+
+**Design inspiration (in place of screenshots for this stage):**
+- Primary: minimal single-page sites in the style of [easlo.co/apps/experiments](https://www.easlo.co/apps/experiments) — spare, content-forward, generous whitespace.
+- The `apple-design-system` skill, same as every other iteration-2 stage.
+
+**Links** (footer or a dedicated links section — Claude Code's call):
+- App Store — **disabled**, shows "Coming soon" on hover (not published there yet).
+- GitHub — the app repo.
+- Android — links straight to the **latest downloadable Expo EAS build**, not a Play Store listing (not published there either).
+- Reach out — `mailto:adam.dawoodjee+notes@gmail.com`.
+
+Fully independent of app internals; can run in parallel with any app stage on its own repo and session.
+
+**📸 SCREENSHOTS** — none. Build from the design inspiration above instead of a static mock.
+
+**Prompt:**
+
+```
+This runs in a NEW, SEPARATE repository, not the open-notes app repo. Create it, and tell me the name you're using before you start committing.
+
+Build a single-page marketing site for open-notes on the Frappe framework, output as static HTML into the app's www directory. One page. No documentation site — the app repo already has self-hosting docs and a roadmap; link to them on GitHub rather than duplicating them here.
+
+CONTEXT ON WHAT THE PRODUCT IS — get this right, it's the whole pitch:
+open-notes is a local-first, cross-platform, end-to-end encrypted notes app. It works fully offline with no account; signing in is how you turn on SYNC, never a precondition for using the app. Note content, titles, and folder names are encrypted on-device — the server, including a self-hosted one, only ever holds ciphertext and cannot read them. It's open source and self-hostable. Notes belong to the person who wrote them: there's a per-note "Visible to Apps" toggle and an on-device broker that is the only path to decrypted content, so other apps and AI get access on the user's explicit terms rather than by default. On-device AI works within that model because the key is already local; anything server-side would require a separate, explicit, off-by-default opt-in. Don't overstate — the repo is at v0.1, mobile-only shipping today, with web on the roadmap.
+
+DESIGN INSPIRATION: primary reference is minimal single-page sites in the style of https://www.easlo.co/apps/experiments — spare, content-forward, generous whitespace. Read the apple-design-system skill and follow it too: clean, minimal, confident typography, generous whitespace, restrained motion. Dark mode. No stock-photo filler, no fake testimonials, no invented metrics or user counts.
+
+Sections, in this order: a hero with the one-sentence pitch and a GitHub link; what makes it different (local-first, E2EE including folder names, no account required, open source and self-hostable); the ownership/AI-boundary principle stated plainly since it's the point of the project; honest platform status (iOS and Android today, web on the roadmap); and a links section with exactly these four: App Store (DISABLED, "Coming soon" on hover — not published yet), GitHub (the app repo), Android (link directly to the latest downloadable Expo EAS build artifact, not a Play Store listing — not published there either), and a "reach out" mailto link to adam.dawoodjee+notes@gmail.com.
+
+Before writing copy, ask me for: the repo name to use, the domain if one exists, the current Expo EAS build link to point the Android link at, and confirmation of anything above you're unsure is still accurate — the app is at v0.1 and I'd rather you check than publish a claim that's drifted.
+
+Deliver the static build in www/, confirm it renders correctly at mobile, tablet, and desktop widths, and screenshot all three.
+```
+
+---
+
 ## Deferred to the end of iteration 2
 
 Parked deliberately, with a landing point, so they don't evaporate into "we'll get to it".
@@ -2417,6 +2486,37 @@ One blocking item; the rest is settled and recorded in the Decisions Log below.
 ## Decisions Log
 
 *(iteration-2-specific decisions, same terse format as `dev-docs/mvp-build-plan.md` — decision / reasoning / verification / status. Don't duplicate MVP-era entries.)*
+
+### 2026-09-28 — Import unwraps only TOP-LEVEL wrapper folders
+- **Decision:** Adam's call. Import repeatedly unwraps while the zip's root is a single folder with no notes of its own — the "MyExport/" artifact zip tools add. Folders anywhere else are always created, even when they hold only subfolders. **Supersedes** the Stage 15 prompt's "collapse any note-less folder, recursively".
+- **Reasoning:** Applied literally, the original rule erases real structure — `Work › Projects › Q3` with notes only in Q3 re-imports as just `Q3` — which contradicts the prompt's own round-trip requirement.
+- **Addition, needed to make the rule hold (decided, cheap to reverse):** our exports write a hidden `.notes-export.json` marker at the zip root, and unwrapping stops at the directory that holds it. Without it, exporting a single folder ("Choose → Work") produces a zip whose root is only `Work/` — indistinguishable from a wrapper — and Work would be stripped on re-import. Foreign zips have no marker and get exactly the rule above.
+- **Consequence accepted:** A zip from another tool whose only top-level entry is one real folder loses that folder level on import. That is the known cost of recognising wrappers by shape.
+- **Status:** Accepted.
+
+### 2026-09-28 — Trashed notes: a "Recently Deleted" directory out, back into the trash in
+- **Decision (mine, per the prompt's "state how"):** "Everything" writes trashed notes under `Recently Deleted/<their original folder path>/` in the zip. On import, a top-level `Recently Deleted/` goes back **into the trash**, unfiled, stamped with the import time so it gets the full 30 days before auto-clear.
+- **Reasoning:** Exporting a note must not restore it, and importing it should not either — a trashed note returning to the trash is the faithful answer. Unfiled rather than recreating its old folders, because restoring into folders that exist only for the trash would leave empty folders behind; the original path stays readable in the zip for a human.
+- **Consequence accepted:** A zip from another app that happens to contain a top-level folder named "Recently Deleted" would import into the trash. Unlikely, and recoverable by restoring.
+- **Status:** Decided; reversible in one branch of the importer.
+
+### 2026-09-28 — "User data management" is Export/Import, then account deletion as 15b
+- **Decision:** Stage 15 builds Export/Import as planned. Account + data deletion follows as its own stage, **15b**, immediately after.
+- **Reasoning:** No deletion path exists anywhere in the app, and Apple requires in-app account deletion for any app that allows sign-up. Export goes first because it is the safety net a user would want before a deletion feature exists. Deletion needs a server-side function (removing an auth user needs the service role, which the client must never hold) and a migration on both stacks, so it gets its own checkpoint rather than riding along with export.
+- **Consequence accepted:** Deletion ships one stage later than it could have in a combined stage; a deletion bug cannot hold up export.
+- **Status:** Stage 15 in progress; 15b planned.
+
+### 2026-09-28 — Five new dependencies for Stage 15
+- **Decision:** `fflate` (zip and unzip), `marked` (Markdown -> HTML on import), `expo-file-system`, `expo-sharing`, `expo-document-picker`.
+- **Reasoning:** None of zip, file access, share sheet or file picking existed. `fflate` over `jszip`: pure JS, far smaller, synchronous and streaming APIs, and it runs under plain Node so the round-trip can be unit-tested in the existing harness. `marked` for IMPORT only, because import must accept arbitrary Markdown from other apps (Obsidian, Bear), which is where a hand-rolled parser silently loses tables, nested lists and reference links. EXPORT is hand-rolled instead: its input is the editor's closed, flat tag set, so owning that direction is what guarantees fidelity. Web needs none of the three expo modules — a Blob download and a file input do the same job.
+- **Consequence accepted:** Three native modules, so one prebuild + rebuild on iOS and Android. Bundle grows by roughly fflate's and marked's size.
+- **Status:** Accepted.
+
+### 2026-09-28 — Underline exports as inline `<u>…</u>`
+- **Decision:** Underlined text is written into the Markdown as inline HTML, `<u>text</u>`.
+- **Reasoning:** Markdown has no underline syntax. CommonMark permits inline HTML, so this round-trips exactly through our own importer, renders in most viewers, and stays readable as plain text. The alternative — dropping to plain text — is silent data loss, which the Stage 15 prompt names as the worst possible outcome for this feature.
+- **Consequence accepted:** A strict Markdown purist sees HTML tags in an otherwise pure file.
+- **Status:** Accepted.
 
 ### 2026-08-27 — The gate KDF is scrypt N=2^13, chosen on measurement
 - **Decision:** `GATE_KDF_PARAMS` = scrypt N=2^13, r=8 — **434 ms** per attempt, ~5 days for a browser-confined sweep of all 10^6 PINs. Down from N=2^16, which was written on an estimate and actually costs **3,123 ms**.
