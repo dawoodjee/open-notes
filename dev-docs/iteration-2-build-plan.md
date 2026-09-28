@@ -2281,7 +2281,7 @@ Three findings that shape the code:
 - [x] **5. Database seams** — `listAllNotes()` (trash included; undecryptable notes returned so export can report them) and `insertNoteInDB()` (one write, body included). `createNoteInDB` now routes through it, so the owner stamp and the Skills visibility default exist in one place. Jobs in `exportNotes.ts` / `importNotes.ts`, progress in `dataJobs.ts`.
 - [x] **6. Platform file I/O** — `fileIO.ts` (share sheet, document picker; the decrypted temp file is deleted as soon as the sheet returns) and `fileIO.web.ts` (Blob download, file input). Zip sizes are checked from the directory BEFORE inflating (10 MB per entry, 500 MB total), and each entry is inflated alone so a corrupt one fails alone.
 - [x] **7. Settings → Data**, with Export and Import pages — `components/DataView.tsx`, `DataJobStatus.tsx`. Both toggles are `SettingsSegmented` in a `SettingsRow`, exactly how Lock Time is drawn. Export states plainly that **the zip is not encrypted** — the one place this app hands out plaintext on purpose.
-- [ ] **8. Verification** — WEB DONE, native pending. Every item below ran through the real UI, with fetch/XHR/WebSocket hooked:
+- [x] **8. Verification** — web and native. Every web item ran through the real UI, with fetch/XHR/WebSocket hooked:
 
       | Check | Result |
       |---|---|
@@ -2297,6 +2297,12 @@ Three findings that shape the code:
       | Network requests during any export or import | **none** |
 
       Two findings from this. **(a)** Trashed notes first came back unfiled, and diffing the two exports was what showed it; they now return to their original folder when that folder already exists (never created for the trash). **(b)** The web editor re-saves any note it opens in its own whitespace form, bumping `updated_at` — pre-existing, not Stage 15, spun off as its own task.
+
+      **Native, iPhone 17 simulator (signed out, local data only):** Settings → Data → Export produced the real iOS share sheet (`ZIP Archive · 736 bytes`); saved to Files, the file opens with the system `unzip`. The app's decrypted temp copy is **gone** afterwards — on Save *and* on Cancel. Picked back through the iOS document picker: nothing created, every file accounted for.
+
+      **Two more of my bugs, found by that native run.** The trash loop did nothing at all with an empty file — three files in, two reported — and the report said "already here with the same title and content" about a note that was actually skipped for being empty. Now every skip is counted with its reason.
+
+      **And one guard added:** the three native modules are loaded lazily, not imported at the top. Settings loads at startup, so a static import would crash any binary built before this stage — your Android build included, which has not been rebuilt — at launch. Same trap as `RNPulsar` in Stage 12, same fix. **Android needs `npx expo run:android` before Export/Import works there**; until then it degrades to "file access isn't in this version" instead of crashing.
 
       **Known limits, stated:** folder settings (Include in Notes, Group by Date) do not round-trip — a zip has nowhere to carry them, and imported folders get the prompt's default (Include ON). Code-block indentation is lost at edit time, before export runs.
 

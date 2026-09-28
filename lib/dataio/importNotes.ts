@@ -46,7 +46,19 @@ const MAX_TOTAL_BYTES = 500 * 1024 * 1024;
 
 /** Pick a zip and import it. Returns without starting a job if the user cancels. */
 export async function startImport(options: ImportOptions): Promise<void> {
-  const picked = await pickZip();
+  // The picker runs BEFORE the job, so cancelling it never starts one. Its
+  // failures -- a build without the file modules, a picker error -- would then
+  // be an unhandled rejection with nothing on screen, so they are routed into a
+  // job purely so the user gets the same "didn't finish" report as any other.
+  let picked: Awaited<ReturnType<typeof pickZip>>;
+  try {
+    picked = await pickZip();
+  } catch (err) {
+    await runJob('import', async () => {
+      throw err;
+    });
+    return;
+  }
   if (!picked) return;
   await runJob('import', ({ progress, yieldToUi }) => importZip(picked.bytes, options, progress, yieldToUi));
 }
@@ -54,7 +66,12 @@ export async function startImport(options: ImportOptions): Promise<void> {
 interface Counts {
   created: number;
   duplicated: number;
+  /** skippedSame + skippedEmpty -- the single number in the headline. */
   skipped: number;
+  /** Already here with the same title and content. */
+  skippedSame: number;
+  /** Empty files: nothing to import. Kept apart so the report can say why. */
+  skippedEmpty: number;
   overwritten: number;
   failed: number;
   trashed: number;
@@ -154,7 +171,22 @@ async function importZip(
       return { id: s.id, key: s.key, updatedAt: s.updatedAt };
     });
 
-  const counts: Counts = { created: 0, duplicated: 0, skipped: 0, overwritten: 0, failed: 0, trashed: 0, foldersCreated: 0 };
+  const counts: Counts = {
+    created: 0,
+    duplicated: 0,
+    skipped: 0,
+    skippedSame: 0,
+    skippedEmpty: 0,
+    overwritten: 0,
+    failed: 0,
+    trashed: 0,
+    foldersCreated: 0,
+  };
+  const skipEmpty = (file: ImportFile) => {
+    counts.skipped++;
+    counts.skippedEmpty++;
+    report.problems.push(`“${file.path}” was skipped: it is empty.`);
+  };
   const degraded = new Set<string>();
   let depthCapped = 0;
 
@@ -196,11 +228,7 @@ async function importZip(
   const importFile = async (file: ImportFile, folder: Folder | null) => {
     try {
       const html = toHtml(file);
-      if (!html) {
-        counts.skipped++;
-        report.problems.push(`“${file.path}” was skipped: it is empty.`);
-        return;
-      }
+      if (!html) return skipEmpty(file);
       const { title } = parseNoteContent(html);
       const key = slotKey(folder?.id ?? null, title);
       const slots = liveIndex.get(key) ?? [];
@@ -209,6 +237,7 @@ async function importZip(
       switch (decision.action) {
         case 'skip':
           counts.skipped++;
+          counts.skippedSame++;
           return;
         case 'overwrite': {
           await updateNoteInDB(decision.existingId, html);
@@ -288,13 +317,19 @@ async function importZip(
   for (const file of tree.trash) {
     try {
       const html = toHtml(file);
-      if (html) {
+      // Reported like any other empty file. This branch used to do nothing at
+      // all with one -- no count, no line -- which is how a note went
+      // unaccounted for in the first native run: three files in, two reported.
+      if (!html) skipEmpty(file);
+      else {
         const { title } = parseNoteContent(html);
         const key = slotKey(null, title);
         const slots = trashIndex.get(key) ?? [];
         const decision = resolveCollision(asExisting(slots), contentKey(html), false);
-        if (decision.action === 'skip') counts.skipped++;
-        else {
+        if (decision.action === 'skip') {
+          counts.skipped++;
+          counts.skippedSame++;
+        } else {
           const folder = existingFolder(file.folderPath);
           const note = await insertNoteInDB({ folderId: folder?.id ?? null, body: html, trashed: true });
           trashIndex.set(key, [...slots, { id: note.id, body: html, updatedAt: note.updatedAt }]);
@@ -324,8 +359,15 @@ async function importZip(
     );
   }
   if (degraded.size) report.lines.push(`Simplified to fit the editor: ${[...degraded].join(', ')}.`);
-  if (counts.skipped && !options.overwrite) {
-    report.lines.push('Skipped notes were already here with the same title and content.');
+  // Each reason stated separately. A single "skipped notes were already here"
+  // line was wrong the first time an import met an empty file.
+  if (counts.skippedSame) {
+    report.lines.push(
+      `${plural(counts.skippedSame, 'note')} ${counts.skippedSame === 1 ? 'was' : 'were'} already here with the same title and content.`
+    );
+  }
+  if (counts.skippedEmpty) {
+    report.lines.push(`${plural(counts.skippedEmpty, 'file')} ${counts.skippedEmpty === 1 ? 'was' : 'were'} empty.`);
   }
   return report;
 }
