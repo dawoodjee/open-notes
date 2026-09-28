@@ -2277,7 +2277,7 @@ Three findings that shape the code:
       iPhone 17 simulator.
 - [x] **2. HTML → Markdown** — `lib/dataio/htmlToMarkdown.ts` + `htmlTree.ts`. 27 tests, mutation-checked (removing the `*` escape fails the suite).
 - [x] **3. Markdown → editor HTML** — `lib/dataio/markdownToHtml.ts`. **`marked` does not sanitise** (measured: a `javascript:` link and `<img onerror>` pass straight through), so the normaliser is an allowlist of tags, attributes and URL schemes. Every stored construct round-trips; the one inexact case — `<b><i>` returns as `<i><b>`, identical on screen — is why collisions compare Markdown, not HTML.
-- [ ] **4. Archive layout** — filenames, folder paths, wrapper collapsing, collisions
+- [x] **4. Archive layout** — `lib/dataio/archiveLayout.ts` + `collisions.ts`, 30 tests. Filenames survive `/`, Windows-illegal characters, trailing dots, `CON`, 100-code-point caps and case-insensitive duplicates. Unwrapping is top-only and stops at our marker (mutation-checked). "Identical" is compared as Markdown.
 - [ ] **5. Database seams** — bulk read for export, one-write note insert for import
 - [ ] **6. Platform file I/O** — native share sheet / document picker; web download / file input
 - [ ] **7. Settings → Data**, with Export and Import sub-pages
@@ -2463,6 +2463,19 @@ One blocking item; the rest is settled and recorded in the Decisions Log below.
 ## Decisions Log
 
 *(iteration-2-specific decisions, same terse format as `dev-docs/mvp-build-plan.md` — decision / reasoning / verification / status. Don't duplicate MVP-era entries.)*
+
+### 2026-09-28 — Import unwraps only TOP-LEVEL wrapper folders
+- **Decision:** Adam's call. Import repeatedly unwraps while the zip's root is a single folder with no notes of its own — the "MyExport/" artifact zip tools add. Folders anywhere else are always created, even when they hold only subfolders. **Supersedes** the Stage 15 prompt's "collapse any note-less folder, recursively".
+- **Reasoning:** Applied literally, the original rule erases real structure — `Work › Projects › Q3` with notes only in Q3 re-imports as just `Q3` — which contradicts the prompt's own round-trip requirement.
+- **Addition, needed to make the rule hold (decided, cheap to reverse):** our exports write a hidden `.notes-export.json` marker at the zip root, and unwrapping stops at the directory that holds it. Without it, exporting a single folder ("Choose → Work") produces a zip whose root is only `Work/` — indistinguishable from a wrapper — and Work would be stripped on re-import. Foreign zips have no marker and get exactly the rule above.
+- **Consequence accepted:** A zip from another tool whose only top-level entry is one real folder loses that folder level on import. That is the known cost of recognising wrappers by shape.
+- **Status:** Accepted.
+
+### 2026-09-28 — Trashed notes: a "Recently Deleted" directory out, back into the trash in
+- **Decision (mine, per the prompt's "state how"):** "Everything" writes trashed notes under `Recently Deleted/<their original folder path>/` in the zip. On import, a top-level `Recently Deleted/` goes back **into the trash**, unfiled, stamped with the import time so it gets the full 30 days before auto-clear.
+- **Reasoning:** Exporting a note must not restore it, and importing it should not either — a trashed note returning to the trash is the faithful answer. Unfiled rather than recreating its old folders, because restoring into folders that exist only for the trash would leave empty folders behind; the original path stays readable in the zip for a human.
+- **Consequence accepted:** A zip from another app that happens to contain a top-level folder named "Recently Deleted" would import into the trash. Unlikely, and recoverable by restoring.
+- **Status:** Decided; reversible in one branch of the importer.
 
 ### 2026-09-28 — "User data management" is Export/Import, then account deletion as 15b
 - **Decision:** Stage 15 builds Export/Import as planned. Account + data deletion follows as its own stage, **15b**, immediately after.

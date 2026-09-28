@@ -23,6 +23,7 @@ import './folderPane.test';
 import './headTags.test';
 import './htmlToMarkdown.test';
 import './markdownToHtml.test';
+import './archiveLayout.test';
 import { report } from './harness';
 
 report();
