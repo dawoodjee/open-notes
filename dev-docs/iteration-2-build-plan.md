@@ -2487,6 +2487,17 @@ One blocking item; the rest is settled and recorded in the Decisions Log below.
 
 *(iteration-2-specific decisions, same terse format as `dev-docs/mvp-build-plan.md` — decision / reasoning / verification / status. Don't duplicate MVP-era entries.)*
 
+### 2026-09-28 — Account deletion (15b): a 30-day grace period, and what devices do during it
+Five calls, all Adam's; three differ from what I recommended, so the tradeoffs are spelled out.
+
+- **Timing: a 30-day grace period** (I recommended immediate). The account is disabled at request and purged after 30 days; signing back in within the window cancels. *Accepted cost:* a scheduled server job, and a "pending deletion" state every device must understand.
+- **Confirmation: type DELETE, nothing more** (I recommended DELETE plus the app's own unlock). *Accepted cost:* it stops accidents, not someone holding the unlocked phone. **The grace period is what covers that gap** — a deletion made by someone else can be undone by signing in within 30 days. The two choices fit together.
+- **Server: a Supabase Edge Function** (I recommended a SECURITY DEFINER database function). *Accepted cost:* a new deploy target (`supabase functions deploy`, on both stacks), and a function running with the service role — which Supabase injects into every Edge Function's environment, so no NEW key is created or stored by us, but the function must verify the caller's own JWT and act only on that user. More flexible later (e.g. a confirmation email).
+- **Other devices: wiped once the account no longer exists** (recommended).
+- **During the 30 days: lock out, wipe at day 30** (recommended). Every device — the one that asked included — signs out and stops syncing but keeps its ENCRYPTED local copy until the purge; it wipes when it next opens and finds the account gone.
+  *Why this one:* notes are end-to-end encrypted. Had devices wiped at request time, cancelling would need the 12-word recovery phrase, and without it the grace period could not save anything. Keeping each device's encrypted copy is what makes "sign back in to cancel" actually work.
+- **Status:** decided; 15b planned against these.
+
 ### 2026-09-28 — Import unwraps only TOP-LEVEL wrapper folders
 - **Decision:** Adam's call. Import repeatedly unwraps while the zip's root is a single folder with no notes of its own — the "MyExport/" artifact zip tools add. Folders anywhere else are always created, even when they hold only subfolders. **Supersedes** the Stage 15 prompt's "collapse any note-less folder, recursively".
 - **Reasoning:** Applied literally, the original rule erases real structure — `Work › Projects › Q3` with notes only in Q3 re-imports as just `Q3` — which contradicts the prompt's own round-trip requirement.
