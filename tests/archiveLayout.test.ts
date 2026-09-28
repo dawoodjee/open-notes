@@ -156,6 +156,9 @@ describe('buildImportTree — top wrappers only (Adam, 2026-09-28)', () => {
   it('Recently Deleted at the top is routed to the trash', () => {
     const tree = buildImportTree([{ path: EXPORT_MARKER, text: '{}' }, file('Recently Deleted/Work/gone.md'), file('kept.md')]);
     expect(tree.trash.map((f) => f.stem)).toEqual(['gone']);
+    // The folder it was deleted from, so import can file it back if that
+    // folder exists.
+    expect(tree.trash[0].folderPath).toEqual(['Work']);
     expect(tree.root.dirs.map((d) => d.name)).toEqual([]);
   });
 

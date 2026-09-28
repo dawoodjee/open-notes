@@ -6,7 +6,7 @@ import { useInstallPrompt } from '@/lib/pwa/install';
 import { Pressable } from '@/components/ui/pressable';
 import { HStack } from '@/components/ui/hstack';
 import { Icon } from '@/components/ui/icon';
-import { AlertTriangle, Download, Palette, Settings as SettingsIcon, ShieldCheck, Type, Wrench, X } from 'lucide-react-native';
+import { AlertTriangle, Database, Download, Palette, Settings as SettingsIcon, ShieldCheck, Type, Wrench, X } from 'lucide-react-native';
 import { getPowerSync } from '@/lib/powersync/db';
 import {
   SettingsGroup,
@@ -17,6 +17,7 @@ import {
 import { SecurityView } from '@/components/SecurityView';
 import { EndpointsView } from '@/components/EndpointsView';
 import { AppearanceView } from '@/components/AppearanceView';
+import { DataView, ExportView, ImportView } from '@/components/DataView';
 import { useVault } from '@/contexts/VaultContext';
 import { useTheme } from '@/contexts/ThemeContext';
 
@@ -88,7 +89,7 @@ function AdvancedView({ onBack }: { onBack: () => void }) {
 
 export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
   const [view, setView] = useState<
-    'root' | 'advanced' | 'security' | 'endpoints' | 'appearance'
+    'root' | 'advanced' | 'security' | 'endpoints' | 'appearance' | 'data' | 'export' | 'import'
   >('root');
   /**
    * Read here and handed down as props.
@@ -166,6 +167,7 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
                   label="Security"
                   onPress={() => setView('security')}
                 />
+                <SettingsRow icon={Database} label="Data" onPress={() => setView('data')} />
                 <SettingsRow icon={Wrench} label="Advanced" onPress={() => setView('advanced')} />
               </SettingsGroup>
 
@@ -203,6 +205,16 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
             updateLockSettings={updateLockSettings}
             onManageEndpoints={() => setView('endpoints')}
           />
+        ) : view === 'data' ? (
+          <DataView
+            onBack={() => setView('root')}
+            onExport={() => setView('export')}
+            onImport={() => setView('import')}
+          />
+        ) : view === 'export' ? (
+          <ExportView onBack={() => setView('data')} />
+        ) : view === 'import' ? (
+          <ImportView onBack={() => setView('data')} />
         ) : view === 'endpoints' ? (
           <EndpointsView onBack={() => setView('security')} />
         ) : view === 'appearance' ? (

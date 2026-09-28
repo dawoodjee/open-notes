@@ -224,8 +224,12 @@ export interface ImportDir {
 
 export interface ImportTree {
   root: ImportDir;
-  /** Everything under a top-level "Recently Deleted", headed for the trash. */
-  trash: ImportFile[];
+  /**
+   * Everything under a top-level "Recently Deleted", headed for the trash, with
+   * the folder path it sat in INSIDE Recently Deleted -- which is the folder
+   * it was deleted from. See importNotes for how that path is used.
+   */
+  trash: (ImportFile & { folderPath: string[] })[];
   /** Entries that were not notes, with why. Reported, not silently dropped. */
   ignored: { path: string; reason: string }[];
   /** True when this zip is one of ours -- see EXPORT_MARKER. */
@@ -309,14 +313,14 @@ export function buildImportTree(entries: { path: string; text: string | null }[]
     topPath = topPath ? `${topPath}/${top.name}` : top.name;
   }
 
-  const trash: ImportFile[] = [];
+  const trash: ImportTree['trash'] = [];
   const trashDir = top.dirs.find((d) => d.name === TRASH_DIR);
   if (trashDir) {
-    const collect = (d: ImportDir) => {
-      trash.push(...d.files);
-      d.dirs.forEach(collect);
+    const collect = (d: ImportDir, folderPath: string[]) => {
+      trash.push(...d.files.map((f) => ({ ...f, folderPath })));
+      d.dirs.forEach((sub) => collect(sub, [...folderPath, sub.name]));
     };
-    collect(trashDir);
+    collect(trashDir, []);
     top = { ...top, dirs: top.dirs.filter((d) => d !== trashDir) };
   }
 

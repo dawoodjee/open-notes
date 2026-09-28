@@ -2280,8 +2280,25 @@ Three findings that shape the code:
 - [x] **4. Archive layout** — `lib/dataio/archiveLayout.ts` + `collisions.ts`, 30 tests. Filenames survive `/`, Windows-illegal characters, trailing dots, `CON`, 100-code-point caps and case-insensitive duplicates. Unwrapping is top-only and stops at our marker (mutation-checked). "Identical" is compared as Markdown.
 - [x] **5. Database seams** — `listAllNotes()` (trash included; undecryptable notes returned so export can report them) and `insertNoteInDB()` (one write, body included). `createNoteInDB` now routes through it, so the owner stamp and the Skills visibility default exist in one place. Jobs in `exportNotes.ts` / `importNotes.ts`, progress in `dataJobs.ts`.
 - [x] **6. Platform file I/O** — `fileIO.ts` (share sheet, document picker; the decrypted temp file is deleted as soon as the sheet returns) and `fileIO.web.ts` (Blob download, file input). Zip sizes are checked from the directory BEFORE inflating (10 MB per entry, 500 MB total), and each entry is inflated alone so a corrupt one fails alone.
-- [ ] **7. Settings → Data**, with Export and Import sub-pages
-- [ ] **8. Verification** — the round-trip list in the prompt below, plus "no network during either operation"
+- [x] **7. Settings → Data**, with Export and Import pages — `components/DataView.tsx`, `DataJobStatus.tsx`. Both toggles are `SettingsSegmented` in a `SettingsRow`, exactly how Lock Time is drawn. Export states plainly that **the zip is not encrypted** — the one place this app hands out plaintext on purpose.
+- [ ] **8. Verification** — WEB DONE, native pending. Every item below ran through the real UI, with fetch/XHR/WebSocket hooked:
+
+      | Check | Result |
+      |---|---|
+      | Export → wipe → import → export, then `diff -r` the two zips | **identical** (marker excluded — it carries a timestamp) |
+      | Opened with the system `unzip`, not fflate | exit 0; Markdown readable, escaping correct |
+      | Re-import the same zip | created 0, **skipped 8** |
+      | Edit one note, re-import | **duplicated 1**, skipped 7 |
+      | Overwrite on | **overwritten 1**; the identical twin still skipped |
+      | "Imported" placement, twice | one `Imported` folder; second run skipped all |
+      | Foreign zip with a `MyExport/` wrapper | wrapper gone; `Sub` kept; filename became the heading |
+      | Hostile Markdown (`javascript:` link, `onerror`) | stored as `<p>click me</p>` |
+      | Import killed at 74/300 by a page reload | existing 4/4 intact, 93 landed, **0 half-written, 0 duplicated**; re-run created 207, skipped 93 |
+      | Network requests during any export or import | **none** |
+
+      Two findings from this. **(a)** Trashed notes first came back unfiled, and diffing the two exports was what showed it; they now return to their original folder when that folder already exists (never created for the trash). **(b)** The web editor re-saves any note it opens in its own whitespace form, bumping `updated_at` — pre-existing, not Stage 15, spun off as its own task.
+
+      **Known limits, stated:** folder settings (Include in Notes, Group by Date) do not round-trip — a zip has nowhere to carry them, and imported folders get the prompt's default (Include ON). Code-block indentation is lost at edit time, before export runs.
 
 ---
 

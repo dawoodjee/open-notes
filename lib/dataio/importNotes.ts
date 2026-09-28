@@ -264,6 +264,26 @@ async function importZip(
   // Top-level folders start at depth 0; under "Imported" they start one lower.
   await walk(tree.root, base, base ? base.depth : -1);
 
+  /**
+   * The folder a trashed note was deleted from -- but only if it EXISTS.
+   *
+   * Looked up, never created. A folder made only to hold trash would be an empty
+   * folder in the sidebar that the user never asked for, which is why trashed
+   * notes originally imported unfiled. But on a full round trip the live notes
+   * have usually recreated the very folder already (Work, here), and then
+   * filing the note back into it costs nothing and makes the round trip exact.
+   * Found by diffing two exports: every file matched except this one path.
+   */
+  const existingFolder = (path: string[]): Folder | null => {
+    let current: Folder | null = base;
+    for (const name of path) {
+      const next = folderIndex.get(folderKey(current?.id ?? null, name));
+      if (!next) return null;
+      current = next;
+    }
+    return path.length ? current : null;
+  };
+
   // Recently Deleted goes back into the trash -- see the Decisions Log.
   for (const file of tree.trash) {
     try {
@@ -275,7 +295,8 @@ async function importZip(
         const decision = resolveCollision(asExisting(slots), contentKey(html), false);
         if (decision.action === 'skip') counts.skipped++;
         else {
-          const note = await insertNoteInDB({ folderId: null, body: html, trashed: true });
+          const folder = existingFolder(file.folderPath);
+          const note = await insertNoteInDB({ folderId: folder?.id ?? null, body: html, trashed: true });
           trashIndex.set(key, [...slots, { id: note.id, body: html, updatedAt: note.updatedAt }]);
           counts.trashed++;
         }
