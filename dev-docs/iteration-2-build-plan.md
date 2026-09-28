@@ -2246,45 +2246,6 @@ Escalate before making any decision that changes the app's stated encryption gua
 
 ---
 
-## Stage 14 — Website (marketing)
-
-**Settled:** separate repo, built on **Frappe**, static HTML compiled into the `www` directory. **Single page**, no docs site — the repo's existing self-hosting docs stay where they are.
-
-**Design inspiration (in place of screenshots for this stage):**
-- Primary: minimal single-page sites in the style of [easlo.co/apps/experiments](https://www.easlo.co/apps/experiments) — spare, content-forward, generous whitespace.
-- The `apple-design-system` skill, same as every other iteration-2 stage.
-
-**Links** (footer or a dedicated links section — Claude Code's call):
-- App Store — **disabled**, shows "Coming soon" on hover (not published there yet).
-- GitHub — the app repo.
-- Android — links straight to the **latest downloadable Expo EAS build**, not a Play Store listing (not published there either).
-- Reach out — `mailto:adam.dawoodjee+notes@gmail.com`.
-
-Fully independent of app internals; can run in parallel with any app stage on its own repo and session.
-
-**📸 SCREENSHOTS** — none. Build from the design inspiration above instead of a static mock.
-
-**Prompt:**
-
-```
-This runs in a NEW, SEPARATE repository, not the open-notes app repo. Create it, and tell me the name you're using before you start committing.
-
-Build a single-page marketing site for open-notes on the Frappe framework, output as static HTML into the app's www directory. One page. No documentation site — the app repo already has self-hosting docs and a roadmap; link to them on GitHub rather than duplicating them here.
-
-CONTEXT ON WHAT THE PRODUCT IS — get this right, it's the whole pitch:
-open-notes is a local-first, cross-platform, end-to-end encrypted notes app. It works fully offline with no account; signing in is how you turn on SYNC, never a precondition for using the app. Note content, titles, and folder names are encrypted on-device — the server, including a self-hosted one, only ever holds ciphertext and cannot read them. It's open source and self-hostable. Notes belong to the person who wrote them: there's a per-note "Visible to Apps" toggle and an on-device broker that is the only path to decrypted content, so other apps and AI get access on the user's explicit terms rather than by default. On-device AI works within that model because the key is already local; anything server-side would require a separate, explicit, off-by-default opt-in. Don't overstate — the repo is at v0.1, mobile-only shipping today, with web on the roadmap.
-
-DESIGN INSPIRATION: primary reference is minimal single-page sites in the style of https://www.easlo.co/apps/experiments — spare, content-forward, generous whitespace. Read the apple-design-system skill and follow it too: clean, minimal, confident typography, generous whitespace, restrained motion. Dark mode. No stock-photo filler, no fake testimonials, no invented metrics or user counts.
-
-Sections, in this order: a hero with the one-sentence pitch and a GitHub link; what makes it different (local-first, E2EE including folder names, no account required, open source and self-hostable); the ownership/AI-boundary principle stated plainly since it's the point of the project; honest platform status (iOS and Android today, web on the roadmap); and a links section with exactly these four: App Store (DISABLED, "Coming soon" on hover — not published yet), GitHub (the app repo), Android (link directly to the latest downloadable Expo EAS build artifact, not a Play Store listing — not published there either), and a "reach out" mailto link to adam.dawoodjee+notes@gmail.com.
-
-Before writing copy, ask me for: the repo name to use, the domain if one exists, the current Expo EAS build link to point the Android link at, and confirmation of anything above you're unsure is still accurate — the app is at v0.1 and I'd rather you check than publish a claim that's drifted.
-
-Deliver the static build in www/, confirm it renders correctly at mobile, tablet, and desktop widths, and screenshot all three.
-```
-
----
-
 ## Stage 15 — Export / Import (`.zip`)
 
 **Settled decisions:**
@@ -2390,6 +2351,52 @@ Add the variable to .env.example with a one-line comment matching that file's ex
 Confirm existing users can still sign in when sign-ups are disabled — that's the whole point, and it's the thing most likely to break.
 
 VERIFY: against the local dev stack, disable sign-ups and prove (a) a new sign-up attempt is refused SERVER-SIDE, shown by hitting the endpoint directly, not just by the button being hidden, and (b) an existing test account can still sign in. Then re-enable and confirm both reverse. Report actual output.
+```
+
+---
+
+## Stage 14 — Website (marketing)  ·  *runs LAST — reordered 2026-09-28*
+
+> **Order changed, number kept.** Adam moved the website to the end of the
+> iteration (2026-09-28): execution order is now **15 → 16 → 14**. The number
+> stays 14 because stage numbers are used as *names* elsewhere in this file —
+> Decisions Log entries say "lands in Stage 15" and "Stage 14 in the new website
+> repo" — and renumbering would quietly falsify those historical entries.
+
+
+**Settled:** separate repo, built on **Frappe**, static HTML compiled into the `www` directory. **Single page**, no docs site — the repo's existing self-hosting docs stay where they are.
+
+**Design inspiration (in place of screenshots for this stage):**
+- Primary: minimal single-page sites in the style of [easlo.co/apps/experiments](https://www.easlo.co/apps/experiments) — spare, content-forward, generous whitespace.
+- The `apple-design-system` skill, same as every other iteration-2 stage.
+
+**Links** (footer or a dedicated links section — Claude Code's call):
+- App Store — **disabled**, shows "Coming soon" on hover (not published there yet).
+- GitHub — the app repo.
+- Android — links straight to the **latest downloadable Expo EAS build**, not a Play Store listing (not published there either).
+- Reach out — `mailto:adam.dawoodjee+notes@gmail.com`.
+
+Fully independent of app internals; can run in parallel with any app stage on its own repo and session.
+
+**📸 SCREENSHOTS** — none. Build from the design inspiration above instead of a static mock.
+
+**Prompt:**
+
+```
+This runs in a NEW, SEPARATE repository, not the open-notes app repo. Create it, and tell me the name you're using before you start committing.
+
+Build a single-page marketing site for open-notes on the Frappe framework, output as static HTML into the app's www directory. One page. No documentation site — the app repo already has self-hosting docs and a roadmap; link to them on GitHub rather than duplicating them here.
+
+CONTEXT ON WHAT THE PRODUCT IS — get this right, it's the whole pitch:
+open-notes is a local-first, cross-platform, end-to-end encrypted notes app. It works fully offline with no account; signing in is how you turn on SYNC, never a precondition for using the app. Note content, titles, and folder names are encrypted on-device — the server, including a self-hosted one, only ever holds ciphertext and cannot read them. It's open source and self-hostable. Notes belong to the person who wrote them: there's a per-note "Visible to Apps" toggle and an on-device broker that is the only path to decrypted content, so other apps and AI get access on the user's explicit terms rather than by default. On-device AI works within that model because the key is already local; anything server-side would require a separate, explicit, off-by-default opt-in. Don't overstate — the repo is at v0.1, mobile-only shipping today, with web on the roadmap.
+
+DESIGN INSPIRATION: primary reference is minimal single-page sites in the style of https://www.easlo.co/apps/experiments — spare, content-forward, generous whitespace. Read the apple-design-system skill and follow it too: clean, minimal, confident typography, generous whitespace, restrained motion. Dark mode. No stock-photo filler, no fake testimonials, no invented metrics or user counts.
+
+Sections, in this order: a hero with the one-sentence pitch and a GitHub link; what makes it different (local-first, E2EE including folder names, no account required, open source and self-hostable); the ownership/AI-boundary principle stated plainly since it's the point of the project; honest platform status (iOS and Android today, web on the roadmap); and a links section with exactly these four: App Store (DISABLED, "Coming soon" on hover — not published yet), GitHub (the app repo), Android (link directly to the latest downloadable Expo EAS build artifact, not a Play Store listing — not published there either), and a "reach out" mailto link to adam.dawoodjee+notes@gmail.com.
+
+Before writing copy, ask me for: the repo name to use, the domain if one exists, the current Expo EAS build link to point the Android link at, and confirmation of anything above you're unsure is still accurate — the app is at v0.1 and I'd rather you check than publish a claim that's drifted.
+
+Deliver the static build in www/, confirm it renders correctly at mobile, tablet, and desktop widths, and screenshot all three.
 ```
 
 ---
