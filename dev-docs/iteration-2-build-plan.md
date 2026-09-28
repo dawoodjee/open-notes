@@ -2278,8 +2278,8 @@ Three findings that shape the code:
 - [x] **2. HTML → Markdown** — `lib/dataio/htmlToMarkdown.ts` + `htmlTree.ts`. 27 tests, mutation-checked (removing the `*` escape fails the suite).
 - [x] **3. Markdown → editor HTML** — `lib/dataio/markdownToHtml.ts`. **`marked` does not sanitise** (measured: a `javascript:` link and `<img onerror>` pass straight through), so the normaliser is an allowlist of tags, attributes and URL schemes. Every stored construct round-trips; the one inexact case — `<b><i>` returns as `<i><b>`, identical on screen — is why collisions compare Markdown, not HTML.
 - [x] **4. Archive layout** — `lib/dataio/archiveLayout.ts` + `collisions.ts`, 30 tests. Filenames survive `/`, Windows-illegal characters, trailing dots, `CON`, 100-code-point caps and case-insensitive duplicates. Unwrapping is top-only and stops at our marker (mutation-checked). "Identical" is compared as Markdown.
-- [ ] **5. Database seams** — bulk read for export, one-write note insert for import
-- [ ] **6. Platform file I/O** — native share sheet / document picker; web download / file input
+- [x] **5. Database seams** — `listAllNotes()` (trash included; undecryptable notes returned so export can report them) and `insertNoteInDB()` (one write, body included). `createNoteInDB` now routes through it, so the owner stamp and the Skills visibility default exist in one place. Jobs in `exportNotes.ts` / `importNotes.ts`, progress in `dataJobs.ts`.
+- [x] **6. Platform file I/O** — `fileIO.ts` (share sheet, document picker; the decrypted temp file is deleted as soon as the sheet returns) and `fileIO.web.ts` (Blob download, file input). Zip sizes are checked from the directory BEFORE inflating (10 MB per entry, 500 MB total), and each entry is inflated alone so a corrupt one fails alone.
 - [ ] **7. Settings → Data**, with Export and Import sub-pages
 - [ ] **8. Verification** — the round-trip list in the prompt below, plus "no network during either operation"
 

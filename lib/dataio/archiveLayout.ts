@@ -1,4 +1,4 @@
-import { htmlToMarkdown } from './htmlToMarkdown';
+import { htmlToMarkdown, type MarkdownResult } from './htmlToMarkdown';
 
 /**
  * Where everything goes inside the zip, and how a zip's contents map back onto
@@ -94,7 +94,14 @@ export function planExport(
   folders: LayoutFolder[],
   notes: LayoutNote[],
   scope: ExportScope,
-  exportedAt: string
+  exportedAt: string,
+  /**
+   * Markdown already converted, by note id. The export job converts note by
+   * note with a yield between each, so a large export does not freeze the UI;
+   * it passes the results here rather than having them converted again in one
+   * uninterrupted block. Absent (as in the tests), notes are converted inline.
+   */
+  converted?: Map<string, MarkdownResult>
 ): ExportPlan {
   const byId = new Map(folders.map((f) => [f.id, f]));
   const childrenOf = new Map<string | null, LayoutFolder[]>();
@@ -173,7 +180,7 @@ export function planExport(
     let dir = pathOf(note.folderId);
     if (note.isTrashed) dir = `${TRASH_DIR}/` + dir;
 
-    const { markdown, unmappedTags } = htmlToMarkdown(note.body);
+    const { markdown, unmappedTags } = converted?.get(note.id) ?? htmlToMarkdown(note.body);
     const taken = takenIn.get(dir) ?? new Set<string>();
     takenIn.set(dir, taken);
     const file = uniqueName(safeName(note.title, 'Untitled'), taken, '.md');

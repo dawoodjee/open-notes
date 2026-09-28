@@ -383,8 +383,33 @@ export function mapRowToNote(row: any): Note {
  * must never have.
  */
 export async function createNoteInDB(folderId: string | null = null): Promise<Note> {
+  return insertNoteInDB({ folderId, body: '' });
+}
+
+/**
+ * Insert a note WITH its body, in one write. The general form of
+ * createNoteInDB, and what import uses.
+ *
+ * Why import does not call createNoteInDB and then updateNoteInDB: that is two
+ * writes and two queued uploads per note, and between them the note briefly
+ * exists empty -- visible to sync, and to the list, as a blank note. One insert
+ * means an imported note appears whole or not at all.
+ *
+ * Everything that makes createNoteInDB safe lives here now rather than being
+ * duplicated for import: the owner stamp (without it RLS rejects the row and
+ * the note is erased at the next checkpoint -- see createNoteInDB) and the
+ * Skills visibility default.
+ *
+ * `trashed` is for import's "Recently Deleted" directory: the note goes
+ * straight into the trash, stamped now, so it gets the full 30 days.
+ */
+export async function insertNoteInDB(options: {
+  folderId: string | null;
+  body: string;
+  trashed?: boolean;
+}): Promise<Note> {
+  const { folderId, body, trashed = false } = options;
   const id = Crypto.randomUUID();
-  const body = '';
   const { title } = parseNoteContent(body);
   const now = new Date().toISOString();
 
@@ -405,8 +430,19 @@ export async function createNoteInDB(folderId: string | null = null): Promise<No
   const userId = getCurrentUserId();
   await getPowerSync().execute(
     `INSERT INTO notes (id, user_id, body, title, created_at, updated_at, is_trashed, trashed_at, is_hidden_from_api, folder_id, is_pinned)
-     VALUES (?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, 0)`,
-    [id, userId, encryptField(body), encryptField(title), now, now, hiddenFromApi ? 1 : 0, folderId]
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+    [
+      id,
+      userId,
+      encryptField(body),
+      encryptField(title),
+      now,
+      now,
+      trashed ? 1 : 0,
+      trashed ? now : null,
+      hiddenFromApi ? 1 : 0,
+      folderId,
+    ]
   );
 
   return {
@@ -416,12 +452,25 @@ export async function createNoteInDB(folderId: string | null = null): Promise<No
     title,
     createdAt: now,
     updatedAt: now,
-    isTrashed: false,
-    trashedAt: null,
+    isTrashed: trashed,
+    trashedAt: trashed ? now : null,
     folderId,
     isHiddenFromApi: hiddenFromApi,
     isPinned: false,
   };
+}
+
+/**
+ * Every note, trashed ones included, decrypted. For export, which is the one
+ * reader that needs the trash and needs every body at once.
+ *
+ * `decryptFailed` notes are returned rather than filtered, so export can
+ * REPORT them. Filtering here would make an unreadable note vanish from the
+ * export without a word.
+ */
+export async function listAllNotes(): Promise<Note[]> {
+  const rows = await getPowerSync().getAll<any>('SELECT * FROM notes ORDER BY created_at ASC');
+  return rows.map(mapRowToNote);
 }
 
 /**
