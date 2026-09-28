@@ -2425,6 +2425,24 @@ One blocking item; the rest is settled and recorded in the Decisions Log below.
 
 *(iteration-2-specific decisions, same terse format as `dev-docs/mvp-build-plan.md` — decision / reasoning / verification / status. Don't duplicate MVP-era entries.)*
 
+### 2026-09-28 — "User data management" is Export/Import, then account deletion as 15b
+- **Decision:** Stage 15 builds Export/Import as planned. Account + data deletion follows as its own stage, **15b**, immediately after.
+- **Reasoning:** No deletion path exists anywhere in the app, and Apple requires in-app account deletion for any app that allows sign-up. Export goes first because it is the safety net a user would want before a deletion feature exists. Deletion needs a server-side function (removing an auth user needs the service role, which the client must never hold) and a migration on both stacks, so it gets its own checkpoint rather than riding along with export.
+- **Consequence accepted:** Deletion ships one stage later than it could have in a combined stage; a deletion bug cannot hold up export.
+- **Status:** Stage 15 in progress; 15b planned.
+
+### 2026-09-28 — Five new dependencies for Stage 15
+- **Decision:** `fflate` (zip and unzip), `marked` (Markdown -> HTML on import), `expo-file-system`, `expo-sharing`, `expo-document-picker`.
+- **Reasoning:** None of zip, file access, share sheet or file picking existed. `fflate` over `jszip`: pure JS, far smaller, synchronous and streaming APIs, and it runs under plain Node so the round-trip can be unit-tested in the existing harness. `marked` for IMPORT only, because import must accept arbitrary Markdown from other apps (Obsidian, Bear), which is where a hand-rolled parser silently loses tables, nested lists and reference links. EXPORT is hand-rolled instead: its input is the editor's closed, flat tag set, so owning that direction is what guarantees fidelity. Web needs none of the three expo modules — a Blob download and a file input do the same job.
+- **Consequence accepted:** Three native modules, so one prebuild + rebuild on iOS and Android. Bundle grows by roughly fflate's and marked's size.
+- **Status:** Accepted.
+
+### 2026-09-28 — Underline exports as inline `<u>…</u>`
+- **Decision:** Underlined text is written into the Markdown as inline HTML, `<u>text</u>`.
+- **Reasoning:** Markdown has no underline syntax. CommonMark permits inline HTML, so this round-trips exactly through our own importer, renders in most viewers, and stays readable as plain text. The alternative — dropping to plain text — is silent data loss, which the Stage 15 prompt names as the worst possible outcome for this feature.
+- **Consequence accepted:** A strict Markdown purist sees HTML tags in an otherwise pure file.
+- **Status:** Accepted.
+
 ### 2026-08-27 — The gate KDF is scrypt N=2^13, chosen on measurement
 - **Decision:** `GATE_KDF_PARAMS` = scrypt N=2^13, r=8 — **434 ms** per attempt, ~5 days for a browser-confined sweep of all 10^6 PINs. Down from N=2^16, which was written on an estimate and actually costs **3,123 ms**.
 - **Reasoning:** Pure-JS scrypt normally loses badly to a native attacker, and native WebCrypto PBKDF2 at 1M iterations costs only 126 ms here — a 44x better rate. That argument does **not** apply, for one specific reason: guessing requires `browserSecret`, which is sealed under a non-extractable WebCrypto key, so its bytes cannot leave the browser. Any sweep has to run in the victim's own browser, in JavaScript, at our speed. Defender/attacker is ~1:1 either way, so the only question is cost per unlock, and scrypt's memory hardness comes free.
