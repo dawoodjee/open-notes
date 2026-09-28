@@ -21,6 +21,8 @@ import './gateKey.test';
 import './resolveSetting.test';
 import './folderPane.test';
 import './headTags.test';
+import './htmlToMarkdown.test';
+import './markdownToHtml.test';
 import { report } from './harness';
 
 report();

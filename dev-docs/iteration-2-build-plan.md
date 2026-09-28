@@ -2275,8 +2275,8 @@ Three findings that shape the code:
 - [x] **1. Dependencies** — `fflate`, `marked`, `expo-file-system`, `expo-sharing`,
       `expo-document-picker`. iOS prebuild + pod install + build: exit 0 on the
       iPhone 17 simulator.
-- [ ] **2. HTML → Markdown** (hand-rolled, closed input set)
-- [ ] **3. Markdown → editor HTML** (`marked`, then normalised to the dialect above)
+- [x] **2. HTML → Markdown** — `lib/dataio/htmlToMarkdown.ts` + `htmlTree.ts`. 27 tests, mutation-checked (removing the `*` escape fails the suite).
+- [x] **3. Markdown → editor HTML** — `lib/dataio/markdownToHtml.ts`. **`marked` does not sanitise** (measured: a `javascript:` link and `<img onerror>` pass straight through), so the normaliser is an allowlist of tags, attributes and URL schemes. Every stored construct round-trips; the one inexact case — `<b><i>` returns as `<i><b>`, identical on screen — is why collisions compare Markdown, not HTML.
 - [ ] **4. Archive layout** — filenames, folder paths, wrapper collapsing, collisions
 - [ ] **5. Database seams** — bulk read for export, one-write note insert for import
 - [ ] **6. Platform file I/O** — native share sheet / document picker; web download / file input
