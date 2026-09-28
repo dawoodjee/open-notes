@@ -2246,6 +2246,45 @@ Escalate before making any decision that changes the app's stated encryption gua
 
 ---
 
+## Stage 15 — LIVE CHECKLIST (started 2026-09-28, branch `stage-15-export-import`)
+
+**What the editor actually stores** — measured through its own API on
+2026-09-28, not assumed. Every supported construct, with the two non-standard
+ones that a converter written from the HTML spec would have got wrong:
+
+| Construct | Stored as |
+|---|---|
+| paragraph / heading | `<p>`, `<h1>`…`<h6>` |
+| bold / italic / underline / strike | `<b>` `<i>` `<u>` `<s>` |
+| inline code / link / image | `<code>`, `<a href>`, `<p><img src …/></p>` |
+| bullet / numbered list | `<ul><li>`, `<ol><li>` — flat, one level |
+| **checklist** | **`<ul data-type="checkbox"><li checked>`** |
+| blockquote | `<blockquote><p>…</p></blockquote>` |
+| **code block** | **`<codeblock><p>line</p><p>line</p></codeblock>`** |
+| empty line | a top-level `<br>` |
+
+Three findings that shape the code:
+- **Markdown punctuation typed as text is stored literally** (`*star*`, `_x_`, a
+  leading `#`). Unescaped on export, a re-import would silently turn it into
+  italics or a heading — so export escapes it.
+- **The editor strips leading whitespace from code-block lines.** Indentation is
+  lost at edit time, before export ever runs; export cannot restore it.
+- Legacy pre-11.5 bodies may still hold `<strong>`/`<em>`/`<pre><code>`, so the
+  converter accepts both dialects.
+
+- [x] **1. Dependencies** — `fflate`, `marked`, `expo-file-system`, `expo-sharing`,
+      `expo-document-picker`. iOS prebuild + pod install + build: exit 0 on the
+      iPhone 17 simulator.
+- [ ] **2. HTML → Markdown** (hand-rolled, closed input set)
+- [ ] **3. Markdown → editor HTML** (`marked`, then normalised to the dialect above)
+- [ ] **4. Archive layout** — filenames, folder paths, wrapper collapsing, collisions
+- [ ] **5. Database seams** — bulk read for export, one-write note insert for import
+- [ ] **6. Platform file I/O** — native share sheet / document picker; web download / file input
+- [ ] **7. Settings → Data**, with Export and Import sub-pages
+- [ ] **8. Verification** — the round-trip list in the prompt below, plus "no network during either operation"
+
+---
+
 ## Stage 15 — Export / Import (`.zip`)
 
 **Settled decisions:**
