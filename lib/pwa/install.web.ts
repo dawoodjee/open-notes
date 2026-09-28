@@ -113,6 +113,23 @@ if (typeof window !== 'undefined') {
   window.addEventListener('appinstalled', () => {
     deferred = null;
     announce();
+
+    /**
+     * Ask for durable storage the moment the app is installed, HOWEVER it was
+     * installed.
+     *
+     * The request also lives in `promptInstall` below, and that was not enough:
+     * Adam installed from Chrome's omnibox rather than the in-app row, so our
+     * button's code never ran and `navigator.storage.persisted()` was still
+     * false afterwards. `appinstalled` fires for every install route, which
+     * makes this the correct hook and the other one merely convenient.
+     *
+     * It matters because until it is granted, browser storage is evictable
+     * under pressure — a data-loss path for an offline-first app that has
+     * nothing to do with encryption. An installed PWA is the strongest
+     * engagement signal Chrome accepts.
+     */
+    void navigator.storage?.persist?.().catch(() => {});
   });
 }
 

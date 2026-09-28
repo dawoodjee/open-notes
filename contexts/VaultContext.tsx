@@ -20,6 +20,7 @@ import {
   LOCK_SETTINGS_KEY,
   adoptLocalSettings,
   reconcileSettings,
+  watchSettings,
 } from '@/lib/settings/syncedSettings';
 import { onLock } from '@/lib/auth/lockBehaviour';
 import { isDeviceKeyGated } from '@/lib/crypto/deviceKeyStore';
@@ -197,6 +198,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   // dead app. A boot failure has to be visible or it cannot be reported.
   useEffect(() => {
     let cancelled = false;
+    // Torn down with the effect, so a sign-out or remount does not leave a
+    // second watch running against a database that is about to close.
+    let disposeSettingsWatch: (() => void) | null = null;
     void (async () => {
       try {
         const settings = await getLockSettings();
@@ -245,6 +249,18 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
             setLockSettingsState(await getLockSettings());
           })
           .catch((err) => console.warn('Settings reconcile failed:', err));
+
+        /**
+         * ...and keep reconciling. The line above handles what is already on
+         * the device; this handles everything that arrives afterwards, which
+         * on a fresh connect is ALL of it -- the initial sync delivers the
+         * account's rows after that first reconcile has already run. See
+         * watchSettings.
+         */
+        disposeSettingsWatch = watchSettings(async (changed) => {
+          if (cancelled || !changed.includes(LOCK_SETTINGS_KEY)) return;
+          setLockSettingsState(await getLockSettings());
+        });
       } catch (err) {
         if (cancelled) return;
         console.error('Vault boot failed:', err);
@@ -254,6 +270,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     })();
     return () => {
       cancelled = true;
+      disposeSettingsWatch?.();
     };
   }, []);
 

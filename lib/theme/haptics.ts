@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { Platform, TurboModuleRegistry } from 'react-native';
 
 /**
  * The app's haptic vocabulary — three meanings, not thirty presets.
@@ -24,8 +24,9 @@ import { Platform } from 'react-native';
  * boot with `'RNPulsar' could not be found. Verify that a module by this name
  * is registered in the native binary.` — found the first time it ran.
  *
- * `require` inside the guarded call, memoised, means a binary without the
- * module degrades to silence instead of to a crash. Which is the correct
+ * A lazy, memoised lookup means a binary without the module degrades to
+ * silence instead of to a crash -- though the require alone was not enough to
+ * achieve that; see `load()` for the correction. Which is the correct
  * behaviour anyway: haptics are the most optional thing in the app, and the
  * device that cannot play them is often the device that has no actuator.
  *
@@ -47,7 +48,31 @@ let presets: PulsarPresets | null | undefined;
 
 function load(): PulsarPresets | null {
   if (presets !== undefined) return presets;
+  presets = null;
+
+  /**
+   * ASK FIRST, THEN IMPORT. A try/catch around the require is NOT enough, and
+   * believing it was is what shipped this bug.
+   *
+   * `react-native-pulsar` calls `TurboModuleRegistry.getEnforcing('RNPulsar')`
+   * at module scope. On a binary without the module that throws, and while the
+   * `catch` below does receive it, React Native's dev error handler has already
+   * reported it as a FATAL — so the red screen appears anyway, on every icon
+   * button press, over a working app.
+   *
+   * Seen on the iPad, whose binary predates the Stage 12.5 native rebuild: a
+   * red LogBox indicator in the corner of every screenshot for days, which I
+   * kept treating as noise. Note `LogBox.ignoreAllLogs(true)` in
+   * app/_layout.tsx does not suppress it; that hides warnings, not fatals.
+   *
+   * `TurboModuleRegistry.get` is the non-throwing variant: it returns null for
+   * a module that is not in the binary. Asking with it first means the import
+   * never runs on a device that cannot satisfy it, so there is no throw for
+   * anything to report. THAT is what makes this degrade to silence, which is
+   * what the wrapper always claimed to do.
+   */
   try {
+    if (TurboModuleRegistry.get('RNPulsar') == null) return presets;
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     presets = require('react-native-pulsar').Presets as PulsarPresets;
   } catch {

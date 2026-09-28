@@ -1870,6 +1870,150 @@ head-tag invariants including the two-viewport trap.
 
 ---
 
+## iPad orientation — the Stage 11 claim, finally settled (2026-08-28)
+
+The folder pane's landscape/portrait rule has been asserted since Stage 11 and
+never confirmed, because `simctl` cannot rotate a simulator. Settled two ways.
+
+**Extracted to `lib/layout/folderPane.ts` and tested.** The rule was three
+inline expressions in `NotesLayout`, and it never needed a device at all — it is
+a pure function of window and platform. 14 tests now cover iPad portrait and
+landscape, both phone orientations, Split View at 320/507/880/1100, the 768
+boundary, and an exactly square window. `NotesLayout` consumes it, so the tests
+govern the app rather than describing a copy of it.
+
+**iPad PORTRAIT verified on the device**, for the first time: the Folders panel
+floats over the editor with the note still visible behind it, matching
+`ipad-portrait-folder-view.jpeg`. Rotation came from a shutdown/boot cycle,
+which resets a simulator to portrait — no permission required, no wipe.
+
+**iPad LANDSCAPE is still not verified on a device.** It is the same branch of
+the same function as desktop, which is verified in the browser at 1280×860, and
+its unit tests pass — but the rendered result on an iPad has not been seen.
+Rotating needs Accessibility permission for System Events (`-1728`), which is
+*separate* from the Automation grant. Writing
+`SimulatorWindowOrientation` into `com.apple.iphonesimulator.plist` does not
+work: the Simulator rewrites it on quit.
+
+### Two things the extraction exposed
+
+**The iPhone orientation lock is load-bearing.** A landscape iPhone 17 Pro is
+874pt wide — over the 768 breakpoint — so this rule would hand a 402pt-TALL
+phone the full three-pane tablet layout. That never happens only because
+`ios/notes/Info.plist` allows just Portrait and PortraitUpsideDown on iPhone.
+A test now asserts the 874×402 classification *with that reasoning attached*, so
+enabling landscape on iPhone fails there instead of shipping a three-pane phone.
+
+**An Android tablet in portrait disagrees with an iPad of identical size.** The
+condition is `platform !== 'ios' || isLandscape`, so a portrait Android tablet
+gets `persistent` where an iPad gets `overlay` — same window, same shape,
+different answer. Pinned in a test rather than quietly changed, because which
+one is right is Adam's call. **Open question for him.**
+
+### A real bug found while doing it
+
+Every iPad screenshot for days had a small red rectangle in one corner. It was
+LogBox, and I had been treating it as noise. Tapping any icon button threw:
+
+```
+TurboModuleRegistry.getEnforcing(...): 'RNPulsar' could not be found.
+```
+
+The iPad runs a binary from before the Stage 12.5 native rebuild, so Pulsar is
+genuinely absent — the case `lib/theme/haptics.ts` was written to survive. **The
+try/catch did not survive it.** The `catch` does receive the throw, but React
+Native's dev error handler has already reported it as FATAL, so the red screen
+appears regardless; `LogBox.ignoreAllLogs(true)` hides warnings, not fatals.
+
+Fixed by asking before importing: `TurboModuleRegistry.get('RNPulsar')` returns
+null instead of throwing, so on a binary without the module the import never
+runs and there is nothing to report. That is what the wrapper always claimed to
+do. Verified on the iPad — icon buttons now press silently, no red screen.
+
+---
+
+## The folder-pane rule is uniform, and finally verified (2026-08-28)
+
+**Adam's call: make it uniform.** The rule read
+`platform !== 'ios' || isLandscape`, so an Android tablet in portrait got the
+persistent column while an iPad of *identical dimensions* got the floating
+overlay. Same window, same shape, different answer — an accident of writing the
+condition against iOS rather than against the window.
+
+`folderPanePresentation` now answers on shape alone: `width > height` decides,
+and the platform is not consulted. `platform` stays in the input type because
+every caller passes it, and its presence makes "this rule ignores the platform"
+a visible decision rather than an omission someone re-adds by accident.
+
+**The consequence, accepted:** a desktop browser window taller than it is wide
+(drag one narrow, say 900x1000) now gets the overlay where it used to get the
+column. That follows from the same reasoning that makes iPad portrait an overlay
+— a tall, narrow window has no width to spare for a permanent column — and it is
+the price of uniformity. Asserted directly in `tests/folderPane.test.ts` rather
+than left to be discovered.
+
+**Verified, after being the project's longest-standing unverified claim.**
+`simctl` cannot rotate a simulator and the `osascript` route kept breaking.
+Making the rule platform-independent is what unblocked the verification too: a
+browser window at iPad dimensions now runs the *identical* code path an iPad
+does, so the two shapes can be tested by resizing.
+
+| Window | Presentation | Observed |
+|---|---|---|
+| 1376x1032 (iPad landscape) | `persistent` | flush, full-height column ✅ |
+| 1032x1376 (iPad portrait) | `overlay` | floating inset panel, content visible behind ✅ |
+
+Plus 215 unit tests, including `no window anywhere is classified by platform`
+across nine shapes — so re-adding a platform branch fails the build regardless
+of which platform it special-cases.
+
+**What this still does not prove:** a physical rotation on the device, including
+the animation between the two states.
+
+---
+
+## Stage 13c — POST-SHIP FIXES (2026-08-28): three bugs between a written row and a synced one
+
+Settings shipped in 13a–13c, type-checked, tested, and did not sync. Adam found
+it on two simulators: notes moved between phone and tablet, appearance never
+did. It was three independent faults stacked, each individually silent.
+
+**1. The upload handler was never written.** `uploadEntry` in
+`lib/powersync/connector.ts` switches on the table name and had cases for
+`notes` and `folders` only. Every `user_settings` op hit `default:`, logged a
+dev warning, and was SKIPPED — and because the skip returned cleanly, PowerSync
+treated the op as delivered and cleared it from the queue. Rows were written
+locally, shown in the UI, and silently discarded on the way out. The guard I
+wrote in Stage 11 predicted this exactly ("a new synced table added later gets a
+loud dev warning here"); the warning fired for weeks in a Metro log nobody reads.
+
+**2. Adoption only looked at the mirror.** `adoptLocalSettings` read
+`notes.settings.<key>` and skipped anything absent — which is every preference
+set BEFORE 13c, since those live in the legacy key. So the devices that most
+needed adopting were exactly the ones it ignored. Fixed to fall back to
+`LEGACY_KEY`, and to write the mirror as it goes.
+
+**3. Reconcile ran once, at boot.** The initial sync delivers the account's rows
+*after* that reconcile has already run, so nothing ever looked at them; the next
+launch lost the same race identically. Notes and folders never hit this because
+they render from live watch queries — settings are read once into a mirror, so
+the watch had to be spelled out. Added `watchSettings()`.
+
+A fourth, found in the fix: importing `LEGACY_KEY` through `syncedSettings`'
+re-export left it `undefined` at module-init time (`TypeError: Cannot convert
+undefined value to object`). Now imported straight from the pure module.
+
+**Verified end to end, and the disambiguation matters.** iPhone set to Dark;
+iPad's *system* appearance set to **Light**; the iPad app renders **dark**. A
+device following its own system and a device honouring a synced preference look
+identical until you make them disagree — the same trap that made the earlier
+legacy-fallback check worthless.
+
+Also new: `lib/settings/settingKeys.ts` — keys and the legacy map in a pure
+module, so `LEGACY_KEY` is covered by tests rather than by hope. 202/202.
+
+---
+
 ## Stage 13c — LIVE CHECKLIST (branch `stage-13b-web-lock`, continues 13b)
 
 - [x] **1. Appearance, app theme and bullet style are account settings.**

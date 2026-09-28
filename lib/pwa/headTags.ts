@@ -83,7 +83,18 @@ export const PWA_HEAD_TAGS: HeadTag[] = [
     },
     replaces: 'meta[name="viewport"]',
   },
-  // iOS Safari predates the manifest's `display` field and reads these instead.
+  /**
+   * The standards-track name. Chrome warns that the `apple-` one below is
+   * deprecated and asks for this — seen in Adam's console — but Safari still
+   * only reads the `apple-` spelling, so BOTH have to be present. Dropping
+   * either one loses a platform.
+   */
+  {
+    tag: 'meta',
+    attrs: { name: 'mobile-web-app-capable', content: 'yes' },
+    replaces: 'meta[name="mobile-web-app-capable"]',
+  },
+  // iOS Safari predates the manifest's `display` field and reads this instead.
   {
     tag: 'meta',
     attrs: { name: 'apple-mobile-web-app-capable', content: 'yes' },

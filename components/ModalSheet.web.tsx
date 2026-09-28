@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 /**
@@ -41,10 +42,29 @@ export function ModalBottomSheet({
   const detent = detents?.[index];
   const height = typeof detent === 'number' ? detent : '80%';
 
-  return (
-    // `fixed`, not `absolute`. Every react-native-web View is position:relative,
-    // so an absolutely-filled overlay would be trapped inside whichever pane
-    // happens to render the sheet instead of covering the window.
+  /**
+   * PORTALLED TO `document.body`, and `position: fixed` alone was not enough.
+   *
+   * The first version used `fixed` on the sheet's own View, reasoning that
+   * every react-native-web View is `position: relative` and so a merely
+   * absolute overlay would be trapped in whichever pane rendered it. That
+   * reasoning was right and the fix was still wrong, because of a CSS rule it
+   * did not account for: **a transformed ancestor becomes the containing block
+   * for `position: fixed`.** The list and folder panes animate with transforms,
+   * so `fixed` resolved against the pane instead of the viewport.
+   *
+   * The symptom, from Adam on the installed PWA: Settings opened *inside the
+   * note-list column*, spanning the folder and list panes and sitting under the
+   * editor, so it could not be reached. It looked like a z-index problem and
+   * was a containing-block problem.
+   *
+   * A portal takes the DOM node out of the pane subtree entirely, so there is
+   * no transformed ancestor left to capture it. `fixed` is kept because the
+   * portal host is `document.body`, which scrolls.
+   *
+   * Native is unaffected -- it never reaches this file.
+   */
+  const overlay = (
     <View style={[styles.root, { position: 'fixed' } as any]} pointerEvents="box-none">
       <Pressable
         style={[StyleSheet.absoluteFill, { backgroundColor: scrimColor }]}
@@ -58,6 +78,11 @@ export function ModalBottomSheet({
       </View>
     </View>
   );
+
+  // Guarded because the web bundle is also what the export/prerender path
+  // evaluates, where there is no document to portal into.
+  if (typeof document === 'undefined' || !document.body) return overlay;
+  return createPortal(overlay, document.body);
 }
 
 const styles = StyleSheet.create({

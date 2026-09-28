@@ -75,6 +75,7 @@
     "@types/aes-js": "^3.1.4",
     "@types/diff-match-patch": "^1.0.36",
     "@types/react": "~19.1.0",
+    "@types/react-dom": "~19.1.7",
     "@types/ws": "^8.18.1",
     "babel-plugin-module-resolver": "^5.0.3",
     "better-sqlite3": "^12.11.1",
