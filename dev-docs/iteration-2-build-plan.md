@@ -2391,7 +2391,7 @@ Report the result of an import to the user: counts of created, duplicated, skipp
 
 ---
 
-## Stage 15b — Account deletion  ·  PLAN, awaiting Adam's review (2026-09-28)
+## Stage 15b — Account deletion  ·  PLAN APPROVED 2026-09-29 (A and B both yes)
 
 Branch `stage-15b-account-deletion`. Built against the five decisions in the
 Decisions Log ("Account deletion (15b)…"). Nothing below is implemented yet.
@@ -2605,6 +2605,12 @@ One blocking item; the rest is settled and recorded in the Decisions Log below.
 ## Decisions Log
 
 *(iteration-2-specific decisions, same terse format as `dev-docs/mvp-build-plan.md` — decision / reasoning / verification / status. Don't duplicate MVP-era entries.)*
+
+### 2026-09-29 — 15b: suspended devices keep their session; self-host gets an edge runtime
+- **Decision (A):** Adam approved. A device whose account is pending deletion keeps its session, disconnects sync, keeps its encrypted local database, and shows only a suspended screen with **Cancel deletion**. Not a sign-out, because the app's sign-out (`lib/auth/logout.ts`) erases the device, which would defeat the grace period.
+- **Decision (B):** Adam approved. `selfhost/docker-compose.yml` gains Supabase's edge-runtime container and a Kong route, so self-hosters get account deletion too.
+- **Consequence accepted:** anyone holding a suspended device can cancel the deletion — the direction that preserves data. The self-host stack grows by one container.
+- **Status:** building.
 
 ### 2026-09-28 — Account deletion (15b): a 30-day grace period, and what devices do during it
 Five calls, all Adam's; three differ from what I recommended, so the tradeoffs are spelled out.
