@@ -471,3 +471,10 @@ enabled = true
 client_id = "env(SUPABASE_AUTH_GOOGLE_CLIENT_ID)"
 secret = "env(SUPABASE_AUTH_GOOGLE_SECRET)"
 redirect_uri = "http://127.0.0.1:54321/auth/v1/callback"
+
+# Stage 15b. JWT checking is done INSIDE this function rather than by the
+# gateway: the daily purge (pg_cron) and a device whose account has already
+# been purged both call it without a user token. Every action checks its own
+# authorisation -- see supabase/functions/account-deletion/index.ts.
+[functions.account-deletion]
+verify_jwt = false
