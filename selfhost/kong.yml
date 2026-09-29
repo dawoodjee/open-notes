@@ -83,6 +83,19 @@ services:
   # --- PostgREST ----------------------------------------------------------
   # profiles, user_keys and the plaintext-endpoint tables. Notes do not travel
   # this path; they go through PowerSync.
+  # Edge Functions (Stage 15b: account deletion). No key-auth: the function
+  # authorises every call itself -- a user's own token for their own account,
+  # a shared secret for the daily purge -- and the purge caller (pg_net inside
+  # the db container) has no API key to send.
+  - name: functions-v1
+    url: http://functions:9000/
+    routes:
+      - name: functions-v1-all
+        strip_path: true
+        paths: ['/functions/v1/']
+    plugins:
+      - name: cors
+
   - name: rest-v1
     url: http://rest:3000/
     routes:
