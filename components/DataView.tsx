@@ -234,7 +234,23 @@ export function ImportView({ onBack }: { onBack: () => void }) {
  * Everything a person needs to decide is on this page BEFORE the button, and
  * the first thing offered is a copy of their notes.
  */
-export function DeleteAccountView({ onBack, onExport }: { onBack: () => void; onExport: () => void }) {
+export function DeleteAccountView({
+  onBack,
+  onExport,
+  onRequested,
+}: {
+  onBack: () => void;
+  onExport: () => void;
+  /**
+   * Close Settings once the request succeeds. Not optional in effect: the
+   * suspended screen is part of the app, and Settings is a sheet ABOVE the app
+   * -- portalled to the top of the page on web, a separate native layer on iOS.
+   * Left open, it hid the suspended screen entirely, so the person who had
+   * just deleted their account was still looking at the Delete page. Found in
+   * the dev-stack run by checking which element was topmost.
+   */
+  onRequested: () => void;
+}) {
   const [typed, setTyped] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -245,9 +261,11 @@ export function DeleteAccountView({ onBack, onExport }: { onBack: () => void; on
     setBusy(true);
     setMessage(null);
     try {
-      // On success this device suspends at once: AccountSuspendedOverlay
-      // replaces the whole app, Settings included.
+      // On success this device suspends at once and AccountSuspendedOverlay
+      // replaces the app -- but only once Settings, which sits above the app,
+      // is out of the way. See onRequested.
       await requestAccountDeletion();
+      onRequested();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'The request did not go through.');
       setBusy(false);

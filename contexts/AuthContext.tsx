@@ -2,7 +2,11 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
-import { handleUnrequestedSignOut, rememberSignedInUser } from '@/lib/account/deletion';
+import {
+  handleUnrequestedSignOut,
+  rememberSignedInUser,
+  verifyAccountStillExists,
+} from '@/lib/account/deletion';
 import { getPowerSync, connectPowerSync, claimUnownedNotes } from '@/lib/powersync/db';
 import { claimUnownedFolders } from '@/lib/powersync/folders';
 import { getCurrentSession, setCurrentSession } from '@/lib/auth/currentUser';
@@ -344,8 +348,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     async function handleAuthEvent(event: string, newSession: Session | null) {
       if (newSession && (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
-        await becomeAuthenticatedLocally(newSession, setSession);
         void rememberSignedInUser(newSession.user.id);
+        // Stage 15b: at launch, confirm the account still exists. BEFORE the
+        // await below and not after it: becomeAuthenticatedLocally ends by
+        // connecting sync, which does not return while the sync server is
+        // unreachable -- and the first version, placed after it, therefore
+        // never ran on exactly the device that needed it. See
+        // verifyAccountStillExists for why no event can be relied on instead.
+        if (event === 'INITIAL_SESSION') {
+          void verifyAccountStillExists(newSession.user.id, true).catch((err) =>
+            console.warn('[auth] account check failed:', err)
+          );
+        }
+        await becomeAuthenticatedLocally(newSession, setSession);
       } else if (event === 'SIGNED_OUT' || (event === 'INITIAL_SESSION' && !newSession)) {
         // Stage 15b. A sign-out nobody asked for may mean the account was
         // purged while this device was away -- or merely that the session was
@@ -376,6 +391,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const appStateSub = AppState.addEventListener('change', (state: AppStateStatus) => {
       if (state === 'active') {
         supabase.auth.startAutoRefresh();
+        // Throttled inside to once per 10 minutes.
+        void verifyAccountStillExists().catch((err) => console.warn('[auth] account check failed:', err));
       } else {
         supabase.auth.stopAutoRefresh();
       }

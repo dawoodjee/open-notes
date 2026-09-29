@@ -2,15 +2,17 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { AppState, Pressable, ScrollView, Text as RNText, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { connectPowerSync, getPowerSync, isPowerSyncReady } from '@/lib/powersync/db';
+import { connectPowerSync, getPowerSync, isPowerSyncReady, readPersistedPending } from '@/lib/powersync/db';
 import {
   cancelAccountDeletion,
   checkServerState,
+  acknowledgeErasedNotice,
   eraseDeviceForPurgedAccount,
+  forgetPersistedPending,
+  restoreErasedNotice,
 } from '@/lib/account/deletion';
 import {
   clearCancelled,
-  dismissErasedNotice,
   markCancelled,
   resolvePending,
   useSuspensionOverrides,
@@ -42,6 +44,11 @@ export function AccountSuspendedOverlay() {
   const pending = usePendingDeletion();
   const overrides = useSuspensionOverrides();
 
+  // A previous session may have erased this device; say so now.
+  useEffect(() => {
+    void restoreErasedNotice();
+  }, []);
+
   if (overrides.erasedNotice) return <ErasedNotice />;
   if (!pending) return null;
   return <Suspended pending={pending} />;
@@ -51,6 +58,18 @@ export function AccountSuspendedOverlay() {
 function usePendingDeletion(): Pending | null {
   const overrides = useSuspensionOverrides();
   const [row, setRow] = useState<Pending | null>(null);
+  // This device's own persisted request, for a restart before the row synced.
+  const [persisted, setPersisted] = useState<Pending | null>(null);
+
+  // Re-read on EVERY override change, not just request/cancel. Erasing the
+  // device deletes the persisted record but changes neither of those, and the
+  // first version -- keyed on those two -- kept showing "scheduled for
+  // deletion" for a dead account after the user dismissed the erased notice.
+  // Every set() in suspension.ts makes a new object, so this is exactly
+  // "whenever anything changed".
+  useEffect(() => {
+    void readPersistedPending().then(setPersisted);
+  }, [overrides]);
 
   useEffect(() => {
     if (!isPowerSyncReady()) return;
@@ -75,7 +94,7 @@ function usePendingDeletion(): Pending | null {
     if (!row && overrides.cancelled) clearCancelled();
   }, [row, overrides.cancelled]);
 
-  return resolvePending(row, overrides);
+  return resolvePending(row ?? persisted, overrides);
 }
 
 function Suspended({ pending }: { pending: Pending }) {
@@ -97,6 +116,7 @@ function Suspended({ pending }: { pending: Pending }) {
     const state = await checkServerState();
     if (state === 'cancelled') {
       // Cancelled from another device. Resume; sync will remove the row.
+      await forgetPersistedPending();
       markCancelled();
       await connectPowerSync();
     } else if (state === 'purged') {
@@ -211,7 +231,7 @@ function ErasedNotice() {
           erased too.
         </RNText>
         <Pressable
-          onPress={dismissErasedNotice}
+          onPress={() => void acknowledgeErasedNotice()}
           className="mt-2 px-6 py-3 rounded-full items-center bg-lime-500"
           accessibilityRole="button"
           accessibilityLabel="OK"

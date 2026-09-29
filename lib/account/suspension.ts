@@ -25,6 +25,28 @@ import { useSyncExternalStore } from 'react';
  */
 export const LAST_USER_KEY = 'notes.account.lastUserId';
 
+/**
+ * This device's own record that it requested deletion, persisted.
+ *
+ * WHY THE SYNCED ROW IS NOT ENOUGH. A device that requests deletion suspends at
+ * once -- disconnecting before its own pending row has synced down. The first
+ * version kept "I just requested" only in memory, so after a restart the gate
+ * found no row, CONNECTED and synced (uploads included), received the row, and
+ * only then suspended. Seen on the dev stack as a /sync/stream request at boot.
+ * Persisting it means a suspended device knows it is suspended before it
+ * touches the network.
+ */
+export const PENDING_KEY = 'notes.account.pendingDeletion';
+
+/**
+ * Set when this device erases itself because its account was purged; cleared
+ * when the person dismisses the notice. Persisted because the notice is the
+ * ONLY explanation they get for their notes disappearing -- and in the first
+ * version it lived in memory, so an app closed right after erasing (found in
+ * the dev-stack run, where a reload did exactly that) showed nothing at all.
+ */
+export const ERASED_NOTICE_KEY = 'notes.account.erasedNotice';
+
 export interface Pending {
   requestedAt: string;
   purgeAfter: string;

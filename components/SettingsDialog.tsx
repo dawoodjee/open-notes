@@ -213,7 +213,11 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
             onDeleteAccount={() => setView('deleteAccount')}
           />
         ) : view === 'deleteAccount' ? (
-          <DeleteAccountView onBack={() => setView('data')} onExport={() => setView('export')} />
+          <DeleteAccountView
+            onBack={() => setView('data')}
+            onExport={() => setView('export')}
+            onRequested={handleClose}
+          />
         ) : view === 'export' ? (
           <ExportView onBack={() => setView('data')} />
         ) : view === 'import' ? (

@@ -2391,10 +2391,12 @@ Report the result of an import to the user: counts of created, duplicated, skipp
 
 ---
 
-## Stage 15b — Account deletion  ·  PLAN APPROVED 2026-09-29 (A and B both yes)
+## Stage 15b — Account deletion  ·  BUILT, dev-verified 2026-09-29; self-host boot + live steps pending
 
 Branch `stage-15b-account-deletion`. Built against the five decisions in the
-Decisions Log ("Account deletion (15b)…"). Nothing below is implemented yet.
+Decisions Log ("Account deletion (15b)…"). The plan below is kept as approved;
+**"As built" at the end of this section** records where the build departed from
+it and what the dev-stack run proved.
 
 ### What the research found, and what it changes
 
@@ -2503,10 +2505,76 @@ Front-loaded now so it is not discovered mid-run. None of it is needed to build
 and verify on dev.
 1. `supabase db push` (the migration).
 2. `supabase functions deploy account-deletion --project-ref svbrvtnldkjwtnppsugi`
-3. Set the function secret: `supabase secrets set CRON_SECRET=<a long random value>`
+3. Set the function secret: `supabase secrets set PURGE_SECRET=<a long random value>`
 4. Put the function URL and that same secret into Vault — one SQL snippet I will
    write for you to paste into the dashboard's SQL editor.
 5. PowerSync dashboard → Sync Streams → add `account_deletions` → **Deploy**.
+
+*(Corrected as built: the secret is `PURGE_SECRET`, not `CRON_SECRET`; step 2
+needs `--no-verify-jwt`, because the cron job calls with the purge secret rather
+than a user token and the function verifies user tokens itself; the stream in
+step 5 is `user_account_deletion`, as in `powersync/sync-streams.yaml`.)*
+
+### As built (2026-09-29)
+
+**Departures from the plan, and why**
+- **A tombstone table, `purged_accounts` (user id + date, nothing else).** The
+  plan said a suspended device learns of the purge because "its token refresh
+  fails". Measured on the dev stack, that signal is ambiguous: a purged
+  account's refresh fails with `refresh_token_not_found` — the same error "sign
+  out everywhere" produces. Erasing on that could wipe unsynced notes on a live
+  account. So a device erases itself only when the function's `was-purged`
+  action answers a definite *yes* from the tombstone; offline or ambiguous
+  answers change nothing.
+- **"Erase this device now"** on the suspended screen (secondary, two taps) —
+  the ordinary sign-out, for someone who wants this device clean before day 30.
+- **supabase-js does not sign out a dead session.** A purged account's refresh
+  fails and the library keeps the session with no event, so a device that never
+  saw the request would stay "signed in" forever. `verifyAccountStillExists()`
+  (`lib/account/deletion.ts`) asks at launch and on foreground (throttled to
+  10 min), and runs at launch *before* sync connects — connecting hangs when
+  sync is unreachable, which would have blocked the check.
+- **The self-host migrator is incremental** (`_selfhost_migrations` + signature
+  probes). It was all-or-nothing, so an existing self-host could never have
+  picked up this migration.
+
+**Bugs the dev-stack run caught (all fixed)**
+1. The Settings sheet stayed open *over* the suspended screen after a request →
+   Settings closes on success.
+2. After a restart, a suspended device connected and synced (a `/sync/stream`
+   request at boot) before its own pending row arrived → the request is
+   persisted (`PENDING_KEY`) and read by the connect gate.
+3. Pressing OK on "account deleted" re-showed "scheduled for deletion" → the
+   persisted-pending read re-runs on every override change.
+4. "Account deleted" lived in memory, so a reload right after erasing showed
+   nothing → persisted (`ERASED_NOTICE_KEY`) until OK.
+5. A zIndex had put the suspended screen above the lock screen (cancel without
+   unlocking) → removed; it is stacked by render order, under the lock.
+
+**Verified on the dev stack** (throwaway accounts; nothing touched live)
+- Function: no/bad token → 401; `purge` without or with a wrong secret → 403; a
+  repeat request keeps the original date (+30 d).
+- RLS: owner reads own row; UPDATE/DELETE → 403; another user sees nothing;
+  anon → 401; `purged_accounts` unreadable; `invoke_account_purge` not callable
+  over RPC.
+- Purge via the cron job's SQL → pg_net 200 `{"purged":1,"failed":[]}`; the user
+  has 0 rows in all five tables, tombstone written; bystander untouched. A
+  temporary every-minute cron job fired unattended (`succeeded`).
+- Web, requesting device: request → suspended; restart → no `/sync/stream` at
+  boot; Cancel → notes back, server row gone, a new edit synced; request again →
+  purge → relaunch → "Your account has been deleted", notes gone.
+- Web, away device (sync server stopped, account purged behind its back):
+  reload → erased + notice; reload again → notice still there; OK → gone, and
+  stays gone after another reload.
+- `tsc` clean · `npm test` 304/304 · `expo lint` 0 errors / 8 warnings (baseline).
+
+**Still to do before merge:** boot the self-host stack and run
+`scripts/verify-selfhost.mjs` (it can't run beside the CLI dev stack — Docker
+OOM); update `docs/two-stacks.md` and the self-host docs; then the live steps
+above (Adam).
+**Deferred:** iOS/Android device runs of the deletion flow. Android first needs
+`npx expo run:android` (Stage 15's new native modules); the iOS build already
+has them.
 
 ---
 
@@ -2610,7 +2678,8 @@ One blocking item; the rest is settled and recorded in the Decisions Log below.
 - **Decision (A):** Adam approved. A device whose account is pending deletion keeps its session, disconnects sync, keeps its encrypted local database, and shows only a suspended screen with **Cancel deletion**. Not a sign-out, because the app's sign-out (`lib/auth/logout.ts`) erases the device, which would defeat the grace period.
 - **Decision (B):** Adam approved. `selfhost/docker-compose.yml` gains Supabase's edge-runtime container and a Kong route, so self-hosters get account deletion too.
 - **Consequence accepted:** anyone holding a suspended device can cancel the deletion — the direction that preserves data. The self-host stack grows by one container.
-- **Status:** building.
+- **My calls while building (reversible):** a `purged_accounts` tombstone (user id + date only) so devices erase only on a definite "purged", never on an ambiguous auth error; an "Erase this device now" button on the suspended screen. Details in Stage 15b → "As built".
+- **Status:** built and dev-verified 2026-09-29; self-host boot and live steps pending.
 
 ### 2026-09-28 — Account deletion (15b): a 30-day grace period, and what devices do during it
 Five calls, all Adam's; three differ from what I recommended, so the tradeoffs are spelled out.

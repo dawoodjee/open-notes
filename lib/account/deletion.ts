@@ -1,9 +1,18 @@
 import * as SecureStore from '@/lib/crypto/secureStorage';
 import { supabase } from '@/lib/supabase/client';
-import { getCurrentUserId } from '@/lib/auth/currentUser';
+import { getCurrentSession, getCurrentUserId } from '@/lib/auth/currentUser';
 import { connectPowerSync, getPowerSync, isPowerSyncReady } from '@/lib/powersync/db';
 import { logout } from '@/lib/auth/logout';
-import { LAST_USER_KEY, markCancelled, markErased, markRequested, type Pending } from './suspension';
+import {
+  ERASED_NOTICE_KEY,
+  LAST_USER_KEY,
+  PENDING_KEY,
+  dismissErasedNotice,
+  markCancelled,
+  markErased,
+  markRequested,
+  type Pending,
+} from './suspension';
 
 /**
  * Account deletion, device side (Stage 15b). The server side is the
@@ -41,7 +50,9 @@ export async function requestAccountDeletion(): Promise<Pending> {
   const { data, error } = await call('request');
   if (error || !data?.pending) throw new Error(await describe(error, 'The request did not go through.'));
   const pending: Pending = data.pending;
-  // Suspend at once rather than waiting for the row to sync down.
+  // Suspend at once rather than waiting for the row to sync down -- and
+  // persist that, so a restart cannot reconnect first (see PENDING_KEY).
+  await SecureStore.setItemAsync(PENDING_KEY, JSON.stringify(pending));
   markRequested(pending);
   if (isPowerSyncReady()) await getPowerSync().disconnect();
   return pending;
@@ -52,6 +63,7 @@ export async function cancelAccountDeletion(): Promise<void> {
   if (error) throw new Error(await describe(error, 'Cancelling did not go through.'));
   // The server row is gone; the local copy leaves when sync resumes, which it
   // can only do once this device stops treating itself as suspended.
+  await forgetPersistedPending();
   markCancelled();
   await connectPowerSync();
 }
@@ -94,8 +106,42 @@ export async function wasAccountPurged(userId: string): Promise<boolean | null> 
  */
 export async function eraseDeviceForPurgedAccount(): Promise<void> {
   await forgetRememberedUser();
+  await forgetPersistedPending();
   await logout();
+  // After logout, which clears keychain items: the notice must outlive it.
+  try {
+    await SecureStore.setItemAsync(ERASED_NOTICE_KEY, '1');
+  } catch {
+    // The in-memory notice below still shows for this session.
+  }
   markErased();
+}
+
+/** On launch: show the erased notice if a previous session erased the device. */
+export async function restoreErasedNotice(): Promise<void> {
+  try {
+    if ((await SecureStore.getItemAsync(ERASED_NOTICE_KEY)) === '1') markErased();
+  } catch {
+    // Unreadable storage: nothing to restore.
+  }
+}
+
+/** The person has read it. */
+export async function acknowledgeErasedNotice(): Promise<void> {
+  dismissErasedNotice();
+  try {
+    await SecureStore.deleteItemAsync(ERASED_NOTICE_KEY);
+  } catch {
+    // Already gone.
+  }
+}
+
+export async function forgetPersistedPending(): Promise<void> {
+  try {
+    await SecureStore.deleteItemAsync(PENDING_KEY);
+  } catch {
+    // Nothing persisted: nothing to forget.
+  }
 }
 
 // ─── The remembered account, for devices that never saw the request ───────
@@ -142,6 +188,47 @@ export async function handleUnrequestedSignOut(): Promise<void> {
   // elsewhere). Stop asking about this account.
   else if (purged === false) await forgetRememberedUser();
   // null: could not reach the server. Keep the id and ask on the next launch.
+}
+
+/**
+ * A signed-in device checks its account still exists. Run at launch and when
+ * the app returns to the foreground.
+ *
+ * WHY THIS IS NEEDED ON TOP OF handleUnrequestedSignOut. That handler assumed a
+ * rejected refresh makes supabase-js drop the session and emit SIGNED_OUT. It
+ * does not -- measured on the dev stack: `refreshSession()` on a purged account
+ * returns `refresh_token_not_found` and KEEPS the session, and no event fires.
+ * A device that never saw the deletion would then stay "signed in" to a dead
+ * account indefinitely, notes and all.
+ *
+ * So the device asks. A network failure says nothing and changes nothing. Any
+ * ANSWER from the auth server rejecting this session -- `user_not_found` for a
+ * still-valid token, `refresh_token_not_found` for an expired one -- is worth
+ * asking the tombstone about, and asking never erases anything by itself.
+ * Only a definite "purged" does.
+ */
+let lastVerifiedAt = 0;
+const VERIFY_EVERY_MS = 10 * 60 * 1000;
+
+export async function verifyAccountStillExists(userId?: string, force = false): Promise<void> {
+  // Passed in at launch, because the module-level session is set by the same
+  // connect path this check must NOT wait for -- see AuthContext.
+  const id = userId ?? getCurrentSession()?.user.id;
+  if (!id) return;
+  if (!force && Date.now() - lastVerifiedAt < VERIFY_EVERY_MS) return;
+  lastVerifiedAt = Date.now();
+
+  let { error } = await supabase.auth.getUser();
+  // An expired access token is rejected as expired, which says nothing about
+  // the account. The refresh is what reveals whether the account is still there.
+  if (error && (error as any).status === 401) {
+    ({ error } = await supabase.auth.refreshSession());
+  }
+  if (!error) return;
+  if (!(error as any).status) return; // no answer from the server: not information
+
+  const purged = await wasAccountPurged(id);
+  if (purged === true) await eraseDeviceForPurgedAccount();
 }
 
 async function describe(error: any, fallback: string): Promise<string> {

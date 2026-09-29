@@ -9,7 +9,13 @@ import { encryptField, tryDecryptField } from '@/lib/crypto/noteCrypto';
 import { ENCRYPTED_DB_FILENAME, migrateToEncrypted } from './migrateToEncrypted';
 import { isSessionOnlyDatabase, openDatabase } from './openDatabase';
 import { isSkillsFolder } from './folders';
-import { getSuspensionOverrides, resolvePending, type Pending } from '@/lib/account/suspension';
+import {
+  PENDING_KEY,
+  getSuspensionOverrides,
+  resolvePending,
+  type Pending,
+} from '@/lib/account/suspension';
+import * as SecureStore from '@/lib/crypto/secureStorage';
 
 // Note the "-v2": the encrypted database is a different file from the
 // pre-Stage-6 plaintext one. See migrateToEncrypted.ts for why the format
@@ -150,12 +156,23 @@ export async function connectPowerSync(): Promise<void> {
  * lib/account/suspension.ts for why both are needed.
  */
 export async function readPendingDeletion(): Promise<Pending | null> {
-  if (!isPowerSyncReady()) return resolvePending(null, getSuspensionOverrides());
+  if (!isPowerSyncReady()) return resolvePending(await readPersistedPending(), getSuspensionOverrides());
   const row = await getPowerSync().getOptional<{ requested_at: string; purge_after: string }>(
     'SELECT requested_at, purge_after FROM account_deletions LIMIT 1'
   );
   const local = row ? { requestedAt: row.requested_at, purgeAfter: row.purge_after } : null;
-  return resolvePending(local, getSuspensionOverrides());
+  return resolvePending(local ?? (await readPersistedPending()), getSuspensionOverrides());
+}
+
+/** This device's persisted request -- see PENDING_KEY for why it exists. */
+export async function readPersistedPending(): Promise<Pending | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(PENDING_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed?.purgeAfter ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 let syncBaseTrackingStarted = false;
