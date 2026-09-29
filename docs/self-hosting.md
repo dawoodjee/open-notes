@@ -75,9 +75,9 @@ First run pulls a few GB. Then:
 docker compose --env-file ../.env ps -a
 ```
 
-Healthy looks like **nine services `running`** — eight `(healthy)`, with `rest`
-showing a bare `Up` because the PostgREST image has no HTTP client to probe
-itself with. `migrator` must show **`Exited (0)`**: it applies the schema and
+Healthy looks like **ten services `running`** — eight `(healthy)`, with `rest`
+and `functions` showing a bare `Up` because neither image has an HTTP client to
+probe itself with. `migrator` must show **`Exited (0)`**: it applies the schema and
 stops, so a stopped migrator is success. Anything else there, read
 `docker compose --env-file ../.env logs migrator`.
 
@@ -87,14 +87,34 @@ stops, so a stopped migrator is success. Anything else there, read
 node scripts/verify-selfhost.mjs
 ```
 
-Fifteen checks, plain Node, nothing to install. Signs up two accounts, writes a
-note, and confirms the things that fail silently: the sign-in email carries a
+Twenty-one checks, plain Node, nothing to install. Signs up two accounts, writes
+a note, and confirms the things that fail silently: the sign-in email carries a
 code rather than a link, PowerSync accepts the token this stack issues, the note
-lands in the right sync bucket as ciphertext, and a second account cannot see
-it. Expect `15/15 passed`.
+lands in the right sync bucket as ciphertext, a second account cannot see it,
+and account deletion answers — a request reaches the owner's devices by sync and
+is cancelled again. Expect `21/21 passed`.
 
 It leaves two junk accounts and a note behind — run it while setting up, not on
 a stack holding real notes. Needs the bundled `mailpit` service.
+
+### Updating an existing install
+
+```bash
+git pull
+node selfhost/generate-keys.mjs --write
+cd selfhost && docker compose --env-file ../.env up -d
+```
+
+The migrator applies only the migrations your database doesn't have yet, and
+records them, so re-running it is safe. `generate-keys --write` fills in values
+added since you set up and leaves every existing one alone; if it says `.env has
+no line for: …`, copy that line (empty) from `.env.example` and run it again.
+
+**Account deletion** (added after the first release) needs `PURGE_SECRET`. The
+app lets someone delete their account; it is erased 30 days later by a daily job
+that authenticates with this secret. Leave it empty and deletion requests still
+work — devices lock and can cancel — but nothing is ever actually erased. The
+migrator logs `account purge armed` when it is set.
 
 ---
 
@@ -229,7 +249,8 @@ then set `GOOGLE_ENABLED=true`, `SUPABASE_AUTH_GOOGLE_CLIENT_ID` and
 | **rest** | PostgREST. Accounts, usernames, wrapped keys. **Notes do not go through here** — they go through PowerSync. |
 | **kong** | The gateway. One port, routed by URL prefix, `apikey` header checked first. |
 | **powersync** | Sync. Reads Postgres's write-ahead log and hands each device only the rows its token allows. Never sees plaintext. |
-| **migrator** | Runs once, applies the schema, exits. Stopped is correct. |
+| **functions** | Supabase's Edge Runtime, running one function: `account-deletion`. It holds the service-role key, because deleting an account means deleting an auth user — something the app must never be able to do directly. |
+| **migrator** | Runs once, applies any migrations not yet applied, arms the daily account purge, exits. Stopped is correct. |
 | **templates** | Serves the sign-in email template to GoTrue. A whole container for one HTML file, because GoTrue fetches templates over HTTP and cannot read them off disk. |
 | **studio** | Admin dashboard. Optional. |
 | **meta** | Schema introspection for Studio. Optional, with it. |
@@ -373,6 +394,13 @@ caller. That is what `scripts/verify-selfhost.mjs` re-runs.
 same fifteen checks, every published port binds to loopback only, and the LAN
 interface refuses connections on Kong, PowerSync and Postgres. `selfhost/Caddyfile`
 passes `caddy validate`.
+
+**Account deletion:** on a stack first booted from the previous release and then
+updated in place, the migrator applied only the new migration and armed the
+purge; all twenty-one checks pass; and a real purge — the cron job's own SQL,
+through `pg_net`, Kong and the `functions` container — deleted the account and
+all its rows, left a second account untouched, and wrote the tombstone devices
+use to erase themselves.
 
 **Not covered:** a physical device against a self-hosted stack, a real
 certificate against a real domain (the DNS and ACME steps have not been executed

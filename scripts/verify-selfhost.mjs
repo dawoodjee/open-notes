@@ -23,9 +23,14 @@
  *   - a note reaches the owner's sync bucket, and the server holds ciphertext.
  *   - a SECOND account cannot see the first one's note, over sync or over the
  *     REST API, and neither can an anonymous caller.
+ *   - the account-deletion Edge Function is reachable through Kong, refuses a
+ *     caller with no token and a purge without the secret, and a request
+ *     reaches the owner's devices by sync. The request is cancelled straight
+ *     away, so nothing is ever scheduled for deletion.
  *
  * SAFE TO RUN: it creates two accounts and one note. It deletes nothing, and
- * touches no table other than by adding that row. Point it at a stack you are
+ * touches no table other than by adding that row (plus a deletion request it
+ * cancels again). Point it at a stack you are
  * still setting up, not one holding notes you care about, purely because two
  * junk accounts will be left behind.
  *
@@ -64,6 +69,21 @@ function check(name, pass, detail = '') {
   console.log(`${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? `  -- ${detail}` : ''}`);
 }
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** POST to the account-deletion Edge Function, the way the app's invoke() does. */
+async function deletion(jwt, body, extraHeaders = {}) {
+  const response = await fetch(`${API}/functions/v1/account-deletion`, {
+    method: 'POST',
+    headers: {
+      apikey: ANON,
+      'Content-Type': 'application/json',
+      ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}),
+      ...extraHeaders,
+    },
+    body: JSON.stringify(body),
+  });
+  return { status: response.status, body: await response.json().catch(() => null) };
+}
 
 /**
  * /sync/stream stays open after sending the checkpoint, so reading it to
@@ -216,6 +236,30 @@ try {
     await fetch(`${API}/rest/v1/notes?select=id`, { headers: { apikey: ANON } })
   ).json();
   check('an anonymous caller sees no notes at all', Array.isArray(anonRest) && anonRest.length === 0);
+
+  // Account deletion (Stage 15b). Request, see it sync, cancel -- never purge.
+  const noToken = await deletion(null, { action: 'status' });
+  check(
+    'the account-deletion function answers, and refuses a caller with no token',
+    noToken.status === 401,
+    noToken.status === 404 || noToken.status === 502 ? `http ${noToken.status} -- is the functions service up?` : `http ${noToken.status}`
+  );
+  const badPurge = await deletion(null, { action: 'purge' }, { 'x-purge-secret': 'not-the-secret' });
+  check('the purge refuses a wrong secret', badPurge.status === 403, `http ${badPurge.status}`);
+
+  const requested = await deletion(alice.jwt, { action: 'request' });
+  check('the owner can request deletion', requested.status === 200 && !!requested.body?.pending?.purgeAfter);
+  try {
+    await sleep(4000);
+    const pendingSync = await syncStream(alice.jwt);
+    check("the request reaches the owner's devices by sync", pendingSync.text.includes('user_account_deletion['));
+    const bobStatus = await deletion(bob.jwt, { action: 'status' });
+    check("the second account is not affected by the owner's request", bobStatus.status === 200 && !bobStatus.body?.pending);
+  } finally {
+    const cancelled = await deletion(alice.jwt, { action: 'cancel' });
+    const after = await deletion(alice.jwt, { action: 'status' });
+    check('the request can be cancelled', cancelled.status === 200 && after.status === 200 && !after.body?.pending);
+  }
 } catch (error) {
   console.error(`\nStopped early: ${error.message}`);
   results.push(false);

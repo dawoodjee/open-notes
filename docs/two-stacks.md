@@ -130,3 +130,54 @@ Sessions are deliberately not preserved; sign in again after a reset.
   same endpoint). This file previously said it "is not wired up"; that is out
   of date. It has not been exercised by a regression pass, so treat it as
   enabled-but-unverified rather than known-good.
+
+## Account deletion
+
+The one piece of server code: the `account-deletion` Edge Function
+(`supabase/functions/account-deletion/`). A request marks the account; a daily
+`pg_cron` job (03:17 UTC) calls the function's `purge` through `pg_net`, which
+deletes every account past its 30 days. The job reads the function URL and a
+shared secret from **Vault**; with either missing it does nothing, so a fresh
+stack is safe by default.
+
+**Dev** — once per machine, then one command each session:
+
+```bash
+printf 'PURGE_SECRET=%s\n' "$(openssl rand -hex 32)" > supabase/functions/.env
+```
+
+```bash
+scripts/configure-account-purge.sh
+```
+
+```bash
+supabase functions serve --env-file supabase/functions/.env
+```
+
+The first two survive restarts (the Vault rows live in the database; re-run the
+script after `supabase db reset`). The third has to be running for requests or
+purges to reach the function. To purge now instead of at 03:17:
+`select public.invoke_account_purge();` as `postgres`.
+
+**Live** — deliberately not scripted from this machine. In order:
+
+1. `supabase db push`
+2. `supabase functions deploy account-deletion --project-ref svbrvtnldkjwtnppsugi --no-verify-jwt`
+   — `--no-verify-jwt` because the cron job calls with the purge secret, not a
+   user token; the function checks user tokens itself on every other action.
+3. `supabase secrets set PURGE_SECRET=<a long random value>` (not the dev one).
+4. Dashboard → SQL editor, with that same value:
+   ```sql
+   select vault.create_secret('https://svbrvtnldkjwtnppsugi.supabase.co/functions/v1/account-deletion', 'account_purge_url');
+   select vault.create_secret('<the same value>', 'account_purge_secret');
+   ```
+5. PowerSync dashboard → Sync Streams: add `user_account_deletion` from
+   `powersync/sync-streams.yaml` → **Deploy**. Skip this and a request still
+   works, but other devices never learn of it until the account is gone.
+
+**Things that will bite you.** A device erases itself only when the function's
+`was-purged` answers yes from the `purged_accounts` tombstone — never on an
+auth error, because a purged account's refresh fails with
+`refresh_token_not_found`, the same error "sign out everywhere" produces. And
+supabase-js does not sign out on that failure: it keeps the dead session and
+fires no event, which is why the app checks at launch and on foreground.
