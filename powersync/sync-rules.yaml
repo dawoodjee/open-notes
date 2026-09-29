@@ -46,3 +46,9 @@ bucket_definitions:
     parameters: select request.user_id() as user_id
     data:
       - select * from user_settings where user_id = bucket.user_id
+  # Stage 15b. How every device learns its account is pending deletion and must
+  # suspend. PowerSync needs an `id` column; this table's key is user_id.
+  user_account_deletion:
+    parameters: select request.user_id() as user_id
+    data:
+      - select user_id as id, requested_at, purge_after from account_deletions where user_id = bucket.user_id

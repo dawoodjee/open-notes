@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text as RNText, View } from 'react-native';
-import { Check, Download, FolderInput, Upload } from 'lucide-react-native';
+import { Pressable, ScrollView, Text as RNText, TextInput, View } from 'react-native';
+import { Check, Download, FolderInput, Upload, UserX } from 'lucide-react-native';
 
 import { Icon } from '@/components/ui/icon';
 import {
@@ -16,6 +16,8 @@ import { startExport } from '@/lib/dataio/exportNotes';
 import { IMPORTED_FOLDER_NAME, startImport, type ImportOptions } from '@/lib/dataio/importNotes';
 import type { ExportScope } from '@/lib/dataio/archiveLayout';
 import { listFolders } from '@/lib/powersync/folders';
+import { requestAccountDeletion } from '@/lib/account/deletion';
+import { useAuth } from '@/contexts/AuthContext';
 import type { Folder } from '@/types/folder';
 
 /**
@@ -30,11 +32,16 @@ export function DataView({
   onBack,
   onExport,
   onImport,
+  onDeleteAccount,
 }: {
   onBack: () => void;
   onExport: () => void;
   onImport: () => void;
+  onDeleteAccount: () => void;
 }) {
+  // Deleting an ACCOUNT needs one. A signed-out device's notes are local only,
+  // and erasing those is what sign-out already does.
+  const { session } = useAuth();
   return (
     <>
       <SettingsSubHeader title="Data" onBack={onBack} />
@@ -54,6 +61,11 @@ export function DataView({
             onPress={onImport}
           />
         </SettingsGroup>
+        {session ? (
+          <SettingsGroup footnote="Erases this account and everything in it after 30 days. You can cancel until then.">
+            <SettingsRow icon={UserX} label="Delete account" destructive onPress={onDeleteAccount} />
+          </SettingsGroup>
+        ) : null}
         <View className="h-8" />
       </ScrollView>
     </>
@@ -205,6 +217,96 @@ export function ImportView({ onBack }: { onBack: () => void }) {
         </SettingsGroup>
 
         <PrimaryButton label="Choose a .zip…" busy={busy} onPress={() => void startImport({ placement, overwrite })} />
+        <View className="h-8" />
+      </ScrollView>
+    </>
+  );
+}
+
+// ─── Delete account (Stage 15b) ───────────────────────────────────────────
+
+/**
+ * Decided (Decisions Log, 2026-09-28): a 30-day grace period, and the
+ * confirmation is typing DELETE -- nothing more. The grace period is what
+ * covers the weaker confirmation: a deletion started by someone holding an
+ * unlocked phone can be cancelled by signing in within the 30 days.
+ *
+ * Everything a person needs to decide is on this page BEFORE the button, and
+ * the first thing offered is a copy of their notes.
+ */
+export function DeleteAccountView({ onBack, onExport }: { onBack: () => void; onExport: () => void }) {
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const armed = typed.trim() === 'DELETE';
+
+  const submit = async () => {
+    if (!armed || busy) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      // On success this device suspends at once: AccountSuspendedOverlay
+      // replaces the whole app, Settings included.
+      await requestAccountDeletion();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'The request did not go through.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <SettingsSubHeader title="Delete account" onBack={onBack} />
+      <ScrollView className="flex-1 px-5 pt-4 bg-background" keyboardShouldPersistTaps="handled">
+        <View className="gap-3 mb-6 px-1">
+          <RNText className="text-base text-foreground">
+            Deleting your account erases every note, folder and setting in it — from our servers and from
+            every device you use.
+          </RNText>
+          <RNText className="text-base text-muted-foreground">
+            It happens after 30 days. Until then every device stops syncing and keeps its notes, still
+            encrypted, and you can cancel from any of them to get everything back.
+          </RNText>
+          <RNText className="text-base text-muted-foreground">
+            After 30 days it can’t be undone.
+          </RNText>
+        </View>
+
+        <SettingsGroup footnote="A .zip of Markdown files you keep, whatever happens to the account.">
+          <SettingsRow icon={Upload} label="Export your notes first" onPress={onExport} />
+        </SettingsGroup>
+
+        <RNText className="text-sm text-muted-foreground mb-2 px-1">Type DELETE to confirm</RNText>
+        <TextInput
+          value={typed}
+          onChangeText={setTyped}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          spellCheck={false}
+          editable={!busy}
+          placeholder="DELETE"
+          accessibilityLabel="Type DELETE to confirm"
+          className="rounded-2xl bg-secondary px-4 py-3 text-base text-foreground mb-4"
+          style={{ outlineStyle: 'none' } as any}
+          onSubmitEditing={() => void submit()}
+        />
+
+        {message ? (
+          <RNText className="text-base text-red-600 dark:text-red-400 mb-4 px-1">{message}</RNText>
+        ) : null}
+
+        <Pressable
+          onPress={() => void submit()}
+          disabled={!armed || busy}
+          className={`px-6 py-3 rounded-full items-center ${armed && !busy ? 'bg-red-600' : 'bg-foreground/10'}`}
+          accessibilityRole="button"
+          accessibilityLabel="Delete account"
+          accessibilityState={{ disabled: !armed || busy, busy }}
+        >
+          <RNText className={`text-base font-medium ${armed && !busy ? 'text-white' : 'text-muted-foreground'}`}>
+            {busy ? 'Working…' : 'Delete account'}
+          </RNText>
+        </Pressable>
         <View className="h-8" />
       </ScrollView>
     </>

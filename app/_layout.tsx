@@ -12,6 +12,7 @@ import { SecureAccountScreen, usePendingKeySetup } from '@/components/SecureAcco
 import { PlaintextConsentDialog } from '@/components/PlaintextConsentDialog';
 import { BootFailureScreen } from '@/components/BootFailureScreen';
 import { BootSpinner } from '@/components/BootSpinner';
+import { AccountSuspendedOverlay } from '@/components/AccountSuspendedOverlay';
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { StatusBar } from 'expo-status-bar';
 
@@ -209,6 +210,10 @@ function VaultGate() {
             <Stack.Screen name="index" />
             <Stack.Screen name="enable-sync" options={{ presentation: 'modal' }} />
           </Stack>
+          {/* Stage 15b. After the Stack so it covers the app; inside
+              AuthProvider so it renders BEFORE the lock overlay below, which
+              must stay on top of it. */}
+          <AccountSuspendedOverlay />
         </AuthProvider>
       ) : null}
 

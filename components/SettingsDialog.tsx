@@ -17,7 +17,7 @@ import {
 import { SecurityView } from '@/components/SecurityView';
 import { EndpointsView } from '@/components/EndpointsView';
 import { AppearanceView } from '@/components/AppearanceView';
-import { DataView, ExportView, ImportView } from '@/components/DataView';
+import { DataView, DeleteAccountView, ExportView, ImportView } from '@/components/DataView';
 import { useVault } from '@/contexts/VaultContext';
 import { useTheme } from '@/contexts/ThemeContext';
 
@@ -89,7 +89,7 @@ function AdvancedView({ onBack }: { onBack: () => void }) {
 
 export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
   const [view, setView] = useState<
-    'root' | 'advanced' | 'security' | 'endpoints' | 'appearance' | 'data' | 'export' | 'import'
+    'root' | 'advanced' | 'security' | 'endpoints' | 'appearance' | 'data' | 'export' | 'import' | 'deleteAccount'
   >('root');
   /**
    * Read here and handed down as props.
@@ -210,7 +210,10 @@ export default function SettingsDialog({ isOpen, onClose }: SettingsDialogProps)
             onBack={() => setView('root')}
             onExport={() => setView('export')}
             onImport={() => setView('import')}
+            onDeleteAccount={() => setView('deleteAccount')}
           />
+        ) : view === 'deleteAccount' ? (
+          <DeleteAccountView onBack={() => setView('data')} onExport={() => setView('export')} />
         ) : view === 'export' ? (
           <ExportView onBack={() => setView('data')} />
         ) : view === 'import' ? (

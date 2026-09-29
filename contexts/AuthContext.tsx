@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
+import { handleUnrequestedSignOut, rememberSignedInUser } from '@/lib/account/deletion';
 import { getPowerSync, connectPowerSync, claimUnownedNotes } from '@/lib/powersync/db';
 import { claimUnownedFolders } from '@/lib/powersync/folders';
 import { getCurrentSession, setCurrentSession } from '@/lib/auth/currentUser';
@@ -344,7 +345,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async function handleAuthEvent(event: string, newSession: Session | null) {
       if (newSession && (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
         await becomeAuthenticatedLocally(newSession, setSession);
+        void rememberSignedInUser(newSession.user.id);
       } else if (event === 'SIGNED_OUT' || (event === 'INITIAL_SESSION' && !newSession)) {
+        // Stage 15b. A sign-out nobody asked for may mean the account was
+        // purged while this device was away -- or merely that the session was
+        // revoked, which looks identical. handleUnrequestedSignOut asks the
+        // server's tombstone and erases this device only on a definite yes.
+        // An intentional logout() has already forgotten the account, so this
+        // does nothing for it.
+        void handleUnrequestedSignOut().catch((err) =>
+          console.warn('[auth] purged-account check failed:', err)
+        );
         // logout() (see lib/auth/logout.ts) already ran
         // getPowerSync().disconnectAndClear() before calling supabase.auth.signOut()
         // -- by the time this fires, local state is already clean. This just
