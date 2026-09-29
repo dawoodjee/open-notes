@@ -2391,7 +2391,7 @@ Report the result of an import to the user: counts of created, duplicated, skipp
 
 ---
 
-## Stage 15b — Account deletion  ·  BUILT, dev-verified 2026-09-29; self-host boot + live steps pending
+## Stage 15b — Account deletion  ·  BUILT, dev + self-host verified 2026-09-29; live steps pending
 
 Branch `stage-15b-account-deletion`. Built against the five decisions in the
 Decisions Log ("Account deletion (15b)…"). The plan below is kept as approved;
@@ -2568,10 +2568,18 @@ step 5 is `user_account_deletion`, as in `powersync/sync-streams.yaml`.)*
   stays gone after another reload.
 - `tsc` clean · `npm test` 304/304 · `expo lint` 0 errors / 8 warnings (baseline).
 
-**Still to do before merge:** boot the self-host stack and run
-`scripts/verify-selfhost.mjs` (it can't run beside the CLI dev stack — Docker
-OOM); update `docs/two-stacks.md` and the self-host docs; then the live steps
-above (Adam).
+- Self-host, upgrade path: booted **main's** self-host on a fresh volume
+  (`verify-selfhost` 15/15), then `up -d` with this branch → migrator recorded
+  the seven existing migrations, applied only 15b, armed the purge;
+  `verify-selfhost` **21/21** (six new deletion checks); a real purge via the
+  cron SQL → pg_net 200 `{"purged":1,"failed":[]}`, account and rows gone,
+  tombstone written, second account intact; `cron.job` = `17 3 * * *`. Volume
+  destroyed afterwards (throwaway).
+- Found and fixed on the way: `.env.example` had no `PURGE_SECRET=` line, so
+  `generate-keys --write` refused a fresh setup.
+
+**Left:** the live steps above (Adam) — full commands in `docs/two-stacks.md`
+→ "Account deletion".
 **Deferred:** iOS/Android device runs of the deletion flow. Android first needs
 `npx expo run:android` (Stage 15's new native modules); the iOS build already
 has them.
@@ -2679,7 +2687,7 @@ One blocking item; the rest is settled and recorded in the Decisions Log below.
 - **Decision (B):** Adam approved. `selfhost/docker-compose.yml` gains Supabase's edge-runtime container and a Kong route, so self-hosters get account deletion too.
 - **Consequence accepted:** anyone holding a suspended device can cancel the deletion — the direction that preserves data. The self-host stack grows by one container.
 - **My calls while building (reversible):** a `purged_accounts` tombstone (user id + date only) so devices erase only on a definite "purged", never on an ambiguous auth error; an "Erase this device now" button on the suspended screen. Details in Stage 15b → "As built".
-- **Status:** built and dev-verified 2026-09-29; self-host boot and live steps pending.
+- **Status:** built; dev and self-host verified 2026-09-29; live steps pending.
 
 ### 2026-09-28 — Account deletion (15b): a 30-day grace period, and what devices do during it
 Five calls, all Adam's; three differ from what I recommended, so the tradeoffs are spelled out.
