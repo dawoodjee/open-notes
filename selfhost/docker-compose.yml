@@ -262,6 +262,35 @@ services:
       - '${BIND_ADDR:-0.0.0.0}:${KONG_HTTP_PORT:-8000}:8000'
 
   # ---------------------------------------------------------------------------
+  # functions -- Supabase's Edge Runtime, for account deletion (Stage 15b).
+  #
+  # The one piece of server code this app has: the `account-deletion` function,
+  # which needs the service role to delete an auth user -- a key the app itself
+  # must never hold. Reached through Kong at /functions/v1/account-deletion.
+  #
+  # It is the MAIN service, not one of several behind a router: this app has a
+  # single function, and it answers on any path. A second function would mean
+  # switching to Supabase's router-style `main` service.
+  #
+  # Same image version the Supabase CLI dev stack runs, so what is tested there
+  # is what runs here.
+  # ---------------------------------------------------------------------------
+  functions:
+    image: public.ecr.aws/supabase/edge-runtime:v1.74.2
+    restart: unless-stopped
+    depends_on:
+      kong:
+        condition: service_started
+    environment:
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY:?set SERVICE_ROLE_KEY in .env}
+      # Checked on the daily purge. Empty = the purge endpoint refuses everything.
+      PURGE_SECRET: ${PURGE_SECRET:-}
+    volumes:
+      - ../supabase/functions:/home/deno/functions:ro
+    command: ['start', '--main-service', '/home/deno/functions/account-deletion']
+
+  # ---------------------------------------------------------------------------
   # migrator -- one-shot. Applies this repo's schema, then exits.
   #
   # Runs as a service rather than as a db init script for one reason: init
@@ -284,6 +313,7 @@ services:
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POWERSYNC_REPLICATION_PASSWORD: ${POWERSYNC_REPLICATION_PASSWORD:?set POWERSYNC_REPLICATION_PASSWORD in .env}
+      PURGE_SECRET: ${PURGE_SECRET:-}
     volumes:
       - ../supabase/migrations:/migrations:ro
       - ./migrate.sh:/migrate.sh:ro

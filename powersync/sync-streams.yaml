@@ -51,3 +51,8 @@ streams:
   user_settings:
     auto_subscribe: true
     query: SELECT * FROM user_settings WHERE user_id = auth.user_id()
+  # Stage 15b. How every device learns its account is pending deletion and must
+  # suspend. PowerSync needs an `id` column; this table's key is user_id.
+  user_account_deletion:
+    auto_subscribe: true
+    query: SELECT user_id AS id, requested_at, purge_after FROM account_deletions WHERE user_id = auth.user_id()

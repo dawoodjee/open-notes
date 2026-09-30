@@ -1,4 +1,6 @@
 import { getPowerSync } from '@/lib/powersync/db';
+import * as SecureStore from '@/lib/crypto/secureStorage';
+import { LAST_USER_KEY } from '@/lib/account/suspension';
 import { supabase } from '@/lib/supabase/client';
 import { clearNoteCryptoCache, tryDecryptField } from '@/lib/crypto/noteCrypto';
 import { clearRecoveryState } from '@/lib/crypto/vault';
@@ -76,6 +78,14 @@ export async function getPendingWriteCount(): Promise<number> {
  * it trusts the caller already got consent.
  */
 export async function logout(): Promise<void> {
+  // Forget which account this device was in BEFORE signing out, so the
+  // SIGNED_OUT this produces is never mistaken for an account being purged
+  // underneath the device (Stage 15b -- see lib/account/deletion.ts).
+  try {
+    await SecureStore.deleteItemAsync(LAST_USER_KEY);
+  } catch {
+    // Nothing remembered, or storage unavailable: nothing to forget.
+  }
   await getPowerSync().disconnectAndClear();
 
   // The decrypted-plaintext cache outlives the rows it came from, so it has

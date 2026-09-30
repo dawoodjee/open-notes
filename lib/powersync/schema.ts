@@ -226,10 +226,27 @@ export const userSettingsTable = new Table({
   updated_at: column.text,
 });
 
+/**
+ * This account's pending deletion, if any (Stage 15b). At most one row -- its
+ * `id` is the user id (sync config aliases `user_id as id`).
+ *
+ * READ-ONLY on the client, by design and by RLS: nothing here ever writes it.
+ * Requesting and cancelling go through the `account-deletion` Edge Function, so
+ * a client cannot shorten its own grace period. That is also why the upload
+ * connector has no handler for it -- there are never ops to upload.
+ *
+ * Its arrival through sync is how every device learns to suspend.
+ */
+export const accountDeletionsTable = new Table({
+  requested_at: column.text,
+  purge_after: column.text,
+});
+
 export const AppSchema = new Schema({
   notes: notesTable,
   folders: foldersTable,
   user_settings: userSettingsTable,
+  account_deletions: accountDeletionsTable,
   ui_state: uiStateTable,
   sync_issues: syncIssuesTable,
   note_sync_base: noteSyncBaseTable,

@@ -9,6 +9,13 @@ import { encryptField, tryDecryptField } from '@/lib/crypto/noteCrypto';
 import { ENCRYPTED_DB_FILENAME, migrateToEncrypted } from './migrateToEncrypted';
 import { isSessionOnlyDatabase, openDatabase } from './openDatabase';
 import { isSkillsFolder } from './folders';
+import {
+  PENDING_KEY,
+  getSuspensionOverrides,
+  resolvePending,
+  type Pending,
+} from '@/lib/account/suspension';
+import * as SecureStore from '@/lib/crypto/secureStorage';
 
 // Note the "-v2": the encrypted database is a different file from the
 // pre-Stage-6 plaintext one. See migrateToEncrypted.ts for why the format
@@ -129,8 +136,43 @@ export async function closePowerSync(): Promise<void> {
 // unconditionally at app boot. The app keeps working fully offline/local-only
 // without this ever being called, exactly as it did before Stage 5.
 export async function connectPowerSync(): Promise<void> {
+  // A device whose account is pending deletion stays disconnected (Stage 15b).
+  //
+  // The gate lives HERE, not in the suspended screen, because this is the one
+  // place every connect goes through -- and the auth layer reconnects on every
+  // TOKEN_REFRESHED (becomeAuthenticatedLocally -> claimAndConnect). A screen
+  // that merely called disconnect() would be silently undone within the hour.
+  //
+  // It reads the LOCAL row, so the suspension survives an app restart with no
+  // network: the device knows it is suspended before it could ask anyone.
+  if (await readPendingDeletion()) return;
   await getPowerSync().connect(connector);
   startSyncBaseTracking();
+}
+
+/**
+ * This account's pending deletion as this device currently understands it --
+ * the synced row, adjusted by what the device has just done itself. See
+ * lib/account/suspension.ts for why both are needed.
+ */
+export async function readPendingDeletion(): Promise<Pending | null> {
+  if (!isPowerSyncReady()) return resolvePending(await readPersistedPending(), getSuspensionOverrides());
+  const row = await getPowerSync().getOptional<{ requested_at: string; purge_after: string }>(
+    'SELECT requested_at, purge_after FROM account_deletions LIMIT 1'
+  );
+  const local = row ? { requestedAt: row.requested_at, purgeAfter: row.purge_after } : null;
+  return resolvePending(local ?? (await readPersistedPending()), getSuspensionOverrides());
+}
+
+/** This device's persisted request -- see PENDING_KEY for why it exists. */
+export async function readPersistedPending(): Promise<Pending | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(PENDING_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed?.purgeAfter ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 let syncBaseTrackingStarted = false;

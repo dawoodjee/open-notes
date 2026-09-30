@@ -2391,6 +2391,201 @@ Report the result of an import to the user: counts of created, duplicated, skipp
 
 ---
 
+## Stage 15b — Account deletion  ·  BUILT, dev + self-host verified 2026-09-29; live steps pending
+
+Branch `stage-15b-account-deletion`. Built against the five decisions in the
+Decisions Log ("Account deletion (15b)…"). The plan below is kept as approved;
+**"As built" at the end of this section** records where the build departed from
+it and what the dev-stack run proved.
+
+### What the research found, and what it changes
+
+1. **Every table holding a user's data already cascades from the auth user** —
+   notes, folders, user_settings, profiles, user_keys all say
+   `references auth.users (id) on delete cascade`. Deleting the one auth row
+   erases everything server-side. No per-table deletion code is needed.
+2. **The app's sign-out erases the device.** `lib/auth/logout.ts` runs
+   `disconnectAndClear()` before signing out. The decided grace-period behaviour
+   ("stop syncing but keep the encrypted local copy") therefore CANNOT be a
+   sign-out. It needs a new **suspended** state — see "Needs your OK" (A).
+3. **The self-host stack has no Edge Function runtime** — `selfhost/docker-compose.yml`
+   runs db, auth, rest, kong, powersync and friends, but no `functions` service.
+   The CLI dev stack has one (`[edge_runtime] enabled = true`). See (B).
+4. **The privileged step goes through GoTrue's admin API, not SQL.**
+   `docs/two-stacks.md` warns that `postgres` is not the superuser and
+   `auth.users` belongs to `supabase_auth_admin`, so a SQL `delete from auth.users`
+   is exactly the kind of thing that works on one stack and not another.
+   `auth.admin.deleteUser()` from the Edge Function is the supported route —
+   which is a real point in favour of the Edge Function choice.
+
+### New pieces, taught briefly
+
+- **Edge Function** — a small TypeScript program (Deno, not Node) that Supabase
+  runs on its own servers at `/functions/v1/<name>`. It is the only place the
+  **service role** — Supabase's key that bypasses RLS — is available, because
+  Supabase injects it into the function's environment. The app never holds it.
+- **pg_cron** — Postgres's built-in scheduler: "run this SQL every day at 03:00".
+- **pg_net** — lets that SQL make an HTTP request, which is how a daily cron job
+  calls the Edge Function to purge expired accounts.
+- **Vault** — Supabase's encrypted secret store inside Postgres. The cron job
+  reads the function URL and a purge secret from it, so neither is ever written
+  into a committed migration.
+
+### The design
+
+**Server (both stacks)**
+- Migration: `public.account_deletions (user_id pk → auth.users on delete cascade,
+  requested_at, purge_after)`. RLS: a user may **read** their own row; nobody
+  may write it from the client — only the Edge Function (service role) does.
+  Added to the PowerSync publication so devices learn of it by sync.
+- Edge Function `account-deletion`:
+  - `request` / `cancel` / `status` — called with the user's own sign-in token;
+    the function verifies it and acts on **that user only**.
+  - `purge` — called only by the cron job, authenticated by a `CRON_SECRET`
+    header; deletes each expired user via `auth.admin.deleteUser()`, and the
+    cascade does the rest.
+- pg_cron: a daily job calls `purge` through pg_net, reading the URL and secret
+  from Vault. On a stack where those Vault secrets are absent it does nothing,
+  so a fresh stack is safe by default.
+- Sync config, by hand in both formats: dev `sync-rules.yaml`, live
+  `sync-streams.yaml`.
+
+**App**
+- **Settings → Data → Delete account** (Data is "user data management", and
+  Apple requires deletion to be easy to find). Signed-in only. The page says
+  plainly: what is deleted, the 30 days, that every device locks, how to cancel,
+  and offers **Export first**. Confirm by typing `DELETE` (decided).
+- **Suspended state**, entered the moment a device sees its own
+  `account_deletions` row — the requesting device at once, the others at their
+  next sync or open: sync disconnects, the local database is **kept**, and the
+  whole app is replaced by one screen — *"Your account is scheduled for deletion
+  on <date>"* — with **Cancel deletion**. Signing in on a fresh device during
+  the window lands on the same screen.
+- **After the purge**, a suspended device finds the account gone (its token
+  refresh fails: the user no longer exists) and erases itself — the existing
+  `logout()` path — then shows *"Your account has been deleted."*
+
+**Self-host (B)** — add Supabase's `edge-runtime` container and its Kong route to
+`selfhost/docker-compose.yml`, and document the Vault/cron setup in `docs/`.
+
+### Verification (dev stack; nothing touches live)
+
+A throwaway account created on the local stack, plus a second account as a
+bystander.
+- Request → the row appears; the device suspends; sync stops; the local notes
+  are still on disk.
+- Cancel → the row is gone; sync resumes; nothing lost.
+- Request, then move `purge_after` into the past and fire the cron job's SQL →
+  the auth user is gone and **every one of that user's rows in all five tables
+  counts zero**; the **bystander's rows are untouched**; the suspended device
+  erases itself on next open.
+- A request carrying user A's token cannot touch user B.
+- `purge` without the secret is refused.
+- The cron job is really scheduled (`cron.job`) and really calls the function.
+- `tsc`, `npm test`, `expo lint` at the baseline.
+
+### Needs your OK before I build
+
+**(A) Lock out with the session kept, not sign out.** Since sign-out erases the
+device, a suspended device keeps its session, stops syncing, and shows only the
+suspended screen with a **Cancel deletion** button. Every property you chose
+holds — locked out, no syncing, encrypted copy kept, cancel without the recovery
+phrase, erased at day 30 — but cancelling is **one tap** on a suspended device
+rather than "sign back in". (A fresh device still signs in, then taps Cancel.)
+*Tradeoff:* someone holding a suspended device can cancel the deletion. That is
+the safe direction — it preserves data — so I recommend it.
+
+**(B) Self-host gets an Edge Function runtime.** Otherwise account deletion
+simply does not exist for self-hosters. Recommended — the docs promise the
+self-hosted app is the same app.
+
+### Needs your hands — LIVE ONLY, after the dev stack is verified
+
+Front-loaded now so it is not discovered mid-run. None of it is needed to build
+and verify on dev.
+1. `supabase db push` (the migration).
+2. `supabase functions deploy account-deletion --project-ref svbrvtnldkjwtnppsugi`
+3. Set the function secret: `supabase secrets set PURGE_SECRET=<a long random value>`
+4. Put the function URL and that same secret into Vault — one SQL snippet I will
+   write for you to paste into the dashboard's SQL editor.
+5. PowerSync dashboard → Sync Streams → add `account_deletions` → **Deploy**.
+
+*(Corrected as built: the secret is `PURGE_SECRET`, not `CRON_SECRET`; step 2
+needs `--no-verify-jwt`, because the cron job calls with the purge secret rather
+than a user token and the function verifies user tokens itself; the stream in
+step 5 is `user_account_deletion`, as in `powersync/sync-streams.yaml`.)*
+
+### As built (2026-09-29)
+
+**Departures from the plan, and why**
+- **A tombstone table, `purged_accounts` (user id + date, nothing else).** The
+  plan said a suspended device learns of the purge because "its token refresh
+  fails". Measured on the dev stack, that signal is ambiguous: a purged
+  account's refresh fails with `refresh_token_not_found` — the same error "sign
+  out everywhere" produces. Erasing on that could wipe unsynced notes on a live
+  account. So a device erases itself only when the function's `was-purged`
+  action answers a definite *yes* from the tombstone; offline or ambiguous
+  answers change nothing.
+- **"Erase this device now"** on the suspended screen (secondary, two taps) —
+  the ordinary sign-out, for someone who wants this device clean before day 30.
+- **supabase-js does not sign out a dead session.** A purged account's refresh
+  fails and the library keeps the session with no event, so a device that never
+  saw the request would stay "signed in" forever. `verifyAccountStillExists()`
+  (`lib/account/deletion.ts`) asks at launch and on foreground (throttled to
+  10 min), and runs at launch *before* sync connects — connecting hangs when
+  sync is unreachable, which would have blocked the check.
+- **The self-host migrator is incremental** (`_selfhost_migrations` + signature
+  probes). It was all-or-nothing, so an existing self-host could never have
+  picked up this migration.
+
+**Bugs the dev-stack run caught (all fixed)**
+1. The Settings sheet stayed open *over* the suspended screen after a request →
+   Settings closes on success.
+2. After a restart, a suspended device connected and synced (a `/sync/stream`
+   request at boot) before its own pending row arrived → the request is
+   persisted (`PENDING_KEY`) and read by the connect gate.
+3. Pressing OK on "account deleted" re-showed "scheduled for deletion" → the
+   persisted-pending read re-runs on every override change.
+4. "Account deleted" lived in memory, so a reload right after erasing showed
+   nothing → persisted (`ERASED_NOTICE_KEY`) until OK.
+5. A zIndex had put the suspended screen above the lock screen (cancel without
+   unlocking) → removed; it is stacked by render order, under the lock.
+
+**Verified on the dev stack** (throwaway accounts; nothing touched live)
+- Function: no/bad token → 401; `purge` without or with a wrong secret → 403; a
+  repeat request keeps the original date (+30 d).
+- RLS: owner reads own row; UPDATE/DELETE → 403; another user sees nothing;
+  anon → 401; `purged_accounts` unreadable; `invoke_account_purge` not callable
+  over RPC.
+- Purge via the cron job's SQL → pg_net 200 `{"purged":1,"failed":[]}`; the user
+  has 0 rows in all five tables, tombstone written; bystander untouched. A
+  temporary every-minute cron job fired unattended (`succeeded`).
+- Web, requesting device: request → suspended; restart → no `/sync/stream` at
+  boot; Cancel → notes back, server row gone, a new edit synced; request again →
+  purge → relaunch → "Your account has been deleted", notes gone.
+- Web, away device (sync server stopped, account purged behind its back):
+  reload → erased + notice; reload again → notice still there; OK → gone, and
+  stays gone after another reload.
+- `tsc` clean · `npm test` 304/304 · `expo lint` 0 errors / 8 warnings (baseline).
+
+- Self-host, upgrade path: booted **main's** self-host on a fresh volume
+  (`verify-selfhost` 15/15), then `up -d` with this branch → migrator recorded
+  the seven existing migrations, applied only 15b, armed the purge;
+  `verify-selfhost` **21/21** (six new deletion checks); a real purge via the
+  cron SQL → pg_net 200 `{"purged":1,"failed":[]}`, account and rows gone,
+  tombstone written, second account intact; `cron.job` = `17 3 * * *`. Volume
+  destroyed afterwards (throwaway).
+- Found and fixed on the way: `.env.example` had no `PURGE_SECRET=` line, so
+  `generate-keys --write` refused a fresh setup.
+
+**Left:** the live steps above (Adam) — full commands in `docs/two-stacks.md`
+→ "Account deletion".
+**Deferred:** iOS/Android device runs of the deletion flow. Android first needs
+`npx expo run:android` (Stage 15's new native modules); the iOS build already
+has them.
+
+---
+
 ## Stage 16 — Env file / sign-up toggle
 
 **Settled:** enforcement is **Supabase-side**, not merely a hidden client control — a client-only toggle is trivially bypassable against a live project.
@@ -2486,6 +2681,24 @@ One blocking item; the rest is settled and recorded in the Decisions Log below.
 ## Decisions Log
 
 *(iteration-2-specific decisions, same terse format as `dev-docs/mvp-build-plan.md` — decision / reasoning / verification / status. Don't duplicate MVP-era entries.)*
+
+### 2026-09-29 — 15b: suspended devices keep their session; self-host gets an edge runtime
+- **Decision (A):** Adam approved. A device whose account is pending deletion keeps its session, disconnects sync, keeps its encrypted local database, and shows only a suspended screen with **Cancel deletion**. Not a sign-out, because the app's sign-out (`lib/auth/logout.ts`) erases the device, which would defeat the grace period.
+- **Decision (B):** Adam approved. `selfhost/docker-compose.yml` gains Supabase's edge-runtime container and a Kong route, so self-hosters get account deletion too.
+- **Consequence accepted:** anyone holding a suspended device can cancel the deletion — the direction that preserves data. The self-host stack grows by one container.
+- **My calls while building (reversible):** a `purged_accounts` tombstone (user id + date only) so devices erase only on a definite "purged", never on an ambiguous auth error; an "Erase this device now" button on the suspended screen. Details in Stage 15b → "As built".
+- **Status:** built; dev and self-host verified 2026-09-29; live steps pending.
+
+### 2026-09-28 — Account deletion (15b): a 30-day grace period, and what devices do during it
+Five calls, all Adam's; three differ from what I recommended, so the tradeoffs are spelled out.
+
+- **Timing: a 30-day grace period** (I recommended immediate). The account is disabled at request and purged after 30 days; signing back in within the window cancels. *Accepted cost:* a scheduled server job, and a "pending deletion" state every device must understand.
+- **Confirmation: type DELETE, nothing more** (I recommended DELETE plus the app's own unlock). *Accepted cost:* it stops accidents, not someone holding the unlocked phone. **The grace period is what covers that gap** — a deletion made by someone else can be undone by signing in within 30 days. The two choices fit together.
+- **Server: a Supabase Edge Function** (I recommended a SECURITY DEFINER database function). *Accepted cost:* a new deploy target (`supabase functions deploy`, on both stacks), and a function running with the service role — which Supabase injects into every Edge Function's environment, so no NEW key is created or stored by us, but the function must verify the caller's own JWT and act only on that user. More flexible later (e.g. a confirmation email).
+- **Other devices: wiped once the account no longer exists** (recommended).
+- **During the 30 days: lock out, wipe at day 30** (recommended). Every device — the one that asked included — signs out and stops syncing but keeps its ENCRYPTED local copy until the purge; it wipes when it next opens and finds the account gone.
+  *Why this one:* notes are end-to-end encrypted. Had devices wiped at request time, cancelling would need the 12-word recovery phrase, and without it the grace period could not save anything. Keeping each device's encrypted copy is what makes "sign back in to cancel" actually work.
+- **Status:** decided; 15b planned against these.
 
 ### 2026-09-28 — Import unwraps only TOP-LEVEL wrapper folders
 - **Decision:** Adam's call. Import repeatedly unwraps while the zip's root is a single folder with no notes of its own — the "MyExport/" artifact zip tools add. Folders anywhere else are always created, even when they hold only subfolders. **Supersedes** the Stage 15 prompt's "collapse any note-less folder, recursively".

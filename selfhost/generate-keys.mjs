@@ -31,6 +31,9 @@ const jwtSecret = randomBytes(20).toString('hex');
 // URI and produces a connection error that names the wrong host.
 const pgPassword = randomBytes(24).toString('base64url');
 const psPassword = randomBytes(24).toString('base64url');
+// Stage 15b: the daily account purge authenticates to the Edge Function with
+// this. The migrator puts it in Vault; the function reads it from the env.
+const purgeSecret = randomBytes(32).toString('hex');
 
 const issued = Math.floor(Date.now() / 1000);
 const expires = issued + 60 * 60 * 24 * 365 * 10; // 10 years
@@ -47,6 +50,7 @@ const values = {
   ANON_KEY: anonKey,
   SERVICE_ROLE_KEY: serviceKey,
   POWERSYNC_REPLICATION_PASSWORD: psPassword,
+  PURGE_SECRET: purgeSecret,
   EXPO_PUBLIC_SUPABASE_ANON_KEY: anonKey,
 };
 
