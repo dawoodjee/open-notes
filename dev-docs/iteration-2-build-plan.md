@@ -2650,7 +2650,51 @@ VERIFY: against the local dev stack, disable sign-ups and prove (a) a new sign-u
 
 ---
 
-## Stage 14 — Website (marketing)  ·  *runs LAST — reordered 2026-09-28*
+## Stage 14 — Website (marketing)  ·  BUILT and verified locally 2026-09-30; publish + host pending
+
+### As built (2026-09-30)
+
+Repo **`open-notes-website`** (Frappe app `open_notes_website`, local at
+`~/React/frappe-bench/apps/open_notes_website`, branch `stage-14-website`; not
+on GitHub yet). Dev bench `~/React/frappe-bench`: Frappe 16.36.0, ERPNext
+16.37.0, webshop + payments (version-16), Builder **v1.34.0**, site
+`notes-website.localhost`, MariaDB 11.8 in OrbStack (`frappe-mariadb`). Local
+dev passwords live in `~/React/frappe-bench-secrets/`, outside every repo.
+
+- The page is a **Builder standard page** (`builder_files/`), not a hooks.py
+  fixture: Builder's own export, which carries the page's tokens and data
+  script and is imported by Builder's `after_app_install`.
+- Colours are seven Builder Tokens with light and dark values (`light-dark()`),
+  accent = the app's lime. Font is set in head HTML: a block `fontFamily` made
+  Builder request "-apple-system" from Google Fonts.
+- **Links hidden until set**, in *Open Notes Website Settings*: web app URL and
+  Android download URL. The "Where it runs today" copy changes with them
+  ("coming" while empty), so the page never promises a download that isn't there.
+- Copy corrections vs the prompt: iOS is "build it yourself; App Store coming"
+  (the free-team build can't be installed by anyone else); AI and MCP are
+  described as the direction, not shipped.
+
+**Verified locally:**
+- Renders at 375 / 768 / 1280, light and dark, with no horizontal overflow
+  (checked with JS). Grid 2 → 1 column; 16px phone gutter; link targets ≥ 52px.
+- App Store → "Coming soon" on hover.
+- Links with both settings set → Android and web links appear with the right
+  `href`s; with both empty → absent, copy says "coming".
+- **Fresh-site round trip:** a new site with only `open_notes_website`
+  installed pulled in Builder and recreated the page, the tokens and the
+  settings doctype. Rendered text and structure were identical to the dev
+  site. That site was then dropped.
+
+**Not verified:** the page opening in the Builder editor. That needed an admin
+session in the browser pane, and I stopped rather than handle the session token.
+
+**Known Builder behaviour** (in the app README): paragraphs render as `<div>`;
+the page template always adds `preconnect` hints to Google Fonts.
+
+**Left for Adam:** create and push the public GitHub repo; host on the live
+bench (README → Install); publish the first APK release, then set the Android
+URL; set the web URL once the web app is hosted.
+
 
 > **Order changed, number kept.** Adam moved the website to the end of the
 > iteration (2026-09-28): execution order is now **15 → 16 → 14**. The number
@@ -2719,6 +2763,14 @@ One blocking item; the rest is settled and recorded in the Decisions Log below.
 ## Decisions Log
 
 *(iteration-2-specific decisions, same terse format as `dev-docs/mvp-build-plan.md` — decision / reasoning / verification / status. Don't duplicate MVP-era entries.)*
+
+### 2026-09-30 — Stage 14: Frappe v16 locally, page in Builder, links hidden until set
+- **Decisions (Adam):** Frappe v16 in local developer mode, with a dev site running Builder, ERPNext and webshop (version-16), MariaDB in OrbStack. Page authored in **Frappe Builder**. Web described as available, with its link hidden until set. Repo `open-notes-website`.
+- **Android link (Adam, changed mid-stage):** first "EAS builds page". That page redirects logged-out visitors to an Expo login (measured: 307 → "Log in — Expo"), so it became **GitHub Releases `…/releases/latest`**, hidden until set because no release exists yet.
+- **Builder pinned to v1.34.0 (Adam):** v1.35.0 (`master`, released that day) imports `@framework/ui/telemetry`, which v16 lacks, and its frontend build fails. v1.34.0 builds and declares `frappe >=15,<18`. *Consequence accepted:* the live bench has to use the same pin until Builder builds on v16 again.
+- **My calls (cheap to undo):** Builder standard page rather than a hooks.py fixture; app name `open_notes_website` (bench rejects hyphens); the home page is not set automatically (the README says how); `payments` added because webshop requires it.
+- **Environment:** C extensions don't link on this Mac with the default toolchain, because the Command Line Tools macOS 27 SDK is newer than Xcode's linker. Build with `SDKROOT` set to Xcode's SDK (saved to memory).
+- **Status:** built and verified locally; publishing and hosting are Adam's.
 
 ### 2026-09-30 — Stage 16: the app asks the server whether sign-ups are open
 - **Decision (A):** Adam approved. The app reads GoTrue's public `/auth/v1/settings` when the Sync Account screen opens, rather than mirroring the setting in an `EXPO_PUBLIC_` variable. No new app variable; `DISABLE_SIGNUP` in `.env.example` stays the self-host switch.
