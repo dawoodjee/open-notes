@@ -25,6 +25,7 @@ import './htmlToMarkdown.test';
 import './markdownToHtml.test';
 import './archiveLayout.test';
 import './suspension.test';
+import './signups.test';
 import { report } from './harness';
 
 report();

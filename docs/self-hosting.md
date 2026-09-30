@@ -212,8 +212,18 @@ docker compose --env-file ../.env up -d
 
 Then:
 
-- **`DISABLE_SIGNUP=true`** once your own devices are enrolled, and restart.
-  Otherwise a server on the open internet accepts new accounts.
+- **`DISABLE_SIGNUP=true`** once your own devices are enrolled, then
+  `docker compose --env-file ../.env up -d` to apply it. Otherwise a server on
+  the open internet accepts new accounts. The auth server enforces it: a new
+  address is refused even by a hand-made request, while existing accounts
+  sign in as before. The app asks the server whether sign-ups
+  are open and tells people, so there's nothing to rebuild. Confirm with
+  `node scripts/verify-signup-toggle.mjs <an-existing-account-email>`.
+
+  One side effect: with sign-ups closed, the server answers differently for
+  addresses that have an account and ones that don't, so anyone can test
+  whether an address is registered. That's the auth server's behaviour, and the
+  app can't hide it. With sign-ups open, every address gets the same answer.
 - **Firewall to 22, 80 and 443.** With `BIND_ADDR` set nothing else listens
   publicly, but a firewall is the thing that stays correct when a future compose
   edit forgets.

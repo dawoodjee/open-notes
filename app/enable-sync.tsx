@@ -15,6 +15,12 @@ import { UserRound, X } from 'lucide-react-native';
 import { supabase } from '@/lib/supabase/client';
 import { isValidEmail, normalizeEmail } from '@/lib/validation/email';
 import { signInWithGoogle } from '@/lib/auth/oauth';
+import {
+  SIGNUPS_CLOSED_MESSAGE,
+  SIGNUPS_CLOSED_NOTICE,
+  fetchSignupsClosed,
+  isSignupClosedError,
+} from '@/lib/auth/signups';
 import { useAuth } from '@/contexts/AuthContext';
 import { BACKGROUND, ON_ACCENT, useTheme } from '@/contexts/ThemeContext';
 
@@ -50,6 +56,19 @@ export default function EnableSyncScreen() {
   const [code, setCode] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Asked of the server, not configured in the app -- see lib/auth/signups.ts.
+  // null (could not ask) shows nothing; a refusal is still explained below.
+  const [signupsClosed, setSignupsClosed] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void fetchSignupsClosed().then((closed) => {
+      if (live) setSignupsClosed(closed);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
 
   /**
    * router.back() alone is not enough, and that is the second half of why this
@@ -96,7 +115,9 @@ export default function EnableSyncScreen() {
     const { error } = await supabase.auth.signInWithOtp({ email: address });
     setIsSubmitting(false);
     if (error) {
-      setError(error.message);
+      // GoTrue's own text here is "Signups not allowed for this instance",
+      // which reads like a fault and says nothing about existing accounts.
+      setError(isSignupClosedError(error) ? SIGNUPS_CLOSED_MESSAGE : error.message);
       return;
     }
     setEmail(address);
@@ -181,6 +202,9 @@ export default function EnableSyncScreen() {
             <RNText className="text-sm text-muted-foreground">
               Enter your email to get your one-time code.
             </RNText>
+            {signupsClosed === true && (
+              <RNText className="text-sm text-muted-foreground">{SIGNUPS_CLOSED_NOTICE}</RNText>
+            )}
             <Input className="rounded-lg h-11 px-3">
               <InputField
                 value={email}

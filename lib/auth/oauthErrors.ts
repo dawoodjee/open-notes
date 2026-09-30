@@ -7,6 +7,8 @@
  * half worth testing is the classification, not the query-string split.
  */
 
+import { SIGNUPS_CLOSED_MESSAGE, isSignupClosedCode } from './signups';
+
 /**
  * The flow ran out of time -- the user left the consent screen sitting, or
  * stopped to reset a password partway through.
@@ -52,6 +54,15 @@ export function classifyOAuthError(
   const description = params.error_description ?? '';
   if (!code) return null;
 
+  // A new Google account on a server that has closed sign-ups (Stage 16).
+  // Checked before anything else: GoTrue's own text for it is
+  // "Signups not allowed for this instance", which reads like a fault.
+  // Matched on the description too: driving a Google sign-up end to end needs
+  // a real Google account's consent, so the exact redirect shape here comes
+  // from GoTrue's source rather than a measurement.
+  if (isSignupClosedCode(params.error_code) || /signups not allowed/i.test(description.replace(/\+/g, ' '))) {
+    return new Error(SIGNUPS_CLOSED_MESSAGE);
+  }
   if (EXPIRED_CODES.includes(code) || /expired/i.test(description)) {
     return new OAuthExpiredError();
   }
