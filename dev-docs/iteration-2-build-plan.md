@@ -2586,7 +2586,45 @@ has them.
 
 ---
 
-## Stage 16 — Env file / sign-up toggle
+## Stage 16 — Env file / sign-up toggle  ·  BUILT and dev-verified 2026-09-30
+
+### As built (2026-09-30)
+
+**The server half already existed** — self-host maps `DISABLE_SIGNUP` to
+`GOTRUE_DISABLE_SIGNUP`; dev has `enable_signup` in `supabase/config.toml`;
+live is the dashboard's "Allow new users to sign up". What was missing was the
+app side: a new person on a closed server saw GoTrue's raw "Signups not allowed
+for this instance".
+
+- `lib/auth/signups.ts` — asks the server (`/auth/v1/settings`), and turns a
+  refusal (`signup_disabled` / `otp_disabled`, matched by code) into an honest
+  sentence. See Decisions Log (A).
+- `app/enable-sync.tsx` — a notice on the email step when the server says
+  closed; the honest message on a refused address.
+- `lib/auth/oauthErrors.ts` — the same message for a Google sign-up refusal
+  (matched by code or description; the redirect shape is from GoTrue's source,
+  since driving a real Google sign-up needs a real account's consent).
+- `scripts/verify-signup-toggle.mjs` — proves both halves against whatever
+  state a server is in; works on dev and self-host.
+- Docs: `.env.example`, `docs/self-hosting.md` (Lock it down),
+  `docs/two-stacks.md` (Live project admin).
+
+**Verified on the dev stack** (live untouched; dev left OPEN, its default):
+- Closed, measured by hand first: `/auth/v1/settings` → `disable_signup: true`;
+  new address → 422 `signup_disabled` on the code request AND on a direct
+  `/signup`; no `auth.users` row; existing account → 200.
+- `verify-signup-toggle.mjs` closed → **5/5**: both refusals 422, existing
+  account requests a code, it arrives, exchanges for `role=authenticated`.
+- Web UI, closed: notice shown; a new address → the honest message; an existing
+  address → the code step.
+- Disagreement: screen opened while OPEN (no notice), server closed behind it,
+  send → the honest message, not GoTrue's text.
+- Reopened → script **4/4** (new address accepted; existing signs in). The one
+  probe account that created was deleted.
+- `tsc` clean · `npm test` 311/311 (7 new) · lint at baseline.
+
+**Not verified:** a real Google sign-up refused on a closed server, and native
+devices (same code path as web; no native change).
 
 **Settled:** enforcement is **Supabase-side**, not merely a hidden client control — a client-only toggle is trivially bypassable against a live project.
 
@@ -2681,6 +2719,18 @@ One blocking item; the rest is settled and recorded in the Decisions Log below.
 ## Decisions Log
 
 *(iteration-2-specific decisions, same terse format as `dev-docs/mvp-build-plan.md` — decision / reasoning / verification / status. Don't duplicate MVP-era entries.)*
+
+### 2026-09-30 — Stage 16: the app asks the server whether sign-ups are open
+- **Decision (A):** Adam approved. The app reads GoTrue's public `/auth/v1/settings` when the Sync Account screen opens, rather than mirroring the setting in an `EXPO_PUBLIC_` variable. No new app variable; `DISABLE_SIGNUP` in `.env.example` stays the self-host switch.
+- **Reasoning:** a mirrored variable is a second copy — baked into each build, so a server flip never reaches installed phones, and on live the real switch is a dashboard setting nothing in the repo can see (the sign-up drift already recorded in `docs/two-stacks.md`).
+- **When they disagree** (offline at open, or flipped while the screen is open): no notice, but the refusal itself is translated — verified on dev. Never GoTrue's raw text.
+- **Consequence accepted:** one small request per Sync Account screen open.
+- **Status:** shipped in Stage 16.
+
+### 2026-09-30 — Stage 16: closed sign-ups reveal which addresses have accounts
+- **Decision (B):** Adam accepted. With sign-ups closed, GoTrue answers 200 for an existing address and 422 `signup_disabled` for an unknown one, so anyone can test whether an address is registered. Open sign-ups give one answer for every address.
+- **Reasoning:** GoTrue's behaviour, reachable with curl; the app's message reveals nothing more and cannot prevent it.
+- **Consequence accepted:** documented beside the switch in `docs/self-hosting.md`. Live is unaffected — its sign-ups stay open, as decided.
 
 ### 2026-09-29 — 15b: suspended devices keep their session; self-host gets an edge runtime
 - **Decision (A):** Adam approved. A device whose account is pending deletion keeps its session, disconnects sync, keeps its encrypted local database, and shows only a suspended screen with **Cancel deletion**. Not a sign-out, because the app's sign-out (`lib/auth/logout.ts`) erases the device, which would defeat the grace period.

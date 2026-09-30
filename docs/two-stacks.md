@@ -110,6 +110,12 @@ Sessions are deliberately not preserved; sign in again after a reset.
 - The anon key in `eas.json` is public by design — RLS is the security
   boundary, and the migration grants table privileges to `authenticated` only,
   never to `anon`.
+- **Closing sign-ups.** Live: dashboard → Authentication → **Allow new users
+  to sign up**. Dev: `enable_signup` under `[auth]` in `supabase/config.toml`,
+  then `supabase stop && supabase start` (keeps data) and recreate PowerSync.
+  Either way the app picks it up from `/auth/v1/settings` with no rebuild, and
+  `node scripts/verify-signup-toggle.mjs <existing-email>` proves both halves.
+  Leave dev open: the other `verify-*` scripts sign up fresh accounts.
 - **Signups are open on live, deliberately.** `disable_signup` is `false`.
   An earlier version of this file said they "should stay disabled", which was
   never true of the running project — the setting lives only in the Supabase
