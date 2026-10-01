@@ -10,8 +10,8 @@ That is meant literally, as three properties the code already has:
 signed in or not. Sync is something you turn on, not something you submit to.
 There is no login wall in front of writing something down.
 
-**Encrypted so that no server can read them — including your own.** Note titles
-and bodies are encrypted on the device. Postgres stores `enc:v1:` envelopes. The
+**Encrypted so that no server can read them — including your own.** Note titles,
+bodies and folder names are encrypted on the device. Postgres stores `enc:v1:` envelopes. The
 key exists in two places: the device's Keychain or Keystore, and a copy on the
 server wrapped under a twelve-word recovery code that only the user has. There
 is no admin path and no support path. [Self-hosting](self-hosting.md) does not
@@ -41,28 +41,45 @@ The four directions below build on that. Nothing here is a commitment to a date.
 
 ## 1. Web and desktop
 
-**Status: not working. Entry points exist; they have not been made to run.**
+**Status: web works. Desktop is undecided.**
 
-`app.json` sets `web.output: "single"`, `npm run web` exists, and there is a web
-build of the editor at `components/RichEditor.web.tsx`. None of that has been
-verified end to end, and it should not be read as "web nearly works".
+**Web is built.** It is the same app in a browser, not a reduced view of it, and
+it installs as an app (a PWA). The two questions this section used to call
+blockers were answered like this:
 
-**The blocker is specific.** PowerSync's web client needs a different SQLite
-implementation from the native one: WebAssembly (wa-sqlite, via
-`@powersync/web`) rather than the native module the app uses today. That is not
-a configuration flag — it is a second storage backend, and the local database is
-also where the at-rest encryption lives, so the encryption story has to be
-answered again for the browser rather than assumed.
+- *Storage.* PowerSync's web client runs SQLite as WebAssembly (`@powersync/web`),
+  stored in the browser's Origin Private File System. It is a second storage
+  backend, as predicted, behind the same queries the native app uses.
+- *Encryption at rest.* The browser has no Keychain, so this had to be answered
+  again rather than assumed. The local database is encrypted, and opening it
+  without a key is a hard failure rather than a fallback. The lock is a passkey
+  where the device offers one, otherwise a 6-digit PIN combined with a key the
+  browser will not export. Locking wipes the keys from memory — stricter than
+  the phone apps, which keep them so sync can continue in a pocket — so a locked
+  tab holds nothing and stops syncing until it is unlocked.
+
+The editor is the one native uses, so a note formatted on a phone opens intact
+in the browser. Tables and attachments are not available there.
+
+**What is left for web:**
+
+- *Public hosting.* Nothing is hosted yet; today you build and serve it
+  yourself ([building](building.md#web)).
+- *More testing* of passkey unlock on real devices, and of launching offline.
+- *Browsers.* It depends on the Origin Private File System, which narrows
+  support compared with a plain IndexedDB app.
 
 **Desktop is genuinely undecided.** Two routes, and the choice has not been
 made:
 
-- *Wrap the web build* in Electron or Tauri. One codebase, ships as soon as web
-  works, inherits whatever the browser storage answer turns out to be.
+- *Wrap the web build* in Electron or Tauri. One codebase, and it inherits the
+  browser storage and lock described above.
 - *A separate native app.* Better platform integration and a real filesystem, at
   the cost of a third UI to maintain.
 
-Neither has been picked, and web landing first would not settle it.
+Neither has been picked. Web landing first did not settle it: an installed PWA
+already covers "an icon in the dock", which lowers the urgency without answering
+the question.
 
 ## 2. MCP server and app integrations
 
