@@ -208,12 +208,26 @@ The same applies to `eas.json`'s `live` profile for Android.
 npm run web
 ```
 
-**This is unverified.** The configuration exists (`app.json` has
-`web.output: "single"`, and there is a web build of the editor), but it has not
-been run to a working state. PowerSync's web client needs a different SQLite
-backend — WebAssembly rather than the native module — and that swap has not been
-made. Treat it as a starting point, not a feature. See
-[roadmap.md](roadmap.md).
+The development server. Web is the same app as iOS and Android, reading the same
+`.env`.
+
+```bash
+npm run build:web
+```
+
+The distributable build: a static site in `dist/`, with the installable-app
+(PWA) tags and the offline file list written in after the export. Serve `dist/`
+from any static host. Two things to know:
+
+- **It must be served over HTTPS** (or from `localhost`). The encrypted local
+  database, the service worker and passkeys all need what browsers call a secure
+  context, and fail without one.
+- **The backend addresses are baked in at build time.** `EXPO_PUBLIC_*` values
+  are read when you build, not when the page loads, so build with the
+  environment of the backend the site should talk to.
+
+The web editor has no tables or attachments. See [roadmap.md](roadmap.md) for
+what is left.
 
 ---
 
@@ -226,7 +240,9 @@ Everything in `package.json`:
 | `npm start` | Dev server only; app must already be installed |
 | `npm run ios` | Build, install, and run on iOS simulator or device |
 | `npm run android` | Build, install, and run on Android emulator or device |
-| `npm run web` | Web dev server (unverified) |
+| `npm run web` | Web dev server |
+| `npm run build:web` | Static web build into `dist/`, with PWA tags and offline list |
+| `npm test` | Unit tests |
 | `npm run lint` | ESLint |
 | `npm run ios:live` | **Maintainer only** — builds against the maintainer's backend |
 
