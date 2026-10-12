@@ -2740,6 +2740,44 @@ Deliver the static build in www/, confirm it renders correctly at mobile, tablet
 
 ---
 
+## Fix after iteration 2 — the web editor re-saved notes it merely opened (2026-10-12)
+
+Branch `fix-web-resave-on-open`. Flagged during Stage 15, fixed here.
+
+**Cause.** The editor library's web build fires a change event the moment it
+mounts (`useOnEditorChange` calls `handleUpdate()` with its last value empty),
+carrying the note as the web editor serialises it. `RichEditor` treated every
+change event as typing. `updateNoteInDB` skips only an *exactly* equal body, so
+any note last written on a phone, or imported, was rewritten on open —
+`updated_at` moved, and on a synced account the rewrite uploaded. Reproduced:
+two change events on open, neither caused by a person.
+
+**Fix.** A change is an edit only once a person has acted (`lib/notes/editGate.ts`):
+capture-phase listeners on the editor element for key, input, paste, cut, drop,
+composition and pointer events, plus the toolbar and Find & Replace, which sit
+outside that element. A remote edit re-closes the gate, so its re-serialisation
+is not saved back. **Fails toward saving:** the gate withholds only on web, and
+only once its listeners are attached; native is unchanged by construction.
+- The listeners attach in a *layout* effect. React runs a child's passive
+  effects before its parent's, so a plain `useEffect` armed the gate just after
+  the event it exists to catch.
+
+**Verified on web** (dev, signed out; temporary write counter, since removed):
+open without typing → 0 writes, `updated_at` unchanged; first keystroke → saved
+and survives reload; phone-style HTML written into the local database while the
+note was open → shown, not written back; that note cold-opened → 0 writes, then
+edited → 1 write; paragraph style from the toolbar with the editor focused only
+by script → saved; paste → saved; Find & Replace → saved. `tsc` clean, 315/315
+tests (4 new), lint at baseline.
+
+**Not verified:** a real second device sending the remote edit (simulated by a
+direct local write), and paste was a script-dispatched paste event.
+
+**Found, not fixed:** the desktop toolbar's **Checklist** button did nothing on
+web in this run, with or without this change — flagged separately.
+
+---
+
 ## Deferred to the end of iteration 2
 
 Parked deliberately, with a landing point, so they don't evaporate into "we'll get to it".

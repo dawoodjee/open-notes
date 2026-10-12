@@ -3,11 +3,12 @@ import React, {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
-import { View } from 'react-native';
+import { Platform, View } from 'react-native';
 import {
   EnrichedTextInput,
   type EnrichedTextInputInstance,
@@ -18,6 +19,7 @@ import { Box } from '@/components/ui/box';
 
 import { useTheme } from '@/contexts/ThemeContext';
 import { toEnrichedHtml } from '@/lib/notes/htmlMigrate';
+import { INTERACTION_EVENTS, isEdit } from '@/lib/notes/editGate';
 import { FormatBar } from './FormatBar';
 import { TextStylePanel } from './TextStylePanel';
 import { PadStylePanel } from './PadStylePanel';
@@ -239,6 +241,42 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
 ) {
   const ref = useRef<EnrichedTextInputInstance>(null);
 
+  /**
+   * Has a PERSON done anything since content was last set? See
+   * lib/notes/editGate.ts for why the editor's change events cannot be trusted
+   * to mean that on their own.
+   *
+   * `gateArmedRef` is the fail-safe: it is true only on web and only once the
+   * listeners below are really attached. Until then -- and always on native --
+   * every change is treated as an edit, exactly as before this existed.
+   */
+  const userActedRef = useRef(false);
+  const gateArmedRef = useRef(false);
+  const editorWrapRef = useRef<View>(null);
+
+  // A LAYOUT effect, and it has to be. React runs a child's passive effects
+  // before its parent's, and the library fires its mount-time change event from
+  // one -- so a plain useEffect here would arm the gate just AFTER the very
+  // event it exists to catch. Layout effects all run before any passive effect.
+  useLayoutEffect(() => {
+    if (Platform.OS !== 'web') return;
+    // On web a View's ref IS its DOM element.
+    const element = editorWrapRef.current as unknown as HTMLElement | null;
+    if (!element || typeof element.addEventListener !== 'function') return;
+
+    const markActed = () => {
+      userActedRef.current = true;
+    };
+    // CAPTURE phase: this has to run before the editor turns the same key press
+    // into a change event, or the first keystroke would be judged a rendition.
+    for (const name of INTERACTION_EVENTS) element.addEventListener(name, markActed, true);
+    gateArmedRef.current = true;
+    return () => {
+      gateArmedRef.current = false;
+      for (const name of INTERACTION_EVENTS) element.removeEventListener(name, markActed, true);
+    };
+  }, []);
+
   useImperativeHandle(
     handle,
     () => ({
@@ -251,7 +289,13 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
         ref.current?.setSelection(start, end);
       },
       getHtml: async () => (await ref.current?.getHTML()) ?? '',
-      setHtml: (html: string) => ref.current?.setValue(html),
+      setHtml: (html: string) => {
+        // Find & Replace: the person asked for this, so what the editor emits
+        // next is an edit. Its button is outside the editor element, where the
+        // interaction listeners cannot see it.
+        userActedRef.current = true;
+        ref.current?.setValue(html);
+      },
     }),
     []
   );
@@ -350,6 +394,11 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
       rememberEcho(rawHtml);
       const next = toEnrichedHtml(rawHtml);
       rememberEcho(next);
+      // Another device's edit, not this person's: what the editor emits for it
+      // is a rendition, and saving that back would re-upload their note in this
+      // platform's serialisation. The next key press re-opens the gate before
+      // its own change event (capture-phase listener).
+      userActedRef.current = false;
       ref.current?.setValue(next);
     },
     [rememberEcho]
@@ -410,8 +459,16 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
   const handleChangeHtml = useCallback(
     (event: { nativeEvent: { value: string } }) => {
       const html = event.nativeEvent.value;
-      lastTypedAtRef.current = Date.now();
+      // Remembered either way: a rendition is still a version this editor
+      // produced, and must not later be mistaken for a remote edit.
       rememberEcho(html);
+
+      // Not an edit: the editor showing what it was handed (at mount, or after
+      // a remote edit was applied). Saving it rewrote every note just by
+      // opening it -- see lib/notes/editGate.ts.
+      if (!isEdit({ armed: gateArmedRef.current, userActed: userActedRef.current })) return;
+
+      lastTypedAtRef.current = Date.now();
 
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => {
@@ -498,6 +555,10 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
       const instance = ref.current;
       if (!instance) return;
 
+      // A toolbar button or shortcut is the person acting, and the bar sits
+      // outside the editor element where the listeners cannot see the press.
+      userActedRef.current = true;
+
       /**
        * BODY IS NOT A FORMAT, it is the absence of one, and the editor has no
        * "make this a paragraph" call. So it is implemented as: turn off
@@ -538,7 +599,7 @@ const RichEditor = forwardRef<RichEditorHandle, RichEditorProps>(function RichEd
 
   return (
     <Box className="flex-1 bg-background flex flex-col">
-      <View style={{ flex: 1 }}>
+      <View ref={editorWrapRef} style={{ flex: 1 }}>
         <EnrichedTextInput
           ref={ref}
           defaultValue={seedRef.current}
