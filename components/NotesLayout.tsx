@@ -69,7 +69,7 @@ import { paneChrome } from '@/lib/layout/paneChrome';
 import { folderPanePresentation } from '@/lib/layout/folderPane';
 // The same constant the editor's chrome decision uses. Two literals meaning
 // almost the same thing would drift the first time one was tuned.
-import { WIDE_LAYOUT_MIN_WIDTH } from '@/lib/layout/editorChrome';
+import { WIDE_LAYOUT_MIN_WIDTH, editorChrome } from '@/lib/layout/editorChrome';
 
 // How long the launch gate below will wait before giving up and painting
 // whatever it has. Deliberately generous -- it is a failsafe for a path that
@@ -155,6 +155,14 @@ export default function NotesLayout() {
     width: windowWidth,
     height: windowHeight,
     platform: Platform.OS,
+    // Which top bar the editor will draw -- the same call NoteEditorPane makes.
+    // The desktop bar needs a minimum width, and below it the Folders pane must
+    // not be pinned (see DESKTOP_PINNED_FOLDERS_MIN_WIDTH).
+    chrome: editorChrome({
+      width: windowWidth,
+      platform: Platform.OS === 'ios' ? 'ios' : Platform.OS === 'web' ? 'web' : 'android',
+      isPad: Platform.OS === 'ios' && Platform.isPad,
+    }),
   });
   const foldersArePersistent = folderPane === 'persistent';
   /** Wide but not persistent: the floating-panel case (iPad portrait). */

@@ -2778,6 +2778,46 @@ web in this run, with or without this change — flagged separately.
 
 ---
 
+## Fix after iteration 2 — the desktop top bar overlapped itself in narrower windows (2026-10-13)
+
+Branch `fix-web-checklist-button`. Reported as "the Checklist button does
+nothing on web". It was not an editor bug.
+
+**Cause.** `DesktopTopBar` is one row — compose | four formatting icons | Share,
+More, Search (`minWidth: 200`) — and needs ~540px. The centre zone was `flex: 1`;
+with less room it shrank to nothing and its icons overflowed sideways UNDER the
+right-hand group. Clicking "Checklist" clicked "Share this note". Measured (which
+element is topmost at each button's centre), landscape with both columns pinned:
+800 wide → bar 188px, all four formatting icons covered; 1024 → 412px, three
+covered; 1152 and 1280 fine. Stage 13f's "Checklist works on web" was checked at
+a wider window.
+
+**Fix (Adam's choice: shrink Search first, then tuck Folders).**
+- `lib/layout/desktopTopBar.ts` — the bar picks a form from its own measured
+  width: `full` (Search 200), `narrow` (Search takes what is left, ≥120),
+  `button` (Search is a round button; pressing it opens the field in place of
+  the formatting icons, and it stays open while there is a query).
+- `lib/layout/folderPane.ts` — under desktop chrome, the Folders column is
+  pinned only from `DESKTOP_PINNED_FOLDERS_MIN_WIDTH` (**1020**: both columns
+  plus the bar's smallest form). Narrower, it floats. See the Decisions Log.
+- `lib/layout/chromeMetrics.ts` — `SURFACE` / `SLOT` / `GROUP_GAP` moved out of
+  `IconButton.tsx` (which re-exports them) so the rule is testable under Node.
+- The groups now keep a `GROUP_GAP` between them; it was zero.
+
+**Verified on web:** at 800, 900, 1000, 1024, 1100, 1152, 1280 and 1440 wide
+(landscape) no top-bar button is covered and nothing overflows; forms are
+button (800, 1024, 1100), narrow (1152), full (900, 1000, 1280, 1440); Folders
+float below 1020 and are pinned from it. **At 1024, Checklist turns the line
+into a real checklist item.** Search button: opens focused in the centre,
+filters the list ("0 Results"), stays open on blur with a query, Escape clears
+and closes. At 900 the Folders overlay opens and closes. `tsc` clean, 331/331
+tests (16 new), lint at baseline.
+
+**Not verified:** iPad landscape on a device (unchanged by construction; unit
+test asserts it stays pinned).
+
+---
+
 ## Deferred to the end of iteration 2
 
 Parked deliberately, with a landing point, so they don't evaporate into "we'll get to it".
@@ -2801,6 +2841,13 @@ One blocking item; the rest is settled and recorded in the Decisions Log below.
 ## Decisions Log
 
 *(iteration-2-specific decisions, same terse format as `dev-docs/mvp-build-plan.md` — decision / reasoning / verification / status. Don't duplicate MVP-era entries.)*
+
+### 2026-10-13 — A narrow desktop window collapses Search, then floats the Folders column
+- **Decision:** Adam chose "shrink Search first, then tuck Folders" for landscape desktop windows too narrow for the top bar. Search narrows, then becomes a button (opening in place of the formatting icons); below 1020px wide the Folders column floats instead of being pinned.
+- **Reasoning:** the alternatives either left the overlap in place at the smallest desktop sizes (Search only) or took the always-visible folder list away from 1024–1150 laptops (Folders only).
+- **This qualifies an earlier decision.** `folderPanePresentation` deliberately ignores the platform (2026-08-28, "the property Adam asked for"). It still does: the new floor is keyed on which top BAR is drawn (`chrome: 'desktop'`), because it is that bar's width that needs the room. The iPad draws a different bar and keeps its pinned landscape layout; `platform` remains unused, and with `chrome` omitted the rule is unchanged — both asserted by tests.
+- **Consequence accepted:** between 768 and 1019 wide, a landscape desktop window now gets the floating Folders panel where it used to get a pinned column (and a broken toolbar). In the button form, searching hides the formatting icons until the search is cleared.
+- **Status:** shipped on `fix-web-checklist-button`.
 
 ### 2026-09-30 — Stage 14: Frappe v16 locally, page in Builder, links hidden until set
 - **Decisions (Adam):** Frappe v16 in local developer mode, with a dev site running Builder, ERPNext and webshop (version-16), MariaDB in OrbStack. Page authored in **Frappe Builder**. Web described as available, with its link hidden until set. Repo `open-notes-website`.

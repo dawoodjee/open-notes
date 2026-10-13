@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Platform, TextInput, View } from 'react-native';
 import {
   ListChecks,
@@ -16,6 +16,7 @@ import { GROUP_GAP, IconButton, IconButtonGroup, SURFACE } from './IconButton';
 import { ChromeScrim } from './ChromeScrim';
 import { useTheme } from '@/contexts/ThemeContext';
 import type { PaneChrome } from '@/lib/layout/paneChrome';
+import { BAR_PADDING, topBarLayout } from '@/lib/layout/desktopTopBar';
 
 /**
  * The desktop editor's top bar. Transparent, FLOATING OVER the note rather
@@ -104,8 +105,77 @@ export function DesktopTopBar({
 }: DesktopTopBarProps) {
   const { scheme } = useTheme();
 
+  /**
+   * The bar's own width, measured. Which form it takes depends on this and not
+   * on the window, because its room changes with which panes are open -- see
+   * lib/layout/desktopTopBar.ts for the rule and the bug behind it.
+   */
+  const [barWidth, setBarWidth] = useState<number | null>(null);
+  const leftCount = chrome.editorShowsRestorePanes ? 2 : 1;
+  const { form, searchWidth } = topBarLayout({ barWidth, leftCount });
+
+  /**
+   * In `button` form there is no room for the Search field AND the formatting
+   * icons, so the field opens in their place. It stays open while there is a
+   * query, so whatever is filtering the list is always visible.
+   */
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchRef = useRef<TextInput>(null);
+  const searchTakesCentre = form === 'button' && (searchOpen || searchQuery !== '');
+
+  useEffect(() => {
+    if (searchOpen) searchRef.current?.focus();
+  }, [searchOpen]);
+
+  const searchField = (fill: boolean) => (
+    <View
+      className="bg-foreground/10"
+      style={{
+        height: SURFACE,
+        borderRadius: SURFACE / 2,
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        gap: 6,
+        ...(fill ? { flex: 1, alignSelf: 'stretch' as const } : { width: searchWidth }),
+      }}
+    >
+      <Search size={16} color={PLACEHOLDER[scheme]} />
+      <TextInput
+        ref={searchRef}
+        value={searchQuery}
+        onChangeText={onSearchChange}
+        placeholder="Search"
+        placeholderTextColor={PLACEHOLDER[scheme]}
+        className="text-sm text-foreground"
+        onBlur={() => {
+          // An empty field with nobody in it goes back to being a button.
+          if (searchQuery === '') setSearchOpen(false);
+        }}
+        onKeyPress={(event) => {
+          if (event.nativeEvent.key !== 'Escape') return;
+          onSearchChange('');
+          setSearchOpen(false);
+          searchRef.current?.blur();
+        }}
+        // `outlineStyle` is a web-only CSS property RN's types do not
+        // model, and the cast is confined to this one prop rather than
+        // widening the whole style object. Without it the browser draws its
+        // own focus ring INSIDE the capsule, which reads as a second border.
+        // `minWidth: 0` lets the input shrink inside a narrow capsule; a text
+        // input's default minimum is its content width, which overflowed.
+        style={[
+          { flex: 1, minWidth: 0 },
+          Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : null,
+        ]}
+        accessibilityLabel="Search notes"
+      />
+    </View>
+  );
+
   return (
     <View
+      onLayout={(event) => setBarWidth(event.nativeEvent.layout.width)}
       // `box-none` so the bar itself never eats a click meant for the note
       // underneath it -- only its actual controls are hit-testable. Without
       // this a transparent full-width strip sits over the top of every
@@ -122,7 +192,7 @@ export function DesktopTopBar({
         // is the default but is stated because clipping it is the obvious
         // "tidy-up" that would silently remove the fade.
         overflow: 'visible',
-        paddingHorizontal: 16,
+        paddingHorizontal: BAR_PADDING,
         flexDirection: 'row',
         alignItems: 'center',
         zIndex: 10,
@@ -145,38 +215,48 @@ export function DesktopTopBar({
 
       {/* CENTRE. Flexed on both sides so it stays optically centred in the bar
           regardless of how wide the left and right groups happen to be. */}
-      <View style={{ flex: 1, alignItems: 'center' }} pointerEvents="box-none">
-        <IconButtonGroup>
-          <IconButton
-            icon={Type}
-            label="Text styles"
-            onPress={onTextStyles}
-            disabled={!canFormat}
-            disabledReason="Not available in this editor yet"
-          />
-          <IconButton
-            icon={ListChecks}
-            label="Checklist"
-            onPress={onChecklist}
-            disabled={!canFormat}
-            disabledReason="Not available in this editor yet"
-          />
-          {/* Rendered, dimmed, in their real positions. The editor cannot do
-              either yet, and hiding them would mean the bar's layout shifts
-              the day it can -- see the Decisions Log. */}
-          <IconButton
-            icon={Table}
-            label="Table"
-            disabled
-            disabledReason="Not available in this editor yet"
-          />
-          <IconButton
-            icon={Paperclip}
-            label="Attach"
-            disabled
-            disabledReason="Not available in this editor yet"
-          />
-        </IconButtonGroup>
+      <View
+        // The margin is the gap the width rule budgets between surfaces. It was
+        // zero, which is how the centre group could end up touching -- and then
+        // under -- its neighbours.
+        style={{ flex: 1, alignItems: 'center', marginHorizontal: GROUP_GAP }}
+        pointerEvents="box-none"
+      >
+        {searchTakesCentre ? (
+          searchField(true)
+        ) : (
+          <IconButtonGroup>
+            <IconButton
+              icon={Type}
+              label="Text styles"
+              onPress={onTextStyles}
+              disabled={!canFormat}
+              disabledReason="Not available in this editor yet"
+            />
+            <IconButton
+              icon={ListChecks}
+              label="Checklist"
+              onPress={onChecklist}
+              disabled={!canFormat}
+              disabledReason="Not available in this editor yet"
+            />
+            {/* Rendered, dimmed, in their real positions. The editor cannot do
+                either yet, and hiding them would mean the bar's layout shifts
+                the day it can -- see the Decisions Log. */}
+            <IconButton
+              icon={Table}
+              label="Table"
+              disabled
+              disabledReason="Not available in this editor yet"
+            />
+            <IconButton
+              icon={Paperclip}
+              label="Attach"
+              disabled
+              disabledReason="Not available in this editor yet"
+            />
+          </IconButtonGroup>
+        )}
       </View>
 
       {/* RIGHT: two groups, not one -- Share/more act on the note, search acts
@@ -188,34 +268,16 @@ export function DesktopTopBar({
         </IconButtonGroup>
 
         {/* Restored here, not rebuilt: Stage 11 removed the search field from
-            the list pane on the understanding that this bar would carry it. */}
-        <View
-          className="bg-foreground/10"
-          style={{
-            height: SURFACE,
-            borderRadius: SURFACE / 2,
-            flexDirection: 'row',
-            alignItems: 'center',
-            paddingHorizontal: 12,
-            gap: 6,
-            minWidth: 200,
-          }}
-        >
-          <Search size={16} color={PLACEHOLDER[scheme]} />
-          <TextInput
-            value={searchQuery}
-            onChangeText={onSearchChange}
-            placeholder="Search"
-            placeholderTextColor={PLACEHOLDER[scheme]}
-            className="text-sm text-foreground"
-            // `outlineStyle` is a web-only CSS property RN's types do not
-            // model, and the cast is confined to this one prop rather than
-            // widening the whole style object. Without it the browser draws its
-            // own focus ring INSIDE the capsule, which reads as a second border.
-            style={[{ flex: 1 }, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : null]}
-            accessibilityLabel="Search notes"
-          />
-        </View>
+            the list pane on the understanding that this bar would carry it.
+            Three forms, chosen by `topBarLayout`: the field, a narrower field,
+            or -- when neither fits -- a button that opens it in the centre. */}
+        {form !== 'button' ? (
+          searchField(false)
+        ) : searchTakesCentre ? null : (
+          <IconButtonGroup>
+            <IconButton icon={Search} label="Search notes" onPress={() => setSearchOpen(true)} />
+          </IconButtonGroup>
+        )}
       </View>
     </View>
   );

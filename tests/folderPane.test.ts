@@ -1,8 +1,10 @@
 import { describe, it, expect } from './harness';
 import {
+  DESKTOP_PINNED_FOLDERS_MIN_WIDTH,
   folderPanePresentation,
   presentationDiffersByPlatform,
 } from '../lib/layout/folderPane';
+import { minBarWidth } from '../lib/layout/desktopTopBar';
 
 /**
  * Real device dimensions in POINTS, so a failure names a device rather than a
@@ -113,5 +115,50 @@ describe('uniform across platforms — Adam, 2026-08-28', () => {
     // that makes iPad portrait an overlay, and it is the price of uniformity.
     expect(folderPanePresentation({ width: 900, height: 1000, platform: 'web' })).toBe('overlay');
     expect(folderPanePresentation({ width: 1280, height: 860, platform: 'web' })).toBe('persistent');
+  });
+});
+
+describe('folderPanePresentation — the desktop bar needs room (2026-10-13)', () => {
+  const desktop = (width: number, height = 700) =>
+    folderPanePresentation({ width, height, platform: 'web', chrome: 'desktop' });
+
+  it('an 800-wide landscape window floats the Folders pane', () => {
+    // Measured in a browser: pinned, the bar had 188px and every formatting
+    // icon sat underneath Share / More / Search.
+    expect(desktop(800)).toBe('overlay');
+  });
+
+  it('pinned exactly from the floor, floating one pixel below it', () => {
+    expect(desktop(DESKTOP_PINNED_FOLDERS_MIN_WIDTH)).toBe('persistent');
+    expect(desktop(DESKTOP_PINNED_FOLDERS_MIN_WIDTH - 1)).toBe('overlay');
+  });
+
+  it('at the floor the editor is exactly as wide as the smallest bar', () => {
+    // 612 = both columns plus their borders; what is left is the bar.
+    expect(DESKTOP_PINNED_FOLDERS_MIN_WIDTH - 612).toBe(minBarWidth(1));
+  });
+
+  it('a 1024-wide window keeps both columns (the bar collapses Search instead)', () => {
+    expect(desktop(1024)).toBe('persistent');
+  });
+
+  it('ordinary desktop sizes are untouched', () => {
+    expect(desktop(1280, 860)).toBe('persistent');
+    expect(desktop(900, 1000)).toBe('overlay'); // portrait, as before
+    expect(desktop(700)).toBe('navigation');
+  });
+
+  it('the iPad is NOT affected: a different bar, a verified layout', () => {
+    // Landscape and narrower than the desktop floor -- still pinned.
+    const pad = (width: number, height: number) =>
+      folderPanePresentation({ width, height, platform: 'ios', chrome: 'pad' });
+    expect(pad(1000, 700)).toBe('persistent');
+    expect(pad(1376, 1032)).toBe('persistent');
+    expect(pad(1032, 1376)).toBe('overlay');
+  });
+
+  it('with no chrome given, the rule is exactly what it was', () => {
+    expect(folderPanePresentation({ width: 800, height: 600, platform: 'web' })).toBe('persistent');
+    expect(presentationDiffersByPlatform(800, 600)).toBe(false);
   });
 });
