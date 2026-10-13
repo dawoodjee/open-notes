@@ -1,4 +1,5 @@
-import { WIDE_LAYOUT_MIN_WIDTH } from './editorChrome';
+import { WIDE_LAYOUT_MIN_WIDTH, type EditorChromeKind } from './editorChrome';
+import { minBarWidth } from './desktopTopBar';
 
 /**
  * How the folder pane is presented: replacing the screen, floating over it, or
@@ -62,11 +63,46 @@ export interface FolderPaneInput {
    * omission somebody re-adds by accident.
    */
   platform?: string;
+  /**
+   * Which top bar the editor draws. Optional, and the ONE input besides the
+   * window that changes the answer -- see DESKTOP_PINNED_FOLDERS_MIN_WIDTH.
+   * This is not the platform coming back in: it is keyed on what the bar
+   * needs, and with it omitted the rule is exactly as platform-blind as before.
+   */
+  chrome?: EditorChromeKind;
 }
+
+/** The pinned Folders column (`md:w-72` in FolderSidebar). */
+const FOLDER_PANE_WIDTH = 288;
+/** The note list column (`md:w-80` in NotesLayout). */
+const NOTE_LIST_WIDTH = 320;
+/** The two columns' right-hand borders. Measured: the editor starts at 612. */
+const PANE_BORDERS = 4;
+
+/**
+ * Below this window width the Folders pane is not pinned under DESKTOP chrome.
+ *
+ * WHY. The desktop top bar needs `minBarWidth` to show every control without
+ * overlap, even in its smallest form (lib/layout/desktopTopBar.ts). With both
+ * columns pinned the editor gets `window - 612`. Narrower than this, no form of
+ * the bar fits and its formatting icons end up underneath Share and Search --
+ * measured at an 800-wide window, where the bar had 188px. So the Folders pane
+ * floats instead, which is what portrait windows already do.
+ *
+ * DESKTOP CHROME ONLY, deliberately. The iPad draws a different bar
+ * (PadTopBar) with different needs, and its pinned landscape layout is a
+ * verified design; tying the iPad's layout to the width of a bar it does not
+ * draw would be an accident waiting for the next button added here.
+ *
+ * Derived, not typed in: add a control to the desktop bar and this moves with it.
+ */
+export const DESKTOP_PINNED_FOLDERS_MIN_WIDTH =
+  FOLDER_PANE_WIDTH + NOTE_LIST_WIDTH + PANE_BORDERS + minBarWidth(1);
 
 export function folderPanePresentation({
   width,
   height,
+  chrome,
 }: FolderPaneInput): FolderPanePresentation {
   // Below the md: breakpoint the folder pane and the list cannot both fit, so
   // the pane becomes a destination rather than a column.
@@ -75,7 +111,11 @@ export function folderPanePresentation({
   // Derived from the WINDOW, not the device, so Split View and a resized
   // desktop window are both classified by the shape the user is looking at.
   const isLandscape = width > height;
-  return isLandscape ? 'persistent' : 'overlay';
+  if (!isLandscape) return 'overlay';
+
+  // Landscape, but too narrow for the desktop bar beside two pinned columns.
+  if (chrome === 'desktop' && width < DESKTOP_PINNED_FOLDERS_MIN_WIDTH) return 'overlay';
+  return 'persistent';
 }
 
 /**

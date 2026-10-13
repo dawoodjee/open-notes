@@ -27,6 +27,7 @@ import './archiveLayout.test';
 import './suspension.test';
 import './signups.test';
 import './editGate.test';
+import './desktopTopBar.test';
 import { report } from './harness';
 
 report();

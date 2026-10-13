@@ -6,6 +6,7 @@ import { Icon } from '@/components/ui/icon';
 import { PressableScale } from './PressableScale';
 import { spring, SPRING_PRESS } from '@/lib/theme/motion';
 import { haptics } from '@/lib/theme/haptics';
+import { CAPSULE_PADDING, GROUP_GAP, SLOT, SURFACE } from '@/lib/layout/chromeMetrics';
 
 /**
  * The one icon button. Every icon button in the app is this component.
@@ -59,12 +60,10 @@ import { haptics } from '@/lib/theme/haptics';
  * this system's most likely failure.
  */
 
-/** Circle diameter and capsule height. 72px in a 2x reference. */
-export const SURFACE = 36;
-/** Width of one icon's slot inside a capsule. 78px in a 2x reference. */
-export const SLOT = 39;
-/** Between two separate surfaces on one row. 37px in a 2x reference. */
-export const GROUP_GAP = 18;
+// SURFACE, SLOT and GROUP_GAP are defined in lib/layout/chromeMetrics.ts (so
+// pure layout rules can use them under test) and re-exported here, where every
+// component already imports them from.
+export { GROUP_GAP, SLOT, SURFACE };
 /** The hover/press/selected shape behind a single glyph. ~51px in a 2x reference. */
 const INSET = 28;
 /** The one glyph size in the app. */
@@ -338,7 +337,7 @@ export function IconButtonGroup({ children }: { children: React.ReactNode }) {
           // The reference leaves ~10pt between the capsule's rounded end and
           // the first inset. A centred 28pt inset in a 39pt slot only gives
           // 5.5, so the end caps get the difference.
-          paddingHorizontal: isCapsule ? 4 : 0,
+          paddingHorizontal: isCapsule ? CAPSULE_PADDING : 0,
         }}
         className={isCapsule ? 'bg-foreground/10' : undefined}
       >
