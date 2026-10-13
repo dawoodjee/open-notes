@@ -2865,9 +2865,14 @@ time, screen checked after each):
   sheet reopens and still responds after both kinds of close.
 - `tsc` clean, 338/338 tests (7 new), lint at baseline.
 
+**Verified on the phone:** the fixed live APK (`open-notes-live-e65327c.apk`,
+built locally, same signing key) installed over the old one with data kept, and
+Adam confirmed Settings → Data opens on the Galaxy S21.
+
 **Not verified:** the opening animation (no frame caught mid-open); iOS on a
-device (unchanged by a platform check); account deletion on Android (signed-in
-only; needs a throwaway account on the dev stack).
+device (unchanged by a platform check); export/import on the phone itself
+(verified on the emulator); account deletion on Android (signed-in only; needs
+a throwaway account on the dev stack).
 
 **Mistakes of mine worth keeping.** Twice I tapped from a stale screenshot: once
 on Adam's phone, where the notification shade had opened and the tap hit its
