@@ -2818,6 +2818,71 @@ test asserts it stays pinned).
 
 ---
 
+## Fix after iteration 2 — bottom sheets were untappable on Android (2026-10-13)
+
+Branch `fix-android-settings-sheet`. Found on the first Android install since
+August: on a Galaxy S21 (APK built locally from `main`, live profile), Settings
+opened and nothing in it responded. Adam confirmed by hand. Reproduced on the
+`notes_b` emulator with a development build.
+
+**Why it went unseen.** The native sheet arrived in Stage 12.5 and was verified
+on iOS and web only. The August APK on the phone predates it. Stage 15's
+export/import and 15b's deletion live inside Settings, so none of them had ever
+run on Android either.
+
+**Cause, from a dump of the real native layout** (`adb shell cmd window
+dump-visible-window-views`, decoded): inside the sheet, the library's content
+wrapper had native bounds **0x0** while our content inside it was 1080x2204.
+Android draws children that overflow a zero-size parent, so the sheet looked
+perfect; hit-testing and accessibility cannot descend into a zero-size view, so
+it was dead to touch and to screen readers. `@swmansion/react-native-bottom-sheet`
+0.16.2 places its own children on Android. Our sheets were mounted while closed
+(content area measures zero) and opened by changing `index`; the wrapper is then
+re-measured but the library never re-places it. Its own source describes this
+failure for content ADDED after layout (its issue #48); ours is content RESIZED
+after layout.
+
+**Fix.** `components/ModalSheet.tsx` is now a wrapper: on Android the sheet is
+mounted from the moment it opens until it has settled closed
+(`lib/layout/sheetMount.ts`, unit-tested), so the wrapper is measured at real
+size and the closing animation still plays. iOS passes straight through; web
+uses its own file. Not patched in the library — that would need `patch-package`.
+A draft upstream issue is in `~/React/notes-apk/upstream-issue-draft.md`.
+
+**Verified on the emulator** (`notes_b`, dev build, dev stack; one tap at a
+time, screen checked after each):
+- Before the fix: tap on Data does nothing, no touch event reaches JS.
+- After: Data, Security, back and X all respond; the rows appear in the
+  accessibility tree.
+- **Export on Android (first time):** zip built and handed to the share sheet;
+  pulled from app storage and inspected — marker file, folder tree, 7 notes as
+  Markdown.
+- **Import on Android (first time):** system file picker opens, a test zip from
+  Downloads imports ("Created 1 … failed 0"), the note appears and synced to the
+  dev server, encrypted.
+- Folder picker: Move → pick a folder → note moved (confirmed in the dev DB).
+- Closing animation plays (frame caught mid-close); drag-to-close works; the
+  sheet reopens and still responds after both kinds of close.
+- `tsc` clean, 338/338 tests (7 new), lint at baseline.
+
+**Verified on the phone:** the fixed live APK (`open-notes-live-e65327c.apk`,
+built locally, same signing key) installed over the old one with data kept, and
+Adam confirmed Settings → Data opens on the Galaxy S21.
+
+**Not verified:** the opening animation (no frame caught mid-open); iOS on a
+device (unchanged by a platform check); export/import on the phone itself
+(verified on the emulator); account deletion on Android (signed-in only; needs
+a throwaway account on the dev stack).
+
+**Mistakes of mine worth keeping.** Twice I tapped from a stale screenshot: once
+on Adam's phone, where the notification shade had opened and the tap hit its
+"Media output" button (nothing played or changed), and once on the emulator,
+where a tap went through the broken sheet and edited a dev test note. Taps now
+go through a guard that refuses unless the app's own window has focus and the
+device is unlocked, and each is followed by a look at the screen.
+
+---
+
 ## Deferred to the end of iteration 2
 
 Parked deliberately, with a landing point, so they don't evaporate into "we'll get to it".
