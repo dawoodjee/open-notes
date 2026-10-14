@@ -2874,6 +2874,23 @@ device (unchanged by a platform check); export/import on the phone itself
 (verified on the emulator); account deletion on Android (signed-in only; needs
 a throwaway account on the dev stack).
 
+**Account deletion on Android (2026-10-14)** — `notes_c` emulator, debug build,
+dev stack, throwaway account `e2e-android-…@example.test` (the old app on
+`notes_c` was signed with a different key and was signed out with one empty
+note, so it was uninstalled first; `notes_b` and its dev account A6 untouched):
+- Delete button inert when empty and for lowercase "delete" — 0 server requests;
+  DELETE → request → server row with purge 30 days out (2026-11-13), suspended
+  screen with that date, Settings closed.
+- Restart while suspended: still suspended, and PowerSync shows no stream
+  after the restart (the live one closed itself 6 s after the request).
+- Cancel: server row gone, note intact, an edit synced (updated_at moved).
+- Request again → purge via the cron SQL → `{"purged":1,"failed":[]}`; every
+  row of the account gone, tombstone written, other 12 dev accounts untouched.
+- Relaunch: "Your account has been deleted"; survives a restart; OK → device
+  signed out, test note gone; next restart shows nothing.
+- Wart found: while the erased notice is up, the fresh empty note behind it has
+  focus and the keyboard opens over the notice — flagged separately.
+
 **Mistakes of mine worth keeping.** Twice I tapped from a stale screenshot: once
 on Adam's phone, where the notification shade had opened and the tap hit its
 "Media output" button (nothing played or changed), and once on the emulator,
