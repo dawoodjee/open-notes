@@ -54,6 +54,21 @@ export function AccountSuspendedOverlay() {
   return <Suspended pending={pending} />;
 }
 
+/**
+ * Is one of these full-screen account screens up -- "scheduled for deletion"
+ * or "your account has been deleted"?
+ *
+ * For the note editor, which sits underneath. After an erase the app creates a
+ * fresh empty note, and an empty note asks its editor to take focus -- so the
+ * keyboard opened over the "deleted" notice and anything typed went into a note
+ * nobody could see. Found on Android (2026-10-14).
+ */
+export function useAccountScreenShowing(): boolean {
+  const pending = usePendingDeletion();
+  const overrides = useSuspensionOverrides();
+  return overrides.erasedNotice || pending !== null;
+}
+
 /** The synced row, adjusted for what this device has just done. */
 function usePendingDeletion(): Pending | null {
   const overrides = useSuspensionOverrides();

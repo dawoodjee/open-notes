@@ -60,6 +60,7 @@ import type { Folder } from '@/types/folder';
 import { FolderPickerSheet } from './FolderPickerSheet';
 import AvatarMenuTrigger from './AvatarMenuTrigger';
 import { useApiGateOpen } from '@/lib/plaintext/useApiGate';
+import { useAccountScreenShowing } from './AccountSuspendedOverlay';
 
 export interface NoteEditorPaneProps {
   selectedNote: Note | undefined;
@@ -337,6 +338,20 @@ export default function NoteEditorPane({
   // otherwise every edge tap would be captured before it could reach
   // anything underneath, including this pane's own back button.
   const editorRef = useRef<RichEditorHandle>(null);
+
+  /**
+   * An account screen (scheduled for deletion / account deleted) covers the
+   * whole app, and the editor underneath must not hold the keyboard. Two cases:
+   * it never asks for focus while one is up (autoFocus below), and it lets go
+   * when one APPEARS -- which on a cold start is after the editor has mounted,
+   * because the "deleted" flag is read back from storage asynchronously.
+   */
+  const accountScreenShowing = useAccountScreenShowing();
+  useEffect(() => {
+    if (!accountScreenShowing) return;
+    editorRef.current?.blur();
+    Keyboard.dismiss();
+  }, [accountScreenShowing]);
 
   const panResponder = useRef(
     PanResponder.create({
@@ -658,7 +673,7 @@ export default function NoteEditorPane({
               key={selectedNote.id}
               initialContent={selectedNote.body}
               onChange={onNoteChange}
-              autoFocus={!selectedNote.body || selectedNote.body === ''}
+              autoFocus={!accountScreenShowing && (!selectedNote.body || selectedNote.body === '')}
               initialScrollOffset={initialEditorScrollOffset}
               onScrollOffsetChange={onEditorScrollOffsetChange}
               onPlainTextChange={setPlainText}
