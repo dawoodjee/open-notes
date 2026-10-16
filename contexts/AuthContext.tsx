@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase/client';
+import { completeOAuthRedirect } from '@/lib/auth/oauth';
 import {
   handleUnrequestedSignOut,
   rememberSignedInUser,
@@ -344,6 +345,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           console.error(`[auth] handling ${event} failed:`, err);
         });
       }, 0);
+    });
+
+    // Web only: a Google round trip lands back here with the session in the
+    // URL. Started after the listener exists, so its SIGNED_IN is handled like
+    // any other sign-in. Native: a no-op. See lib/auth/oauth.web.ts.
+    void completeOAuthRedirect().catch((err) => {
+      console.error('[auth] finishing the provider redirect failed:', err);
     });
 
     async function handleAuthEvent(event: string, newSession: Session | null) {

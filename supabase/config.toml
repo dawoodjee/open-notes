@@ -176,7 +176,9 @@ site_url = "notes://"
 # "notes" matches app.json's expo "scheme" -- where OAuth redirects back into
 # the app. Not used by anything this stage (the app isn't wired up yet), but
 # needed on the allow-list before Stage 5 can redirect here.
-additional_redirect_urls = ["https://127.0.0.1:3000", "notes://"]
+# The web app returns here after Google: the dev web server at the root, and a
+# local production build served under /web (see lib/auth/oauth.web.ts).
+additional_redirect_urls = ["https://127.0.0.1:3000", "notes://", "http://localhost:8102/**", "http://localhost:8130/web/**"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
