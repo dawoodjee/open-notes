@@ -222,6 +222,10 @@ from any static host. Two things to know:
 - **It must be served over HTTPS** (or from `localhost`). The encrypted local
   database, the service worker and passkeys all need what browsers call a secure
   context, and fail without one.
+- **To serve it under a path** (e.g. `https://example.com/web`), build with
+  `WEB_BASE_URL=/web npm run build:web` and serve `dist/` at that path, with
+  unknown paths under it falling back to its `index.html`. Every path the app
+  uses — its service worker, its database worker, the manifest — moves with it.
 - **The backend addresses are baked in at build time.** `EXPO_PUBLIC_*` values
   are read when you build, not when the page loads, so build with the
   environment of the backend the site should talk to.

@@ -1,6 +1,7 @@
 import { PowerSyncDatabase, WASQLiteVFS } from '@powersync/web';
 import type { CommonPowerSyncDatabase, Schema } from '@powersync/common';
 import type { OpenOptions } from './openDatabase';
+import { withBase } from '@/lib/pwa/basePath';
 
 /**
  * The web database: wa-sqlite on OPFS, encrypted, and it survives the tab.
@@ -115,7 +116,7 @@ export function openDatabase({
       vfs: WASQLiteVFS.OPFSCoopSyncVFS,
       enableMultiTabs: false,
       // Served from public/@powersync -- see the README there.
-      worker: '/@powersync/worker.js',
+      worker: withBase('/@powersync/worker.js'),
       encryptionKey,
     },
   });

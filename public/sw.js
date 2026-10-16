@@ -52,7 +52,12 @@ const CACHE_VERSION = 'notes-shell-dev';
  * Without them the app launches offline and then cannot open its database,
  * which is worse than saying it is offline.
  */
-const ALWAYS = ['/', '/manifest.webmanifest', '/@powersync/worker.js'];
+// The app's base path, from the worker's own scope: '' at the root, '/web' when
+// served at /web. A worker served from /web/sw.js has scope /web/ by default,
+// so this cannot disagree with where the app actually lives.
+const BASE = new URL(self.registration.scope).pathname.replace(/\/$/, '');
+const SHELL = BASE + '/';
+const ALWAYS = [SHELL, BASE + '/manifest.webmanifest', BASE + '/@powersync/worker.js'];
 
 self.addEventListener('install', (event) => {
   const urls = [...new Set([...ALWAYS, ...BUILD_ASSETS])];
@@ -106,10 +111,10 @@ self.addEventListener('fetch', (event) => {
       fetch(request)
         .then((response) => {
           const copy = response.clone();
-          void caches.open(CACHE_VERSION).then((cache) => cache.put('/', copy));
+          void caches.open(CACHE_VERSION).then((cache) => cache.put(SHELL, copy));
           return response;
         })
-        .catch(() => caches.match('/').then((cached) => cached ?? offlineResponse()))
+        .catch(() => caches.match(SHELL).then((cached) => cached ?? offlineResponse()))
     );
     return;
   }

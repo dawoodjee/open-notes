@@ -11,7 +11,11 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import { PWA_HEAD_TAGS, renderHeadTag } from '../lib/pwa/headTags';
+import { pwaHeadTags, renderHeadTag } from '../lib/pwa/headTags';
+import { normalizeBase } from '../lib/pwa/basePath';
+
+// The same variable app.config.ts gives Expo -- see lib/pwa/basePath.ts.
+const BASE = normalizeBase(process.env.WEB_BASE_URL);
 
 const FILE = 'dist/index.html';
 
@@ -26,7 +30,7 @@ try {
 let replaced = 0;
 let appended = 0;
 
-for (const spec of PWA_HEAD_TAGS) {
+for (const spec of pwaHeadTags(BASE)) {
   const rendered = renderHeadTag(spec);
 
   // Match the existing tag by its identifying attribute rather than by a full
@@ -93,11 +97,12 @@ function walk(dir: string): string[] {
 const EXCLUDED = new Set(['sw.js', 'metadata.json']);
 
 const assets = walk('dist')
-  .map((f) => '/' + relative('dist', f).split(sep).join('/'))
-  .filter((url) => !EXCLUDED.has(url.slice(1)))
+  .map((f) => relative('dist', f).split(sep).join('/'))
+  .filter((path) => !EXCLUDED.has(path))
+  .map((path) => `${BASE}/${path}`)
   // `/index.html` is served at `/`, and caching both would store the shell
   // twice under keys the navigation handler does not look up.
-  .filter((url) => url !== '/index.html')
+  .filter((url) => url !== `${BASE}/index.html`)
   .sort();
 
 // A stamp over the asset names, so a build that changes any hashed filename
