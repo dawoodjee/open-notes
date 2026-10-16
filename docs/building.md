@@ -228,7 +228,13 @@ from any static host. Two things to know:
   uses — its service worker, its database worker, the manifest — moves with it.
 - **The backend addresses are baked in at build time.** `EXPO_PUBLIC_*` values
   are read when you build, not when the page loads, so build with the
-  environment of the backend the site should talk to.
+  environment of the backend the site should talk to. Environment variables set
+  in the shell win over `.env`, **but Metro's cache keeps the old values**: when
+  switching backends, export with `--clear`
+  (`npx expo export --platform web --clear`, then
+  `npx tsx scripts/inject-pwa-head.ts`), and check the result with
+  `grep -rl <your-project-ref> dist/_expo`. Without `--clear` the build succeeds
+  and quietly talks to the previous backend.
 
 The web editor has no tables or attachments. See [roadmap.md](roadmap.md) for
 what is left.
