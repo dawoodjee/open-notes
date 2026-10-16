@@ -76,15 +76,22 @@ Each stage's `📸 SCREENSHOTS` block marks which files **exist** (✅) versus w
 | 13 (Phase 1+) | Web Platform Parity + PWA | 10, 11, 12, Phase 0 | Ports the now-finalized native UI to web rather than building web UI twice. |
 | 14 | Website (marketing) | — | Fully independent of the app. Can run in parallel with any stage above on a separate branch. |
 | 15 | Export / Import `.md` | 10 (soft) | Needs folder structure only if export preserves it; the parsing/format logic itself has zero UI dependency. |
+| 15b | Account deletion | 15 | Added 2026-09-28 as the second half of "user data management". Export comes first so a person can keep their notes before deleting. |
 | 16 | Env file / sign-up toggle | — | Trivial, independent. |
+
+**Order as actually run:** 9 → 10 → 11 → 11.5/11.6/11.7 → 12 → 12.5 → 13 → 15 → 15b → 16 → 14. The website moved
+to the end on 2026-09-28; stage numbers are kept as names.
 
 ---
 
-## Runnable now
+## Where iteration 2 stands (2026-10-15)
 
-**All stages now have finished prompts.** Stage 12's screenshots are now nearly complete (rescanned 2026-08-21) — only the mobile scrolling-bar *collapsed* state is still missing — and the prompt's Apple Notes fallback covers that one gap.
+**Every stage is merged.** Three things remain, none of them code:
+- **15b live steps** — `docs/two-stacks.md` → "Account deletion" (Adam).
+- **First Android release** — rebuild the live APK after the live steps, publish it as a GitHub release, then set the website's Android URL.
+- **Hosting** — the website on the live bench, and the web app at `/web` on the same domain.
 
-Suggested parallelism: Stage 9 in the app repo, the Stage 13 spike on its own branch, and Stage 14 in the new website repo can all run without colliding. Stages 10 → 11 → 12 are strictly sequential.
+Post-iteration fixes are recorded below the stages ("Fix after iteration 2 — …"). Iteration 3 has not been planned yet.
 
 ---
 
@@ -249,7 +256,7 @@ Prove, don't assert:
 
 ---
 
-## Stage 11 — List View (Mobile + iPad + Desktop) 🔄 IN PROGRESS
+## Stage 11 — List View (Mobile + iPad + Desktop) ✅ MERGED
 
 > **Standing iPad rules for Stages 10–12** (apply wherever no iPad screenshot exists): iPad inherits the **desktop layout's structure** — same panes, same grouping, same information density — but stays **primarily touch-driven**, not a scaled-down desktop. Decided:
 > - **Folder sidebar:** persistent split-view pane in landscape; collapses to an overlay in portrait.
@@ -2308,7 +2315,7 @@ Three findings that shape the code:
 
 ---
 
-## Stage 15 — Export / Import (`.zip`)
+## Stage 15 — Export / Import (`.zip`)  ·  ✅ MERGED; verified on web, and on Android 2026-10-13
 
 **Settled decisions:**
 - **Entry point:** new main-menu item -> **Settings > Data**, with its own **Import** and **Export** sub-pages, each carrying a concise explainer of what the operation does.
@@ -2391,7 +2398,7 @@ Report the result of an import to the user: counts of created, duplicated, skipp
 
 ---
 
-## Stage 15b — Account deletion  ·  BUILT, dev + self-host verified 2026-09-29; live steps pending
+## Stage 15b — Account deletion  ·  ✅ MERGED; verified on dev, self-host and Android — live steps pending
 
 Branch `stage-15b-account-deletion`. Built against the five decisions in the
 Decisions Log ("Account deletion (15b)…"). The plan below is kept as approved;
@@ -2586,7 +2593,7 @@ has them.
 
 ---
 
-## Stage 16 — Env file / sign-up toggle  ·  BUILT and dev-verified 2026-09-30
+## Stage 16 — Env file / sign-up toggle  ·  ✅ MERGED (dev-verified 2026-09-30)
 
 ### As built (2026-09-30)
 
@@ -2650,7 +2657,7 @@ VERIFY: against the local dev stack, disable sign-ups and prove (a) a new sign-u
 
 ---
 
-## Stage 14 — Website (marketing)  ·  BUILT and verified locally 2026-09-30; publish + host pending
+## Stage 14 — Website (marketing)  ·  ✅ BUILT; repo pushed (`dawoodjee/open-notes-website`) — hosting pending
 
 ### As built (2026-09-30)
 
@@ -2889,7 +2896,13 @@ note, so it was uninstalled first; `notes_b` and its dev account A6 untouched):
 - Relaunch: "Your account has been deleted"; survives a restart; OK → device
   signed out, test note gone; next restart shows nothing.
 - Wart found: while the erased notice is up, the fresh empty note behind it has
-  focus and the keyboard opens over the notice — flagged separately.
+  focus and the keyboard opens over the notice. **Fixed 2026-10-15:**
+  `useAccountScreenShowing()` (AccountSuspendedOverlay) — the editor does not
+  autofocus while an account screen is up, and blurs + dismisses the keyboard
+  when one appears (on a cold start that is after mount, since the "deleted"
+  flag is read from storage asynchronously). Verified on `notes_c` with a second
+  throwaway account: suspended screen and two cold launches with the notice →
+  `mInputShown=false`; after OK, tapping the editor brings the keyboard back.
 
 **Mistakes of mine worth keeping.** Twice I tapped from a stale screenshot: once
 on Adam's phone, where the notification shade had opened and the tap hit its
@@ -2913,9 +2926,9 @@ Parked deliberately, with a landing point, so they don't evaporate into "we'll g
 
 ## Open Questions — remaining
 
-One blocking item; the rest is settled and recorded in the Decisions Log below.
+Nothing blocking; both items are settled and recorded in the Decisions Log below.
 
-1. **Stage 12 screenshots** — nearly resolved (rescanned 2026-08-21): only the mobile scrolling-bar *collapsed* state is still missing, and the prompt's Apple Notes fallback covers that one gap.
+1. ✅ **RESOLVED — Stage 12 screenshots:** Stage 12 shipped (closed 2026-08-22) using the prompt's Apple Notes fallback for the one missing state (the mobile scrolling-bar *collapsed* state).
 2. ✅ **RESOLVED — directory picking on mobile:** the risk called out here (uneven iOS/Android support for directory selection) is why Stage 15's import source changed from a directory picker to a `.zip` file picker — see the 2026-08-21 Decisions Log entry below. Plain file picking doesn't have this problem, so the escalation this item predicted won't come back.
 
 ---
