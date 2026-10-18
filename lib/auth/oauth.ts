@@ -125,3 +125,9 @@ export async function signInWithGoogle() {
   }
   return result.type;
 }
+
+/**
+ * Native: nothing to do. The result comes back through openOAuthSession's
+ * in-app browser, not through a page load. See lib/auth/oauth.web.ts.
+ */
+export async function completeOAuthRedirect(): Promise<void> {}

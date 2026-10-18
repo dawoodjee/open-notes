@@ -3358,3 +3358,21 @@ Five calls, all Adam's; three differ from what I recommended, so the tradeoffs a
 - **Reasoning:** the library's web support is marked **experimental**, and its own material describes web as "a subset guaranteed to render and parse identically". That is exactly the kind of claim to measure rather than trust, and it cannot be measured yet because web does not boot (the known `Appearance.setColorScheme` failure Stage 13 owns). A divergence would mean a note edited on web and then on phone disagrees about its own markup.
 - **Consequence accepted:** until Stage 13 runs, cross-platform content parity is asserted by the vendor, not verified by us. Native-to-native (iOS ↔ Android) IS verified — a note edited on iOS renders and syncs correctly on Android.
 - **Status:** recorded as a Stage 13 gate.
+
+### 2026-10-16 — Website and web app go live together on adam.dawoodjee.com
+
+- **Decision:** the open-notes website replaces the IDEAS site on the existing live bench (`adam.dawoodjee.com`), and the web app is served on the same domain at **`/web`**. `/app` was rejected because it is Frappe's Desk. The bench moves from developer mode to production (nginx + supervisor, Let's Encrypt), and Adam runs every server command himself from exact commands; I verify from outside.
+- **Why nginx serves `/web`, not Frappe:** Frappe's `www/` refuses `.js/.css/.json/.html`, and serving from `/assets/…` would put the service worker outside the path it has to control. The app also needs HTTPS (OPFS, service worker, passkeys).
+- **Consequence accepted:** `bench setup nginx` regenerates nginx's config and drops the `/web` block. The website repo carries an idempotent re-apply script, and it must be re-run after any bench nginx regeneration.
+- **Kept from IDEAS:** the personal story (rewritten; Adam approves the words), privacy/terms pages (rewritten for a free, open-source app), and GA + Clarity analytics. IDEAS' own pages keep working until `uninstall-app ideas`, which is recommended after a backup once the new site checks out.
+- **Google sign-in on web is included:** the browser returns to `https://adam.dawoodjee.com/web/`. Supabase must allow that URL (live: dashboard Redirect URLs `https://adam.dawoodjee.com/web/**`; dev: `supabase/config.toml`).
+- **Status:** web app at `/web` and Google on web built on `web-at-subpath`; website and server steps next.
+
+### 2026-10-16 — The website keeps IDEAS' geo-based analytics consent
+
+- **Decision:** Adam chose to port the old consent banner's behaviour as it is, over "nothing loads until everyone clicks Accept" (my recommendation). Each visitor's IP goes to `ipapi.co` to guess their country. EU and California visitors see the banner. Everyone else is auto-accepted without a banner. GA's script loads early in Google consent mode "denied" and is upgraded on acceptance.
+- **Reasoning:** more analytics data than an ask-everyone banner, which many visitors never click.
+- **Consequence accepted:** the privacy page cannot say "only with your consent" for everyone. It has to state the IP lookup to ipapi.co, the regions that get asked, the auto-accept elsewhere, and that GA loads before an answer in denied mode. A third party (ipapi.co) sees every visitor's IP before any choice is made.
+- **Two refinements Adam chose on seeing the old code (2026-10-16):** (1) **Refuse means off.** The old banner's "Refuse non-essential" still granted GA `analytics_storage` and loaded Clarity, with the old privacy page calling both "essential". Now Refuse loads no Clarity and keeps GA denied (cookieless pings only). (2) **No ad flags.** Accept grants `analytics_storage` only, never `ad_storage` / `ad_user_data` / `ad_personalization`, because the site shows no ads. The auto-accept outside the EU and California therefore also grants analytics only.
+- **IDs:** Adam is making a new GA property and Clarity project, so the IDEAS IDs are not reused. Both settings stay empty until he pastes the new IDs into Open Notes Website Settings, and with them empty nothing loads, the ipapi lookup included.
+- **Status:** recorded; built in the website repo (`ideas-essence`).

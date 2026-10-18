@@ -29,6 +29,8 @@ import './signups.test';
 import './editGate.test';
 import './desktopTopBar.test';
 import './sheetMount.test';
+import './basePath.test';
+import './oauthReturn.test';
 import { report } from './harness';
 
 report();

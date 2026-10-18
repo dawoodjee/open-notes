@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import type { InstallPrompt } from './install';
 import { PWA_HEAD_TAGS } from './headTags';
+import { withBase } from './basePath';
 
 /**
  * Service-worker registration and the install prompt.
@@ -19,7 +20,9 @@ import { PWA_HEAD_TAGS } from './headTags';
  * outlive it and cause precisely that.
  */
 
-const SW_URL = '/sw.js';
+// At the app's base path: a worker only controls the path it is served from,
+// so at /web it must be /web/sw.js -- see lib/pwa/basePath.ts.
+const SW_URL = withBase('/sw.js');
 
 /**
  * Put the PWA head tags into the live document.

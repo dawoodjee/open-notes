@@ -1,3 +1,4 @@
+import { BASE_PATH, withBase } from './basePath';
 /**
  * The `<head>` tags a PWA needs, defined once.
  *
@@ -44,15 +45,21 @@ export interface HeadTag {
 /** Matches `BACKGROUND.dark` in contexts/ThemeContext.tsx. */
 export const THEME_COLOR = '#0a0a0c';
 
-export const PWA_HEAD_TAGS: HeadTag[] = [
+/**
+ * The tags for a web app served at `base` ('' or e.g. '/web'). A function, not
+ * a constant, because the build script (Node) and the running app learn the
+ * base from different places -- see lib/pwa/basePath.ts.
+ */
+export function pwaHeadTags(base: string = BASE_PATH): HeadTag[] {
+  return [
   {
     tag: 'link',
-    attrs: { rel: 'manifest', href: '/manifest.webmanifest' },
+    attrs: { rel: 'manifest', href: withBase('/manifest.webmanifest', base) },
     replaces: 'link[rel="manifest"]',
   },
   {
     tag: 'link',
-    attrs: { rel: 'apple-touch-icon', href: '/icons/icon-192.png' },
+    attrs: { rel: 'apple-touch-icon', href: withBase('/icons/icon-192.png', base) },
     replaces: 'link[rel="apple-touch-icon"]',
   },
   {
@@ -118,7 +125,11 @@ export const PWA_HEAD_TAGS: HeadTag[] = [
     text: `html,body{background-color:${THEME_COLOR};}`,
     replaces: 'style#pwa-preload-background',
   },
-];
+  ];
+}
+
+/** The tags for this bundle's own base. */
+export const PWA_HEAD_TAGS: HeadTag[] = pwaHeadTags();
 
 /** Serialise one tag to HTML, for the build-time consumer. */
 export function renderHeadTag(tag: HeadTag): string {
