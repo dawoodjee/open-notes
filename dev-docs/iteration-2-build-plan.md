@@ -3389,3 +3389,10 @@ Five calls, all Adam's; three differ from what I recommended, so the tradeoffs a
 - **Two refinements Adam chose on seeing the old code (2026-10-16):** (1) **Refuse means off.** The old banner's "Refuse non-essential" still granted GA `analytics_storage` and loaded Clarity, with the old privacy page calling both "essential". Now Refuse loads no Clarity and keeps GA denied (cookieless pings only). (2) **No ad flags.** Accept grants `analytics_storage` only, never `ad_storage` / `ad_user_data` / `ad_personalization`, because the site shows no ads. The auto-accept outside the EU and California therefore also grants analytics only.
 - **IDs:** Adam is making a new GA property and Clarity project, so the IDEAS IDs are not reused. Both settings stay empty until he pastes the new IDs into Open Notes Website Settings, and with them empty nothing loads, the ipapi lookup included.
 - **Status:** recorded; built in the website repo (`ideas-essence`).
+
+### 2026-10-18 — The domain is notes.casa
+
+- **Decision:** Adam bought `notes.casa`, and the website and web app go there instead of `adam.dawoodjee.com`: the website at `https://notes.casa/`, the web app at `https://notes.casa/web/`. This replaces the domain in the 2026-10-16 entry. Everything else in that entry stands.
+- **What changes:** the live Supabase redirect URL becomes `https://notes.casa/web/**`, and `apply_web_nginx.py` runs with `--domain notes.casa`. No code changes: the web app builds its Google return address from the page it's served on, and passkeys bind to the page's hostname, so the existing `/web` build works on any domain.
+- **Open:** what happens to `adam.dawoodjee.com` and the IDEAS site there (left as is, redirected, or IDEAS uninstalled). It currently returns 500 on every page (seen 2026-10-16).
+- **Status:** Adam is bringing up the server for notes.casa.
